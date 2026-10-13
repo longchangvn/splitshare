@@ -1,0 +1,126 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using SplitShare.Api.Auth;
+using SplitShare.Api.Data;
+using SplitShare.Api.Expenses;
+using SplitShare.Api.Models;
+using SplitShare.Api.Services;
+
+namespace SplitShare.Tests;
+
+public sealed class LedgerViewTests
+{
+    private static (AppDbContext Db, AuthService Auth, ExpenseService Exp, LedgerService Ledger) Setup()
+    {
+        var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Jwt:Key"] = new string('k', 64) }).Build();
+        var ledger = new LedgerService(db);
+        var auth = new AuthService(db, new TokenService(config),
+            new StubEmailSender(NullLogger<StubEmailSender>.Instance), ledger);
+        return (db, auth, new ExpenseService(db, ledger, new FakeStore()), ledger);
+    }
+
+    private static async Task<(User A, User B, Group G)> SeedAsync(AuthService auth, AppDbContext db, string cur = "USD")
+    {
+        var a = (await auth.RegisterAsync("lda" + Guid.NewGuid().ToString("N")[..6], "a@x.io", "A", "pass1234", null)).User!;
+        var b = (await auth.RegisterAsync("ldb" + Guid.NewGuid().ToString("N")[..6], "b@x.io", "B", "pass1234", null)).User!;
+        var g = new Group { Name = "LG", Currency = cur, CreatedBy = a.Id };
+        db.Groups.Add(g);
+        db.GroupMembers.AddRange(
+            new GroupMember { GroupId = g.Id, UserId = a.Id, Role = "owner" },
+            new GroupMember { GroupId = g.Id, UserId = b.Id });
+        await db.SaveChangesAsync();
+        return (a, b, g);
+    }
+
+    private static LedgerService.LedgerFilters All(int page = 1, int limit = 20)
+        => new("all", null, null, null, null, null, null, null, "-created_at", page, limit);
+
+    [Fact]
+    public async Task Ledger_Filters_Type_Status_Search_Pagination()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db);
+        await exp.CreateAsync(a.Id, g.Id, "Hotel", null, 20m, a.Id, SplitType.Equal, [a.Id, b.Id], null, null, null);
+        await exp.CreateAsync(a.Id, g.Id, "Taxi", null, 10m, b.Id, SplitType.Equal, [a.Id, b.Id], null, null, null);
+        db.Payments.Add(new Payment
+            { GroupId = g.Id, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 500, CreatedBy = b.Id });
+        await db.SaveChangesAsync();
+
+        var (all, total) = await ledger.GetLedgerAsync(g.Id, a.Id, All());
+        Assert.Equal(3, total);
+        var (expOnly, expTotal) = await ledger.GetLedgerAsync(g.Id, a.Id, All() with { Type = "expense" });
+        Assert.Equal(2, expTotal);
+        var (payOnly, payTotal) = await ledger.GetLedgerAsync(g.Id, a.Id, All() with { Type = "payment" });
+        Assert.Equal(1, payTotal);
+        var (found, foundTotal) = await ledger.GetLedgerAsync(g.Id, a.Id, All() with { Q = "tax" });
+        Assert.Equal(1, foundTotal);
+        var (p1, _) = await ledger.GetLedgerAsync(g.Id, a.Id, All(1, 2));
+        var (p2, _) = await ledger.GetLedgerAsync(g.Id, a.Id, All(2, 2));
+        Assert.Equal(2, p1.Count);
+        Assert.Single(p2);
+        Assert.Throws<InvalidOperationException>(() =>
+            ledger.GetLedgerAsync(g.Id, Guid.NewGuid(), All()).GetAwaiter().GetResult());
+    }
+
+    [Fact]
+    public async Task Ledger_RemovedMember_SnapshotRule()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db);
+        await exp.CreateAsync(a.Id, g.Id, "Before", null, 20m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        foreach (var e in db.Expenses) e.CreatedAt = DateTime.UtcNow.AddHours(-2);
+        // B settles, leaves an hour ago, then A adds another expense.
+        var pay = new Payment
+            { GroupId = g.Id, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 1000, CreatedBy = b.Id };
+        pay.CreatedAt = DateTime.UtcNow.AddHours(-2);
+        db.Payments.Add(pay);
+        await db.SaveChangesAsync();
+        db.GroupMembers.RemoveRange(db.GroupMembers.Where(m => m.GroupId == g.Id && m.UserId == b.Id));
+        db.MembershipArchives.Add(new MembershipArchive
+            { GroupId = g.Id, UserId = b.Id, RemovedAt = DateTime.UtcNow.AddHours(-1) });
+        await exp.CreateAsync(a.Id, g.Id, "After", null, 50m, a.Id,
+            SplitType.Equal, [a.Id], null, null, null);
+
+        var (items, total) = await ledger.GetLedgerAsync(g.Id, b.Id, All());
+        var titles = items.Select(i => i.Title).ToList();
+        Assert.DoesNotContain("After", titles); // created after removal: hidden
+        Assert.Contains("Before", titles);
+        Assert.Contains(items, i => i.Kind == "payment"); // own payment visible
+    }
+
+    [Fact]
+    public async Task Me_OwesBreakdown_And_All_PerCurrency()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db, "USD");
+        await exp.CreateAsync(a.Id, g.Id, "D", null, 30m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        // B owes A 1500.
+        var me = (await ledger.BuildMeAsync(g.Id, b.Id))!;
+        Assert.Equal(-1500L, me.NetCents);
+        Assert.Equal(1500L, Assert.Single(me.Owes).AmountCents);
+        var meA = (await ledger.BuildMeAsync(g.Id, a.Id))!;
+        Assert.Equal(1500L, meA.NetCents);
+
+        // Second group in EUR where B is creditor.
+        var g2 = new Group { Name = "EU", Currency = "EUR", CreatedBy = b.Id };
+        db.Groups.Add(g2);
+        db.GroupMembers.AddRange(
+            new GroupMember { GroupId = g2.Id, UserId = a.Id },
+            new GroupMember { GroupId = g2.Id, UserId = b.Id, Role = "owner" });
+        await db.SaveChangesAsync();
+        await exp.CreateAsync(b.Id, g2.Id, "E", null, 20m, b.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+
+        var all = await ledger.BuildAllAsync(b.Id);
+        Assert.Equal(2, all.Groups.Count);
+        Assert.True(all.Totals.ContainsKey("USD") && all.Totals.ContainsKey("EUR")); // never merged
+        Assert.Equal(1500L, all.Totals["USD"].OweCents);
+        Assert.Equal(0L, all.Totals["USD"].OwedCents);
+    }
+}

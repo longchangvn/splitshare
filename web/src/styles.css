@@ -1,0 +1,15 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 16px; }
+.card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; }
+.bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; background: #fff; border-bottom: 1px solid #ddd; padding: 8px 12px; margin: -16px -16px 12px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+input, select { padding: 6px; margin: 4px 0; }
+button { padding: 6px 12px; cursor: pointer; }
+button.on { background: #222; color: #fff; }
+.err { color: crimson; }
+.neg { color: crimson; } .pos { color: green; } .muted { color: #777; }
+.warn { color: #a60; } .warnbox { border: 1px solid #a60; padding: 8px; margin: 8px 0; background: #fff8e6; }
+.settle { background: #fff; border: 1px solid #bbb; border-radius: 8px; padding: 8px; margin: 12px 0; }
+.settle-head { width: 100%; text-align: left; font-weight: bold; }
+table { border-collapse: collapse; } td { border: 1px solid #ddd; padding: 2px 8px; }
+ul { padding-left: 20px; }

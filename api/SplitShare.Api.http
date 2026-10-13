@@ -1,0 +1,6 @@
+@SplitShare.Api_HostAddress = http://localhost:5079
+
+GET {{SplitShare.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

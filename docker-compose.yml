@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-module_platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-module_platform}
+      POSTGRES_DB: ${POSTGRES_DB:-module_platform}
+    ports:
+      - "5433:5432" # host localhost:5433 -> container 5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-module_platform}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # In compose, host is `db:5432`. Local dev (no compose) uses localhost:5433 via appsettings.json.
+      ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB:-module_platform};Username=${POSTGRES_USER:-module_platform};Password=${POSTGRES_PASSWORD:-module_platform}
+      Jwt__Key: ${JWT_KEY:-dev-only-insecure-key-change-in-prod-0123456789}
+      Uploads__Path: /data/uploads
+      Cors__AllowedOrigins__0: http://localhost:3000
+      Cors__AllowedOrigins__1: http://localhost:5173
+    ports:
+      - "5000:8080"
+    volumes:
+      - uploads:/data/uploads
+
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: http://localhost:5000
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "3000:80"
+
+volumes:
+  pgdata:
+  uploads:
