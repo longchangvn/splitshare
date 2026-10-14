@@ -1,8 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import {
+  Anchor, Badge, Button, Card, Code, FileButton, Group, Image, List, Stack,
+  Text, Title,
+} from '@mantine/core';
+import { modals } from '@mantine/modals';
+import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
+import { Shell } from '../components/Shell.jsx';
+import { displayNameOf } from '../components/Net.jsx';
 import { ExpenseForm } from '../components/Forms.jsx';
+
+const statusColor = (s) => (s === 'LOCKED' ? 'gray' : s === 'OPEN' ? 'teal' : 'blue');
 
 export function ExpenseDetail() {
   const { id, eid } = useParams();
@@ -24,18 +34,26 @@ export function ExpenseDetail() {
   };
   useEffect(() => { load(); }, [eid]);
 
-  const del = async () => {
-    if (!confirm('Delete this expense? Balances recompute.')) return;
-    try { await api.del(`/api/v1/expenses/${eid}`); nav(`/groups/${id}`); }
-    catch (err) { setE(err); }
+  const del = () => {
+    modals.openConfirmModal({
+      title: 'Delete expense',
+      centered: true,
+      children: <Text size="sm">Delete this expense? Balances recompute.</Text>,
+      labels: { confirm: 'Delete', cancel: 'Cancel' },
+      confirmProps: { color: 'red' },
+      onConfirm: async () => {
+        try { await api.del(`/api/v1/expenses/${eid}`); nav(`/groups/${id}`); }
+        catch (err) { setE(err); }
+      },
+    });
   };
-  const upload = async (ev) => {
-    const f = ev.target.files[0];
-    if (!f) return;
+  const upload = async (file) => {
+    if (!file) return;
     const form = new FormData();
-    form.append('file', f);
+    form.append('file', file);
     try {
       await api.postForm(`/api/v1/expenses/${eid}/images`, form);
+      notifications.show({ title: 'Receipt uploaded', color: 'teal' });
       load();
     } catch (err) { setE(err); }
   };
@@ -43,32 +61,93 @@ export function ExpenseDetail() {
     try { await api.del(`/api/v1/images/${iid}`); load(); } catch (err) { setE(err); }
   };
 
-  if (!d) return (<div><p>Loading…</p><Err e={e} /></div>);
+  if (!d) {
+    return (
+      <Shell>
+        <Text c="dimmed">Loading…</Text>
+        <Err e={e} />
+      </Shell>
+    );
+  }
   const x = d.expense;
   return (
-    <div>
-      <Link to={`/groups/${id}`}>← group</Link>
-      <h2>{x.title} [{x.status}]</h2>
-      <p>{x.description}</p>
-      <p>Total {fmt(x.amount_cents, '')} · v{x.version} · settlement v{d.settlement_version}</p>
-      <Err e={e} />
-      <h4>Splits</h4>
-      <ul>{x.splits.map((s) => <li key={s.user_id}>{s.user_id.slice(0, 8)}: {fmt(s.share_cents, '')}</li>)}</ul>
-      {!edit
-        ? <p><button onClick={() => setEdit(true)}>Edit</button> <button onClick={del}>Delete</button></p>
-        : <ExpenseForm groupId={id} members={members} existing={x}
-            onDone={() => { setEdit(false); load(); }} />}
-      <h4>Receipts</h4>
-      <input type="file" accept="image/*" onChange={upload} />
-      <ul>{x.images.map((i) => (
-        <li key={i.image_id}>
-          <ImgView id={i.image_id} mime={i.mime} size={i.size_bytes} />{' '}
-          <button onClick={() => delImg(i.image_id)}>delete</button>
-        </li>
-      ))}</ul>
-      <h4>History</h4>
-      <ul>{d.audit.map((a, i) => <li key={i}>{a.at}: {JSON.stringify(a.diff)}</li>)}</ul>
-    </div>
+    <Shell>
+      <Anchor component={Link} to={`/groups/${id}`} size="sm">← Back to group</Anchor>
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="xs">
+        <Group gap="sm" mb="xs">
+          <Title order={2}>{x.title}</Title>
+          <Badge color={statusColor(x.status)} variant="light">{x.status}</Badge>
+        </Group>
+        {x.description && <Text mb="sm">{x.description}</Text>}
+        <Group gap="xs" mb="sm">
+          <Badge variant="outline">Total {fmt(x.amount_cents, '')}</Badge>
+          <Badge variant="outline">v{x.version}</Badge>
+          <Badge variant="outline">settlement v{d.settlement_version}</Badge>
+        </Group>
+        <Err e={e} />
+        <Group gap="sm">
+          <Button variant="light" onClick={() => setEdit(!edit)}>
+            {edit ? 'Close editor' : 'Edit'}
+          </Button>
+          <Button variant="light" color="red" onClick={del}>Delete</Button>
+        </Group>
+      </Card>
+
+      {edit && (
+        <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+          <ExpenseForm
+            groupId={id}
+            members={members}
+            existing={x}
+            onDone={() => { setEdit(false); load(); }}
+          />
+        </Card>
+      )}
+
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+        <Title order={4} mb="sm">Splits</Title>
+        <List size="sm" spacing="xs">
+          {x.splits.map((s) => (
+            <List.Item key={s.user_id}>
+              {displayNameOf(members, s.user_id)}: <b>{fmt(s.share_cents, '')}</b>
+            </List.Item>
+          ))}
+        </List>
+      </Card>
+
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+        <Group justify="space-between" mb="sm">
+          <Title order={4}>Receipts</Title>
+          <FileButton onChange={upload} accept="image/*">
+            {(props) => <Button size="xs" {...props}>Upload receipt</Button>}
+          </FileButton>
+        </Group>
+        {x.images.length === 0 && <Text size="sm" c="dimmed">No receipts attached.</Text>}
+        <Group gap="sm">
+          {x.images.map((i) => (
+            <Stack key={i.image_id} gap={4} align="center">
+              <ImgView id={i.image_id} mime={i.mime} size={i.size_bytes} />
+              <Button size="xs" variant="subtle" color="red" onClick={() => delImg(i.image_id)}>
+                Delete
+              </Button>
+            </Stack>
+          ))}
+        </Group>
+      </Card>
+
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+        <Title order={4} mb="sm">History</Title>
+        {d.audit.length === 0 && <Text size="sm" c="dimmed">No changes recorded.</Text>}
+        <List size="sm" spacing="xs">
+          {d.audit.map((a, i) => (
+            <List.Item key={i}>
+              <Text size="xs" c="dimmed">{a.at}</Text>
+              <Code block mt={2}>{JSON.stringify(a.diff)}</Code>
+            </List.Item>
+          ))}
+        </List>
+      </Card>
+    </Shell>
   );
 }
 
@@ -78,7 +157,7 @@ function ImgView({ id, mime, size }) {
   useEffect(() => {
     let live = true;
     (async () => {
-      const r = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/v1/images/${id}`,
+      const r = await fetch(`/api/v1/images/${id}`,
         { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
       if (!r.ok) return;
       const blob = await r.blob();
@@ -87,17 +166,33 @@ function ImgView({ id, mime, size }) {
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
-  if (!url) return <span className="muted">{mime} {(size / 1024).toFixed(1)}KB…</span>;
-  return <a href={url} target="_blank" rel="noreferrer"><img src={url} alt="receipt" style={{ maxWidth: 120 }} /></a>;
+  if (!url) return <Text size="xs" c="dimmed">{mime} {(size / 1024).toFixed(1)}KB…</Text>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      <Image src={url} alt="receipt" w={120} radius="md" />
+    </a>
+  );
 }
 
-export function JoinPage() {  const { token } = useParams();
+export function JoinPage() {
+  const { token } = useParams();
   const nav = useNavigate();
   const [msg, setMsg] = useState('Joining…');
   useEffect(() => {
     api.post('/api/v1/groups/join', { token })
-      .then((r) => nav(`/groups/${r.group_id}`))
+      .then((r) => {
+        const gid = r.group_id ?? r.group?.id;
+        if (!gid) { setMsg('Join failed: server did not return a group id.'); return; }
+        nav(`/groups/${gid}`);
+      })
       .catch((err) => setMsg(`Join failed: ${err.code || ''} ${err.message}`));
   }, [token, nav]);
-  return (<div><p>{msg}</p><p><Link to="/">Home</Link></p></div>);
+  return (
+    <Shell>
+      <Card withBorder shadow="sm" padding="lg" radius="md">
+        <Text>{msg}</Text>
+        <Anchor component={Link} to="/" size="sm">Home</Anchor>
+      </Card>
+    </Shell>
+  );
 }

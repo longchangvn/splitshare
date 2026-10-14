@@ -19,7 +19,7 @@ Full spec: `requirements-splitshare.md`. Archived change: `openspec/changes/arch
 cp .env.example .env
 # set a strong JWT_KEY inside .env, then:
 docker compose up --build
-# web http://localhost:3000 · api http://localhost:5000/health · db localhost:5433
+# web http://localhost:3000 · api http://localhost:8081/health · db localhost:5433
 ```
 
 `Jwt__Key` (≥32 chars) is required in production; dev falls back to an
@@ -30,11 +30,11 @@ Google button; `App:BaseUrl` shapes invite links (default `http://localhost:3000
 
 ```sh
 ASPIRE_ALLOW_UNSECURED_TRANSPORT=true \
-ASPNETCORE_URLS=http://localhost:18888 \
+ASPNETCORE_URLS=http://localhost:8080 \
 ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL=http://localhost:4317 \
 ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL=http://localhost:4318 \
 dotnet run --project apphost/SplitShare.AppHost.csproj
-# dashboard http://localhost:18888 (token printed in log) · api :5079 · web :5173
+# dashboard http://localhost:8080 (token printed in log) · api :8081 · web :3000
 ```
 
 The AppHost starts the API (`dotnet run --project api`) and Vite dev server,
@@ -49,9 +49,9 @@ are no-ops when running the API standalone. Production stays on compose.
 
 ```sh
 # API (needs Postgres on localhost:5433, user/password module_platform)
-dotnet run --project api --urls http://localhost:5099
-# Web (proxies /api to VITE_API_URL or localhost:5000)
-VITE_API_URL=http://localhost:5099 npm run --prefix web dev
+dotnet run --project api --urls http://localhost:8081
+# Web (proxies /api to VITE_API_URL or localhost:8081)
+VITE_API_URL=http://localhost:8081 npm run --prefix web dev
 ```
 
 ## Test

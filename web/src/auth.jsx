@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Alert, Center, Loader } from '@mantine/core';
 import { api, setTokens, clearTokens, ApiError } from './api.js';
 
 const Ctx = createContext(null);
@@ -40,12 +41,12 @@ export function Guard({ children }) {
   const { user, loading } = useAuth();
   const nav = useNavigate();
   useEffect(() => { if (!loading && !user) nav('/login'); }, [loading, user, nav]);
-  if (loading) return <p>Loading…</p>;
+  if (loading) return <Center h={240}><Loader /></Center>;
   return user ? children : null;
 }
 
 export function Err({ e }) {
   if (!e) return null;
   const msg = e instanceof ApiError ? `${e.code || e.status}: ${e.message}` : String(e?.message || e);
-  return <p className="err">{msg}</p>;
+  return <Alert color="red" variant="light" title="Something went wrong" mt="sm">{msg}</Alert>;
 }

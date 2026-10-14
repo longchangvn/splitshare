@@ -14,7 +14,7 @@ var cs = builder.Configuration.GetConnectionString("module_platform")
     ?? "Host=localhost;Port=5433;Database=module_platform;Username=module_platform;Password=module_platform";
 
 var api = builder.AddExecutable("api", "dotnet", "../api", "run", "--project", ".")
-    .WithHttpEndpoint(targetPort: 5079, name: "http") // api launch profile "http"
+    .WithHttpEndpoint(port: 8081, targetPort: 8081, name: "http") // api launch profile "http"
     .WithHttpHealthCheck("/health")
     .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
     .WithEnvironment("ConnectionStrings__module-platform", cs);
@@ -22,7 +22,7 @@ var api = builder.AddExecutable("api", "dotnet", "../api", "run", "--project", "
 // Web has no Aspire.JavaScript package on this SDK generation: run the Vite
 // dev server as a plain executable on the fixed port the API CORS allows.
 var web = builder.AddExecutable("web", "npm", "../web", "run", "dev")
-    .WithHttpEndpoint(targetPort: 5173, name: "vite")
+    .WithHttpEndpoint(port: 3000, targetPort: 3000, name: "vite")
     .WithEnvironment("VITE_API_URL", api.GetEndpoint("http"));
 
 builder.Build().Run();

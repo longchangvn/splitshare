@@ -1,7 +1,45 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import {
+  Anchor, Box, Button, Center, Container, Divider, Grid, List, Paper,
+  PasswordInput, Stack, Text, TextInput, Title,
+} from '@mantine/core';
 import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
+
+function AuthLayout({ children }) {
+  return (
+    <Container size={720} my="md">
+      <Center mih="calc(100vh - 140px)">
+        <Paper withBorder shadow="md" radius="lg" style={{ overflow: 'hidden', width: '100%' }}>
+          <Grid gutter={0}>
+            <Grid.Col span={{ base: 12, sm: 5 }}>
+              <Box
+                p="xl"
+                h="100%"
+                c="white"
+                style={{ background: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)' }}
+              >
+                <Text fw={800} size={26}>SplitShare</Text>
+                <Text size="sm" mt={4} style={{ opacity: 0.9 }}>
+                  Split expenses with friends, settle up in seconds
+                </Text>
+                <List size="sm" mt="lg" spacing="sm" visibleFrom="sm">
+                  <List.Item>Snap a receipt, split it any way you like</List.Item>
+                  <List.Item>Fewest transfers, fully explained</List.Item>
+                  <List.Item>Settle up and lock it in</List.Item>
+                </List>
+              </Box>
+            </Grid.Col>
+            <Grid.Col span={{ base: 12, sm: 7 }}>
+              <Box p="xl">{children}</Box>
+            </Grid.Col>
+          </Grid>
+        </Paper>
+      </Center>
+    </Container>
+  );
+}
 
 export function Login() {
   const { login } = useAuth();
@@ -14,16 +52,24 @@ export function Login() {
     try { await login(id, pw); nav('/'); } catch (err) { setE(err); }
   };
   return (
-    <div className="card">
-      <h2>Log in</h2>
-      <form onSubmit={go}>
-        <input placeholder="username or email" value={id} onChange={(x) => setId(x.target.value)} />
-        <input placeholder="password" type="password" value={pw} onChange={(x) => setPw(x.target.value)} />
-        <button type="submit">Log in</button>
-      </form>
-      <Err e={e} />
-      <p><Link to="/register">Register</Link> · <GoogleBtn /></p>
-    </div>
+    <AuthLayout>
+      <Stack gap="sm">
+        <Title order={3}>Log in</Title>
+        <form onSubmit={go}>
+          <Stack gap="sm">
+            <TextInput label="Username or email" required value={id} onChange={(x) => setId(x.target.value)} />
+            <PasswordInput label="Password" required value={pw} onChange={(x) => setPw(x.target.value)} />
+            <Button fullWidth type="submit">Log in</Button>
+          </Stack>
+        </form>
+        <Err e={e} />
+        <Divider label="or" labelPosition="center" />
+        <GoogleBtn />
+        <Text ta="center" size="sm">
+          No account? <Anchor component={Link} to="/register">Register</Anchor>
+        </Text>
+      </Stack>
+    </AuthLayout>
   );
 }
 
@@ -43,19 +89,33 @@ export function Register() {
   };
   const set = (k) => (x) => setF({ ...f, [k]: x.target.value });
   return (
-    <div className="card">
-      <h2>Register</h2>
-      <form onSubmit={go}>
-        <input placeholder="username" value={f.username} onChange={set('username')} />
-        <input placeholder="email" value={f.email} onChange={set('email')} />
-        <input placeholder="display name" value={f.display_name} onChange={set('display_name')} />
-        <input placeholder="password (8+ chars, letter+digit)" type="password" value={f.password} onChange={set('password')} />
-        <button type="submit">Register</button>
-      </form>
-      <Err e={e} />
-      {done && done.auto_joined_groups?.length > 0 && <p>Auto-joined {done.auto_joined_groups.length} group(s) from email invites.</p>}
-      <p><Link to="/login">Back to login</Link></p>
-    </div>
+    <AuthLayout>
+      <Stack gap="sm">
+        <Title order={3}>Create your account</Title>
+        <form onSubmit={go}>
+          <Stack gap="sm">
+            <TextInput label="Username" required value={f.username} onChange={set('username')} />
+            <TextInput label="Email" required value={f.email} onChange={set('email')} />
+            <TextInput label="Display name" required value={f.display_name} onChange={set('display_name')} />
+            <PasswordInput
+              label="Password"
+              required
+              description="8+ characters with a letter and a digit"
+              value={f.password}
+              onChange={set('password')}
+            />
+            <Button fullWidth type="submit">Register</Button>
+          </Stack>
+        </form>
+        <Err e={e} />
+        {done && done.auto_joined_groups?.length > 0 && (
+          <Text size="sm">Auto-joined {done.auto_joined_groups.length} group(s) from email invites.</Text>
+        )}
+        <Text ta="center" size="sm">
+          <Anchor component={Link} to="/login">Back to login</Anchor>
+        </Text>
+      </Stack>
+    </AuthLayout>
   );
 }
 
@@ -64,7 +124,7 @@ function GoogleBtn() {
   const nav = useNavigate();
   const [e, setE] = useState(null);
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  if (!clientId) return <span className="muted">Google login needs VITE_GOOGLE_CLIENT_ID</span>;
+  if (!clientId) return <Text size="sm" c="dimmed" ta="center">Google login needs VITE_GOOGLE_CLIENT_ID</Text>;
   const start = () => {
     // eslint-disable-next-line no-undef
     google.accounts.id.initialize({
@@ -81,5 +141,10 @@ function GoogleBtn() {
     // eslint-disable-next-line no-undef
     google.accounts.id.prompt();
   };
-  return (<span><button onClick={start}>Continue with Google</button><Err e={e} /></span>);
+  return (
+    <>
+      <Button fullWidth variant="light" onClick={start}>Continue with Google</Button>
+      <Err e={e} />
+    </>
+  );
 }

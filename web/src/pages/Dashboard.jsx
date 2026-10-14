@@ -1,62 +1,123 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
+import {
+  Anchor, Avatar, Badge, Button, Card, Group, Modal, SimpleGrid, Stack, Text,
+  TextInput, Title, Center,
+} from '@mantine/core';
 import { api, fmt } from '../api.js';
-import { useAuth, Err } from '../auth.jsx';
+import { Err } from '../auth.jsx';
+import { Shell } from '../components/Shell.jsx';
+import { Net, initialsOf } from '../components/Net.jsx';
 
 export function Dashboard() {
-  const { user, logout } = useAuth();
   const nav = useNavigate();
   const [data, setData] = useState(null);
   const [e, setE] = useState(null);
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [cur, setCur] = useState('USD');
+  const [creating, setCreating] = useState(false);
 
   const load = () => api.get('/api/v1/me/balances').then(setData).catch(setE);
   useEffect(() => { load(); }, []);
 
   const create = async (ev) => {
     ev.preventDefault();
+    setCreating(true);
     try {
       const g = await api.post('/api/v1/groups', { name, currency: cur });
-      nav(`/groups/${g.group_id}`);
-    } catch (err) { setE(err); }
+      const gid = g.group_id ?? g.group?.id; // create returns nested {group:{id}}
+      if (!gid) {
+        setE({ message: 'Server did not return a group id.' });
+        return;
+      }
+      setOpen(false);
+      setName('');
+      nav(`/groups/${gid}`);
+    } catch (err) { setE(err); } finally { setCreating(false); }
   };
 
   return (
-    <div>
-      <header className="bar">
-        <b>SplitShare</b>
-        <span>{user?.display_name} ({user?.username}) {!user?.email_verified && <i>unverified email</i>}</span>
-        <button onClick={async () => { await logout(); window.location.reload(); }}>Logout</button>
-      </header>
+    <Shell>
+      <Group justify="space-between" mb="md">
+        <Title order={2}>Dashboard</Title>
+        <Button onClick={() => setOpen(true)}>New group</Button>
+      </Group>
       <Err e={e} />
-      <h3>What you owe</h3>
-      {data && Object.entries(data.totals).map(([c, t]) => (
-        <p key={c}>{c}: owe <b className="neg">{fmt(t.owe_cents, c)}</b> · owed <b className="pos">{fmt(t.owed_cents, c)}</b></p>
-      ))}
-      {data && data.groups.length === 0 && <p className="muted">No groups yet — create one below.</p>}
-      <ul>
-        {data?.groups.map((g) => (
-          <li key={g.group_id}>
-            <Link to={`/groups/${g.group_id}`}>{g.name}</Link>{' '}
-            <Net v={g.net_cents} c={g.currency} />
-            {g.delinquent && <span className="warn"> · unsettled 30d+</span>}
-          </li>
-        ))}
-      </ul>
-      <h3>New group</h3>
-      <form onSubmit={create} className="row">
-        <input placeholder="Trip to Alps (3-50 chars)" value={name} onChange={(x) => setName(x.target.value)} />
-        <input placeholder="USD" value={cur} onChange={(x) => setCur(x.target.value)} style={{ width: 70 }} />
-        <button type="submit">Create</button>
-      </form>
-    </div>
-  );
-}
 
-export function Net({ v, c }) {
-  if (v === 0) return <span className="muted">settled up</span>;
-  return v < 0
-    ? <span className="neg">you owe {fmt(-v, c)}</span>
-    : <span className="pos">you are owed {fmt(v, c)}</span>;
+      <Title order={4} mb="xs">What you owe</Title>
+      {data && Object.keys(data.totals).length === 0 && (
+        <Text c="dimmed" size="sm" mb="md">Nothing outstanding.</Text>
+      )}
+      <SimpleGrid cols={{ base: 1, sm: 2 }} mb="lg">
+        {data && Object.entries(data.totals).map(([c, t]) => (
+          <Card key={c} withBorder shadow="sm" padding="md" radius="md">
+            <Text size="sm" c="dimmed">{c}</Text>
+            <Group gap="lg" mt="xs">
+              <div>
+                <Text size="xs" c="dimmed">You owe</Text>
+                <Text size="xl" fw={700} c="red">{fmt(t.owe_cents, c)}</Text>
+              </div>
+              <div>
+                <Text size="xs" c="dimmed">Owed to you</Text>
+                <Text size="xl" fw={700} c="teal">{fmt(t.owed_cents, c)}</Text>
+              </div>
+            </Group>
+          </Card>
+        ))}
+      </SimpleGrid>
+
+      <Title order={4} mb="xs">Your groups</Title>
+      {data && data.groups.length === 0 && (
+        <Card withBorder padding="lg" radius="md">
+          <Text ta="center" c="dimmed">No groups yet — create one to get started.</Text>
+          <Center mt="sm"><Button variant="light" onClick={() => setOpen(true)}>Create a group</Button></Center>
+        </Card>
+      )}
+      <Stack gap="sm">
+        {data?.groups.map((g) => (
+          <Card key={g.group_id} withBorder shadow="xs" padding="sm" radius="md">
+            <Group justify="space-between" wrap="nowrap">
+              <Group gap="sm" wrap="nowrap">
+                <Avatar color="teal" radius="xl">{initialsOf(g.name)}</Avatar>
+                <div>
+                  <Anchor fw={600} onClick={() => nav(`/groups/${g.group_id}`)} style={{ cursor: 'pointer' }}>
+                    {g.name}
+                  </Anchor>
+                  <Group gap="xs" mt={2}>
+                    <Badge size="xs" variant="light">{g.currency}</Badge>
+                    {g.delinquent && <Badge size="xs" color="orange" variant="light">unsettled 30d+</Badge>}
+                  </Group>
+                </div>
+              </Group>
+              <Net v={g.net_cents} c={g.currency} />
+            </Group>
+          </Card>
+        ))}
+      </Stack>
+
+      <Modal opened={open} onClose={() => setOpen(false)} title="New group" centered>
+        <form onSubmit={create}>
+          <TextInput
+            label="Group name"
+            placeholder="Trip to Alps"
+            description="3–50 characters"
+            required
+            value={name}
+            onChange={(x) => setName(x.target.value)}
+          />
+          <TextInput
+            label="Currency"
+            description="ISO-4217 code, e.g. USD"
+            required
+            mt="sm"
+            value={cur}
+            onChange={(x) => setCur(x.target.value)}
+          />
+          <Button fullWidth mt="md" type="submit" loading={creating}>Create group</Button>
+        </form>
+        <Err e={e} />
+      </Modal>
+    </Shell>
+  );
 }

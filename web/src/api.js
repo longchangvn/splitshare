@@ -1,5 +1,7 @@
 // API client. Contract is snake_case both directions (spec §9).
-const BASE = import.meta.env.VITE_API_URL || '';
+// Same-origin relative URLs: in dev Vite proxies /api to the API (see
+// vite.config.js); in prod nginx does the same (see nginx.conf). No CORS.
+const BASE = '';
 
 export function getAccess() { return localStorage.getItem('ss_at'); }
 export function getRefresh() { return localStorage.getItem('ss_rt'); }

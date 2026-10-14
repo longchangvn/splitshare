@@ -23,7 +23,7 @@ builder.Services.ConfigureHttpJsonOptions(o =>
     o.SerializerOptions.PropertyNamingPolicy = new SnakeCaseNamingPolicy();
 });
 builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
-    p.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:5173"])
+    p.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"])
      .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
 var conn = builder.Configuration.GetConnectionString("module-platform")

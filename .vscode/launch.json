@@ -1,0 +1,99 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": ".NET: AppHost (Aspire — API + Web)",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "${workspaceFolder}/apphost/SplitShare.AppHost.csproj"
+      ],
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPIRE_ALLOW_UNSECURED_TRANSPORT": "true",
+        "ASPNETCORE_URLS": "http://localhost:8080",
+        "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:4317",
+        "ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL": "http://localhost:4318",
+        "ConnectionStrings__module-platform": "Host=localhost;Port=55432;Database=module_platform;Username=module_platform;Password=module_platform"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)",
+        "uriFormat": "%s"
+      }
+    },
+    {
+      "name": ".NET: API (launch profile http)",
+      "type": "coreclr",
+      "request": "launch",
+      "program": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "${workspaceFolder}/api/SplitShare.Api.csproj",
+        "--launch-profile",
+        "http"
+      ],
+      "cwd": "${workspaceFolder}/api",
+      "stopAtEntry": false,
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ConnectionStrings__module-platform": "Host=localhost;Port=55432;Database=module_platform;Username=module_platform;Password=module_platform"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Now listening on:\\s+(https?://\\S+)",
+        "uriFormat": "%s/health"
+      }
+    },
+    {
+      "name": "Web: Vite dev (npm)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/web",
+      "env": {
+        "VITE_API_URL": "http://localhost:8081"
+      },
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "%s"
+      }
+    },
+    {
+      "name": "Web: Chrome (http://localhost:3000)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/web"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "SplitShare: Aspire (recommended)",
+      "configurations": [".NET: AppHost (Aspire — API + Web)"]
+    },
+    {
+      "name": "SplitShare: API + Web (no Aspire)",
+      "configurations": [".NET: API (launch profile http)", "Web: Vite dev (npm)"]
+    },
+    {
+      "name": "SplitShare: API + Web + Chrome",
+      "configurations": [
+        ".NET: API (launch profile http)",
+        "Web: Vite dev (npm)",
+        "Web: Chrome (http://localhost:3000)"
+      ]
+    }
+  ]
+}

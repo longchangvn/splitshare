@@ -10,17 +10,15 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <div className="wrap">
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/g/:token" element={<Guard><JoinPage /></Guard>} />
-            <Route path="/groups/:id" element={<Guard><GroupDetail /></Guard>} />
-            <Route path="/groups/:id/expenses/:eid" element={<Guard><ExpenseDetail /></Guard>} />
-            <Route path="/" element={<Guard><Dashboard /></Guard>} />
-            <Route path="*" element={<Navigate to="/" />} />
-          </Routes>
-        </div>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/g/:token" element={<Guard><JoinPage /></Guard>} />
+          <Route path="/groups/:id" element={<Guard><GroupDetail /></Guard>} />
+          <Route path="/groups/:id/expenses/:eid" element={<Guard><ExpenseDetail /></Guard>} />
+          <Route path="/" element={<Guard><Dashboard /></Guard>} />
+          <Route path="*" element={<Navigate to="/" />} />
+        </Routes>
       </AuthProvider>
     </BrowserRouter>
   );
