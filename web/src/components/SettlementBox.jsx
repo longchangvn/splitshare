@@ -11,10 +11,16 @@ export function SettlementBox({ groupId, currency, members, onPay }) {
   const [plan, setPlan] = useState(null);
   const [hist, setHist] = useState([]);
   const [viewV, setViewV] = useState(null);
+  const [payments, setPayments] = useState([]);
   const [e, setE] = useState(null);
 
   const load = () => api.get(`/api/v1/groups/${groupId}/settlement`).then((p) => { setPlan(p); setViewV(null); }).catch(setE);
   useEffect(() => { load(); }, [groupId]);
+  // Completed-transfer history: kept forever, shown even when fully settled.
+  useEffect(() => {
+    api.get(`/api/v1/groups/${groupId}/ledger?type=payment&limit=100`)
+      .then((r) => setPayments(r.items || [])).catch(() => {});
+  }, [groupId]);
 
   const loadHist = async () => {
     try { setHist(await api.get(`/api/v1/groups/${groupId}/settlement/history`)); }
@@ -73,6 +79,22 @@ export function SettlementBox({ groupId, currency, members, onPay }) {
               ))}
             </List>
             <Text size="xs" c="dimmed">v{view.version} · {view.computed_at} · {view.inputs_hash}</Text>
+            <Text fw={600} size="sm" mt="sm">Completed transfers ({payments.length})</Text>
+            {payments.length === 0 ? (
+              <Text size="sm" c="dimmed">No transfers recorded yet.</Text>
+            ) : (
+              <List size="sm" spacing="xs">
+                {payments.map((p) => (
+                  <List.Item key={p.id}>
+                    {p.from_name || displayNameOf(members, p.from_user_id)} → {p.to_name || displayNameOf(members, p.to_user_id)}:{' '}
+                    <b>{fmt(p.amount_cents, currency)}</b>{' '}
+                    <Text span size="xs" c="dimmed">
+                      {new Date(p.created_at).toLocaleString()}{p.reversed ? ' · reversed' : ''}{p.status === 'LOCKED' ? ' · settled' : ''}
+                    </Text>
+                  </List.Item>
+                ))}
+              </List>
+            )}
             <Spoiler maxHeight={0} showLabel="View raw debts (unoptimized)" hideLabel="Hide">
               <Text size="sm" c="dimmed">
                 Raw view: {ex.raw_debts} participant-share debts collapsed into {transfers.length} transfers.

@@ -223,7 +223,8 @@ public sealed class LedgerService(AppDbContext db)
             {
                 var s = f.Q.ToLower();
                 q = q.Where(e => e.Title.ToLower().Contains(s)
-                    || (e.Description != null && e.Description.ToLower().Contains(s)));
+                    || (e.Description != null && e.Description.ToLower().Contains(s))
+                    || NameOf(names, e.PayerId).ToLower().Contains(s));
             }
             foreach (var e in q)
             {
@@ -248,7 +249,9 @@ public sealed class LedgerService(AppDbContext db)
             if (!string.IsNullOrWhiteSpace(f.Q))
             {
                 var s = f.Q.ToLower();
-                q = q.Where(p => p.Note != null && p.Note.ToLower().Contains(s));
+                q = q.Where(p => (p.Note != null && p.Note.ToLower().Contains(s))
+                    || NameOf(names, p.FromUserId).ToLower().Contains(s)
+                    || NameOf(names, p.ToUserId).ToLower().Contains(s));
             }
             foreach (var p in q)
             {

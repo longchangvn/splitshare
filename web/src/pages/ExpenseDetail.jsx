@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Anchor, Badge, Button, Card, Code, FileButton, Group, Image, List, Stack,
   Text, Title,
@@ -17,9 +17,10 @@ const statusColor = (s) => (s === 'LOCKED' ? 'gray' : s === 'OPEN' ? 'teal' : 'b
 export function ExpenseDetail() {
   const { id, eid } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
   const [d, setD] = useState(null);
   const [members, setMembers] = useState([]);
-  const [edit, setEdit] = useState(false);
+  const [edit, setEdit] = useState(!!location.state?.openEdit);
   const [e, setE] = useState(null);
 
   const load = async () => {

@@ -18,7 +18,7 @@ export function Shell({ children }) {
                 <Avatar color="teal" radius="xl" size="sm">
                   {initialsOf(user.display_name)}
                 </Avatar>
-                <Text size="sm" visibleFrom="xs">
+                <Text size="sm" visibleFrom="xs" component={Link} to="/profile" style={{ textDecoration: 'none', color: 'inherit' }}>
                   {user.display_name} <Text span c="dimmed">@{user.username}</Text>
                 </Text>
                 {!user.email_verified && (
@@ -28,6 +28,14 @@ export function Shell({ children }) {
                 )}
               </>
             )}
+            <Button
+              variant="light"
+              size="xs"
+              component={Link}
+              to="/profile"
+            >
+              Profile
+            </Button>
             <Button
               variant="light"
               size="xs"

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ActionIcon, Anchor, Avatar, Badge, Button, Card, CopyButton, Grid, Group, Loader,
-  Modal, ScrollArea, SegmentedControl, Skeleton, Stack, Table, Tabs, Text, TextInput, Title,
+  Modal, ScrollArea, SegmentedControl, Select, Skeleton, Stack, Table, Tabs, Text, TextInput, Title,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
@@ -22,19 +22,16 @@ export function GroupDetail() {
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [summary, setSummary] = useState(null);
   const [me, setMe] = useState(null);
+  const [plan, setPlan] = useState(null);
   const [type, setType] = useState('all');
   const [q, setQ] = useState('');
+  const [payer, setPayer] = useState('');
   const [showExp, setShowExp] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payPreset, setPayPreset] = useState(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteLink, setInviteLink] = useState('');
-  const [email, setEmail] = useState('');
-  const [cq, setCq] = useState('');
-  const [contacts, setContacts] = useState([]);
   const [e, setE] = useState(null);
-  const [inviting, setInviting] = useState(false);
-  const [searching, setSearching] = useState(false);
   const isMobile = useMediaQuery('(max-width: 36em)');
   // Copy handoff from expense detail (task 4.1): opens the create form prefilled.
   const location = useLocation();
@@ -53,25 +50,32 @@ export function GroupDetail() {
   const load = async () => {
     if (!validId) { setE({ message: 'Invalid group link.' }); return; }
     try {
-      const [d, m, s] = await Promise.all([
+      const [d, m, s, p] = await Promise.all([
         api.get(`/api/v1/groups/${id}`),
         api.get(`/api/v1/groups/${id}/me`),
         api.get(`/api/v1/groups/${id}/summary`),
+        api.get(`/api/v1/groups/${id}/settlement`).catch(() => null),
       ]);
-      setDetail(d); setMe(m); setSummary(s); setE(null);
+      setDetail(d); setMe(m); setSummary(s); if (p) setPlan(p); setE(null);
     } catch (err) { setE(err); }
   };
   const loadLedger = async () => {
     if (!validId) return;
     setLedgerLoading(true);
     try {
-      setLedger(await api.get(`/api/v1/groups/${id}/ledger?type=${type}&q=${encodeURIComponent(q)}`));
+      const params = new URLSearchParams({ type, q, limit: '100' });
+      if (payer) params.set('payer_id', payer);
+      setLedger(await api.get(`/api/v1/groups/${id}/ledger?${params.toString()}`));
     } catch (err) { setE(err); } finally { setLedgerLoading(false); }
   };
   const loadSummary = async () => {
     if (!validId) return;
     try {
-      setSummary(await api.get(`/api/v1/groups/${id}/summary`));
+      const [s, p] = await Promise.all([
+        api.get(`/api/v1/groups/${id}/summary`),
+        api.get(`/api/v1/groups/${id}/settlement`).catch(() => null),
+      ]);
+      setSummary(s); if (p) setPlan(p);
     } catch (err) { setE(err); }
   };
   useEffect(() => { load(); }, [id]);
@@ -79,31 +83,6 @@ export function GroupDetail() {
 
   const members = detail?.members || [];
 
-  const invite = async (ev) => {
-    ev.preventDefault();
-    if (inviting) return;
-    setInviting(true);
-    try {
-      const r = await api.post(`/api/v1/groups/${id}/invites`, { emails: [email] });
-      notifications.show({ title: 'Invite sent', message: `added: ${r.added} pending: ${r.pending}`, color: 'teal' });
-      setEmail('');
-      load();
-    } catch (err) { setE(err); } finally { setInviting(false); }
-  };
-  const searchContacts = async (ev) => {
-    ev.preventDefault();
-    if (searching) return;
-    setSearching(true);
-    try { setContacts(await api.get(`/api/v1/contacts?q=${encodeURIComponent(cq)}`)); }
-    catch (err) { setE(err); } finally { setSearching(false); }
-  };
-  const addMember = async (uid) => {
-    try {
-      await api.post(`/api/v1/groups/${id}/members`, { user_ids: [uid] });
-      notifications.show({ title: 'Member added', color: 'teal' });
-      load();
-    } catch (err) { setE(err); }
-  };
   const remove = (uid, name) => {
     const mid = modals.openConfirmModal({
       title: 'Remove member',
@@ -124,13 +103,6 @@ export function GroupDetail() {
       },
     });
   };
-  const rotate = async () => {
-    try {
-      const r = await api.post(`/api/v1/groups/${id}/rotate-invite`, {});
-      setInviteLink(r.invite_link);
-      setInviteOpen(true);
-    } catch (err) { setE(err); }
-  };
   const leave = () => {
     const mid = modals.openConfirmModal({
       title: 'Leave group',
@@ -145,6 +117,60 @@ export function GroupDetail() {
       },
     });
   };
+  const delGroup = () => {
+    const mid = modals.openConfirmModal({
+      title: 'Delete group',
+      centered: true,
+      children: <Text size="sm">Delete “{detail?.name}”? Only possible when there are no expenses or everything is fully settled.</Text>,
+      labels: { confirm: 'Delete', cancel: 'Cancel' },
+      confirmProps: { color: 'red' },
+      onConfirm: async () => {
+        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
+        try { await api.del(`/api/v1/groups/${id}`); modals.closeModal(mid); nav('/'); }
+        catch (err) { modals.closeModal(mid); setE(err); }
+      },
+    });
+  };
+
+  // Per-row copy / edit for expenses.
+  const copyExpense = async (item) => {
+    try {
+      const d = await api.get(`/api/v1/expenses/${item.id}`);
+      nav(`/groups/${id}`, { state: { copyFrom: d.expense } });
+      setCopyFrom(d.expense);
+      setShowExp(true);
+    } catch (err) { setE(err); }
+  };
+  const editExpense = (item) => nav(`/groups/${id}/expenses/${item.id}`, { state: { openEdit: true } });
+
+  // Ledger totals over the loaded page.
+  const totals = useMemo(() => {
+    const items = ledger?.items || [];
+    return {
+      amount: items.reduce((a, t) => a + (t.amount_cents || 0), 0),
+      mine: items.reduce((a, t) => a + (t.my_share_cents || 0), 0),
+    };
+  }, [ledger]);
+
+  const payments = useMemo(
+    () => (ledger?.items || []).filter((t) => t.kind === 'payment'),
+    [ledger],
+  );
+
+  // Elegant balances: only debtors + who they transfer to (from settlement plan).
+  const transfers = plan?.transfers || [];
+  const byDebtor = useMemo(() => {
+    const m = new Map();
+    for (const t of transfers) {
+      if (!m.has(t.from_user_id)) m.set(t.from_user_id, []);
+      m.get(t.from_user_id).push(t);
+    }
+    return [...m.entries()];
+  }, [transfers]);
+  const debtors = useMemo(
+    () => (summary || []).filter((x) => x.owe_cents > 0),
+    [summary],
+  );
 
   if (!detail) {
     return (
@@ -202,6 +228,9 @@ export function GroupDetail() {
             <Tabs.List mb="sm">
               <Tabs.Tab value="ledger">Ledger</Tabs.Tab>
               <Tabs.Tab value="balances">Balances</Tabs.Tab>
+              <Tabs.Tab value="paid">Total paid</Tabs.Tab>
+              <Tabs.Tab value="share">Total share</Tabs.Tab>
+              <Tabs.Tab value="payments">Payments</Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="ledger">
@@ -212,28 +241,39 @@ export function GroupDetail() {
               {ledger && <Text size="sm" c="dimmed">{ledger.total} total</Text>}
             </Group>
           </Group>
-          <Group gap="xs" mb="sm">
-            <SegmentedControl
-              size="xs"
-              value={type}
-              onChange={setType}
-              data={[
-                { value: 'all', label: 'All' },
-                { value: 'expense', label: 'Expenses' },
-                { value: 'payment', label: 'Payments' },
-              ]}
-            />
-            <TextInput
-              size="xs"
-              placeholder="Search"
-              value={q}
-              onChange={(x) => setQ(x.target.value)}
-              style={{ flex: 1 }}
-            />
-            <Button size="xs" variant="default" onClick={loadLedger} loading={ledgerLoading}>Go</Button>
-          </Group>
+          <form onSubmit={(ev) => { ev.preventDefault(); loadLedger(); }}>
+            <Group gap="xs" mb="sm">
+              <SegmentedControl
+                size="xs"
+                value={type}
+                onChange={setType}
+                data={[
+                  { value: 'all', label: 'All' },
+                  { value: 'expense', label: 'Expenses' },
+                  { value: 'payment', label: 'Payments' },
+                ]}
+              />
+              <Select
+                size="xs"
+                placeholder="Filter by payer / party"
+                clearable
+                value={payer}
+                onChange={(v) => setPayer(v || '')}
+                data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
+                style={{ minWidth: 170 }}
+              />
+              <TextInput
+                size="xs"
+                placeholder="Search item or payer"
+                value={q}
+                onChange={(x) => setQ(x.target.value)}
+                style={{ flex: 1 }}
+              />
+              <Button size="xs" variant="default" onClick={loadLedger} loading={ledgerLoading}>Go</Button>
+            </Group>
+          </form>
           <ScrollArea>
-          <Table striped highlightOnHover withTableBorder miw={560}>
+          <Table striped highlightOnHover withTableBorder miw={640}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Item</Table.Th>
@@ -241,6 +281,7 @@ export function GroupDetail() {
                 <Table.Th>Amount</Table.Th>
                 <Table.Th>My share</Table.Th>
                 <Table.Th>Status</Table.Th>
+                <Table.Th></Table.Th>
               </Table.Tr>
             </Table.Thead>
             <Table.Tbody>
@@ -267,47 +308,134 @@ export function GroupDetail() {
                       {t.status}
                     </Badge>
                   </Table.Td>
+                  <Table.Td>
+                    {t.kind === 'expense' && (
+                      <Group gap={2} wrap="nowrap">
+                        <ActionIcon size="sm" variant="subtle" title="Copy expense" aria-label={`Copy ${t.title}`} onClick={() => copyExpense(t)}>⧉</ActionIcon>
+                        <ActionIcon size="sm" variant="subtle" title="Edit expense" aria-label={`Edit ${t.title}`} onClick={() => editExpense(t)}>✎</ActionIcon>
+                      </Group>
+                    )}
+                  </Table.Td>
                 </Table.Tr>
               ))}
             </Table.Tbody>
+            <Table.Tfoot>
+              <Table.Tr>
+                <Table.Td><Text size="sm" fw={600}>Total ({ledger?.items.length || 0} rows)</Text></Table.Td>
+                <Table.Td />
+                <Table.Td><Text size="sm" fw={600}>{fmt(totals.amount, detail.currency)}</Text></Table.Td>
+                <Table.Td><Text size="sm" fw={600}>{fmt(totals.mine, detail.currency)}</Text></Table.Td>
+                <Table.Td />
+                <Table.Td />
+              </Table.Tr>
+            </Table.Tfoot>
           </Table>
           </ScrollArea>
             </Tabs.Panel>
 
             <Tabs.Panel value="balances">
-              <Text size="xs" c="dimmed" mb="sm">
-                Paid = expense totals paid (all non-deleted expenses) · Owe = current net debt
-              </Text>
+              <Title order={4} mb="sm">Who owes</Title>
+              {debtors.length === 0 && transfers.length === 0 && (
+                <Text c="dimmed" size="sm">All settled — nobody owes anything. 🎉</Text>
+              )}
+              <Stack gap="sm">
+                {byDebtor.map(([from, list]) => (
+                  <Card key={from} withBorder radius="md" padding="sm">
+                    <Group gap="sm" wrap="nowrap">
+                      <Avatar color="red" radius="xl" size="sm">{initialsOf(displayNameOf(members, from))}</Avatar>
+                      <div style={{ flex: 1 }}>
+                        <Text size="sm" fw={600}>{displayNameOf(members, from)} owes</Text>
+                        {list.map((t, i) => (
+                          <Group key={i} gap="xs" mt={2}>
+                            <Text size="sm">
+                              → {displayNameOf(members, t.to_user_id)} <b>{fmt(t.amount_cents, detail.currency)}</b>
+                            </Text>
+                            <Button size="xs" variant="light" onClick={() => { setPayPreset(t); setPayOpen(true); }}>Pay</Button>
+                          </Group>
+                        ))}
+                      </div>
+                    </Group>
+                  </Card>
+                ))}
+                {byDebtor.length === 0 && debtors.map((m) => (
+                  <Card key={m.user_id} withBorder radius="md" padding="sm">
+                    <Text size="sm"><b>{m.display_name}</b> owes <b>{fmt(m.owe_cents, detail.currency)}</b></Text>
+                  </Card>
+                ))}
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="paid">
+              <Title order={4} mb="sm">Total paid</Title>
               <ScrollArea>
-              <Table striped highlightOnHover withTableBorder miw={520}>
+              <Table striped highlightOnHover withTableBorder miw={400}>
                 <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Member</Table.Th>
-                    <Table.Th>Total paid</Table.Th>
-                    <Table.Th>Share</Table.Th>
-                    <Table.Th>Owe</Table.Th>
-                    <Table.Th>Net</Table.Th>
-                  </Table.Tr>
+                  <Table.Tr><Table.Th>Member</Table.Th><Table.Th>Total paid</Table.Th></Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
-                  {summary?.map((m) => (
+                  {[...(summary || [])].sort((a, b) => b.total_paid_cents - a.total_paid_cents).map((m) => (
                     <Table.Tr key={m.user_id}>
                       <Table.Td>{m.display_name}</Table.Td>
                       <Table.Td>{fmt(m.total_paid_cents, detail.currency)}</Table.Td>
-                      <Table.Td>{fmt(m.total_share_cents, detail.currency)}</Table.Td>
-                      <Table.Td>{m.owe_cents > 0 ? fmt(m.owe_cents, detail.currency) : '—'}</Table.Td>
-                      <Table.Td>
-                        {m.net_cents === 0 ? 'settled' : (
-                          <Text span c={m.net_cents < 0 ? 'red' : 'teal'}>
-                            {fmt(m.net_cents, detail.currency)}
-                          </Text>
-                        )}
-                      </Table.Td>
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
+                <Table.Tfoot>
+                  <Table.Tr>
+                    <Table.Td><Text size="sm" fw={600}>Total</Text></Table.Td>
+                    <Table.Td><Text size="sm" fw={600}>{fmt((summary || []).reduce((a, m) => a + m.total_paid_cents, 0), detail.currency)}</Text></Table.Td>
+                  </Table.Tr>
+                </Table.Tfoot>
               </Table>
               </ScrollArea>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="share">
+              <Title order={4} mb="sm">Total share</Title>
+              <ScrollArea>
+              <Table striped highlightOnHover withTableBorder miw={400}>
+                <Table.Thead>
+                  <Table.Tr><Table.Th>Member</Table.Th><Table.Th>Total share</Table.Th></Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {[...(summary || [])].sort((a, b) => b.total_share_cents - a.total_share_cents).map((m) => (
+                    <Table.Tr key={m.user_id}>
+                      <Table.Td>{m.display_name}</Table.Td>
+                      <Table.Td>{fmt(m.total_share_cents, detail.currency)}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+                <Table.Tfoot>
+                  <Table.Tr>
+                    <Table.Td><Text size="sm" fw={600}>Total</Text></Table.Td>
+                    <Table.Td><Text size="sm" fw={600}>{fmt((summary || []).reduce((a, m) => a + m.total_share_cents, 0), detail.currency)}</Text></Table.Td>
+                  </Table.Tr>
+                </Table.Tfoot>
+              </Table>
+              </ScrollArea>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="payments">
+              <Group justify="space-between" mb="sm">
+                <Title order={4}>Transfer history</Title>
+                <Text size="sm" c="dimmed">Kept forever — stays visible after settle-up</Text>
+              </Group>
+              {payments.length === 0 && <Text size="sm" c="dimmed">No transfers yet.</Text>}
+              <Stack gap="xs">
+                {payments.map((p) => (
+                  <Card key={p.id} withBorder radius="md" padding="sm">
+                    <Group justify="space-between" wrap="nowrap">
+                      <Text size="sm">
+                        {p.from_name || p.from_user_id?.slice(0, 8)} → {p.to_name || p.to_user_id?.slice(0, 8)}:{' '}
+                        <b>{fmt(p.amount_cents, detail.currency)}</b>{' '}
+                        <Text span size="xs" c="dimmed">
+                          {new Date(p.created_at).toLocaleString()}{p.reversed ? ' · reversed' : ''} · {p.status}
+                        </Text>
+                      </Text>
+                    </Group>
+                  </Card>
+                ))}
+              </Stack>
             </Tabs.Panel>
           </Tabs>
         </Card>
@@ -337,53 +465,20 @@ export function GroupDetail() {
               <Button fullWidth variant="light" color="red" mt="md" onClick={leave}>
                 Leave group
               </Button>
+              {detail.my_role === 'owner' && (
+                <Button fullWidth variant="outline" color="red" mt="sm" onClick={delGroup}>
+                  Delete group
+                </Button>
+              )}
             </Card>
           </Grid.Col>
           <Grid.Col span={{ base: 12, sm: 6 }}>
             <Card withBorder shadow="sm" padding="md" radius="md" h="100%">
               <Title order={4} mb="sm">Invite</Title>
-              <form onSubmit={invite}>
-                <Group gap="xs" align="flex-end">
-                  <TextInput
-                    label="Invite by email"
-                    placeholder="friend@example.com"
-                    value={email}
-                    onChange={(x) => setEmail(x.target.value)}
-                    style={{ flex: 1 }}
-                  />
-                  <Button type="submit" loading={inviting}>Invite</Button>
-                </Group>
-              </form>
-              <form onSubmit={searchContacts}>
-                <Group gap="xs" mt="sm" align="flex-end">
-                  <TextInput
-                    label="Add from contacts"
-                    placeholder="Search name, username, email"
-                    value={cq}
-                    onChange={(x) => setCq(x.target.value)}
-                    style={{ flex: 1 }}
-                  />
-                  <Button type="submit" variant="default" loading={searching}>Search</Button>
-                </Group>
-              </form>
-              <Stack gap="xs" mt="sm">
-                {contacts.map((c) => (
-                  <Group key={c.user_id} justify="space-between" wrap="nowrap">
-                    <Group gap="sm" wrap="nowrap">
-                      <Avatar color="blue" radius="xl" size="sm">{initialsOf(c.display_name)}</Avatar>
-                      <Text size="sm">{c.display_name} <Text span c="dimmed">@{c.username}</Text></Text>
-                    </Group>
-                    <ActionIcon variant="light" title="Add to group" onClick={() => addMember(c.user_id)}>
-                      +
-                    </ActionIcon>
-                  </Group>
-                ))}
-              </Stack>
-              {detail.my_role === 'owner' && (
-                <Button fullWidth variant="default" mt="md" onClick={rotate}>
-                  New invite link (rotates)
-                </Button>
-              )}
+              <Text size="sm" c="dimmed" mb="sm">Invite several people at once, or share a link.</Text>
+              <Button fullWidth onClick={() => nav(`/groups/${id}/invite`)}>
+                Invite members
+              </Button>
             </Card>
           </Grid.Col>
         </Grid>

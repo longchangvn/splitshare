@@ -60,8 +60,8 @@ export function Login() {
         <Title order={3}>Log in</Title>
         <form onSubmit={go}>
           <Stack gap="sm">
-            <TextInput label="Username or email" required value={id} onChange={(x) => setId(x.target.value)} />
-            <PasswordInput label="Password" required value={pw} onChange={(x) => setPw(x.target.value)} />
+            <TextInput label="Username or email" required autoFocus autoComplete="username" name="username" value={id} onChange={(x) => setId(x.target.value)} />
+            <PasswordInput label="Password" required autoComplete="current-password" name="password" value={pw} onChange={(x) => setPw(x.target.value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && !busy) ev.currentTarget.form?.requestSubmit(); }} />
             <Button fullWidth type="submit" loading={busy}>Log in</Button>
           </Stack>
         </form>
