@@ -132,7 +132,8 @@ public sealed class LedgerService(AppDbContext db)
         Guid? PayerId, string Sort, int Page, int Limit);
 
     public sealed record LedgerItem(string Kind, Guid Id, string Title, DateTime CreatedAt,
-        long AmountCents, Guid? PayerId, string? PayerName, Guid? FromUserId, Guid? ToUserId,
+        long AmountCents, Guid? PayerId, string? PayerName, Guid? FromUserId, string? FromName,
+        Guid? ToUserId, string? ToName,
         long MyShareCents, string Status, bool HasImage, bool Reversed);
 
     public sealed record OweTo(Guid ToUserId, string ToName, long AmountCents);
@@ -143,6 +144,45 @@ public sealed class LedgerService(AppDbContext db)
         bool Delinquent, DateTime? OldestUnsettledAt);
     public sealed record CurrencyTotals(long OweCents, long OwedCents);
     public sealed record AllView(List<GroupRow> Groups, Dictionary<string, CurrencyTotals> Totals);
+    public sealed record MemberSummary(Guid UserId, string DisplayName,
+        long TotalPaidCents, long TotalShareCents, long NetCents, long OweCents);
+
+    /// <summary>
+    /// Per-member aggregates: total paid and total share across all non-deleted
+    /// expenses (any status — locked history still counts), plus the current
+    /// net debt (OPEN ledger only, same basis as settlement).
+    /// </summary>
+    public async Task<List<MemberSummary>?> BuildSummaryAsync(Guid groupId)
+    {
+        var group = await db.Groups.FindAsync(groupId);
+        if (group is null || group.DeletedAt is not null) return null;
+
+        var expenses = await db.Expenses
+            .Where(e => e.GroupId == groupId && e.DeletedAt == null)
+            .Include(e => e.Splits).ToListAsync();
+        var snapshot = await ComputeNetsAsync(groupId);
+
+        var ids = new HashSet<Guid>(await db.GroupMembers.Where(m => m.GroupId == groupId)
+            .Select(m => m.UserId).ToListAsync());
+        foreach (var e in expenses)
+        {
+            ids.Add(e.PayerId);
+            foreach (var s in e.Splits) ids.Add(s.UserId);
+        }
+        var names = await db.Users.Where(u => ids.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+
+        return ids
+            .Select(id => new MemberSummary(
+                id,
+                names.TryGetValue(id, out var n) ? n : "Unknown",
+                expenses.Where(e => e.PayerId == id).Sum(e => e.AmountCents),
+                expenses.SelectMany(e => e.Splits).Where(s => s.UserId == id).Sum(s => s.ShareCents),
+                snapshot?.Nets.TryGetValue(id, out var net) == true ? net : 0L,
+                snapshot?.Nets.TryGetValue(id, out var net2) == true && net2 < 0 ? -net2 : 0L))
+            .OrderBy(m => m.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     /// <summary>
     /// Unified expense+payment ledger. Removed members see a snapshot up to
@@ -189,7 +229,7 @@ public sealed class LedgerService(AppDbContext db)
             {
                 rows.Add((e.CreatedAt, new LedgerItem(
                     "expense", e.Id, e.Title, e.CreatedAt, e.AmountCents,
-                    e.PayerId, NameOf(names, e.PayerId), null, null,
+                    e.PayerId, NameOf(names, e.PayerId), null, null, null, null,
                     e.Splits.FirstOrDefault(s => s.UserId == requesterId)?.ShareCents ?? 0L,
                     e.Status.ToString().ToUpperInvariant(), e.Images.Count > 0, false)));
             }
@@ -215,7 +255,9 @@ public sealed class LedgerService(AppDbContext db)
                 rows.Add((p.CreatedAt, new LedgerItem(
                     "payment", p.Id,
                     $"Payment {NameOf(names, p.FromUserId)} → {NameOf(names, p.ToUserId)}",
-                    p.CreatedAt, p.AmountCents, null, null, p.FromUserId, p.ToUserId,
+                    p.CreatedAt, p.AmountCents, null, null,
+                    p.FromUserId, NameOf(names, p.FromUserId),
+                    p.ToUserId, NameOf(names, p.ToUserId),
                     p.ToUserId == requesterId ? p.AmountCents
                         : p.FromUserId == requesterId ? -p.AmountCents : 0L,
                     p.Status.ToString().ToUpperInvariant(), false, p.ReversedAt is not null)));

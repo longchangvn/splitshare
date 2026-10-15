@@ -42,5 +42,14 @@ public static class LedgerEndpoints
 
         api.MapGet("/me/balances", async (ClaimsPrincipal p, Services.LedgerService ledger) =>
             Results.Ok(await ledger.BuildAllAsync(Me(p))));
+
+        api.MapGet("/groups/{id:guid}/summary", async (Guid id, ClaimsPrincipal p,
+            Services.LedgerService ledger) =>
+        {
+            if (!await ledger.CanViewAsync(id, Me(p)))
+                return ApiResults.Error("FORBIDDEN", "Not a group member.", 403);
+            var summary = await ledger.BuildSummaryAsync(id);
+            return summary is null ? ApiResults.Error("NOT_FOUND", "Group not found.", 404) : Results.Ok(summary);
+        });
     }
 }

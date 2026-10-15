@@ -19,3 +19,23 @@ export function initialsOf(name) {
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
+
+export function ChevronRight({ size = 20, label = 'View details' }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label={label}
+      style={{ flex: 'none', opacity: 0.55 }}
+    >
+      <path d="m 9 6 6 6 -6 6" />
+    </svg>
+  );
+}

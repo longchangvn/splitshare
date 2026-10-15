@@ -37,12 +37,49 @@ async function req(method, path, body, extra = {}) {
   return data;
 }
 
+// Transparent reactive refresh: on 401 from a non-auth endpoint, run one
+// shared refresh for all concurrent callers, store the rotated pair, and
+// retry the original request exactly once. Auth paths throw untouched so a
+// wrong password never triggers refresh traffic or a retry loop.
+let inflightRefresh = null;
+
+async function doRefresh() {
+  const rt = getRefresh();
+  if (!rt) throw new ApiError(401, { code: 'SESSION_EXPIRED', message: 'Session expired.' });
+  const r = await fetch(`${BASE}/api/v1/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: rt }),
+  });
+  const text = await r.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!r.ok) {
+    clearTokens();
+    throw new ApiError(r.status, { code: 'SESSION_EXPIRED', message: 'Session expired.' });
+  }
+  setTokens(data.access_token, data.refresh_token);
+}
+
+async function reqAuth(method, path, body, extra = {}) {
+  try {
+    return await req(method, path, body, extra);
+  } catch (err) {
+    const isAuthPath = path.startsWith('/api/v1/auth/');
+    if (!(err instanceof ApiError) || err.status !== 401 || isAuthPath || extra._retried) throw err;
+    if (!inflightRefresh) {
+      inflightRefresh = doRefresh().finally(() => { inflightRefresh = null; });
+    }
+    await inflightRefresh;
+    return req(method, path, body, { ...extra, _retried: true });
+  }
+}
+
 export const api = {
-  get: (p) => req('GET', p),
-  post: (p, b) => req('POST', p, b ?? {}),
-  postForm: (p, form) => req('POST', p, undefined, { form }),
-  patch: (p, b) => req('PATCH', p, b ?? {}),
-  del: (p) => req('DELETE', p),
+  get: (p) => reqAuth('GET', p),
+  post: (p, b) => reqAuth('POST', p, b ?? {}),
+  postForm: (p, form) => reqAuth('POST', p, undefined, { form }),
+  patch: (p, b) => reqAuth('PATCH', p, b ?? {}),
+  del: (p) => reqAuth('DELETE', p),
 };
 
 export function fmt(cents, currency) {

@@ -6,6 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 using SplitShare.Api.Auth;
 using SplitShare.Api.Common;
 using SplitShare.Api.Data;
+using SplitShare.Api.Data.Providers;
 using SplitShare.Api.Endpoints;
 using SplitShare.Api.Expenses;
 using SplitShare.Api.Groups;
@@ -26,11 +27,13 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"])
      .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
-var conn = builder.Configuration.GetConnectionString("module-platform")
+var provider = DatabaseProviderFactory.Create(builder.Configuration);
+var conn = builder.Configuration[provider.ConnectionKey]
+    ?? builder.Configuration.GetConnectionString("module-platform")
     ?? builder.Configuration.GetConnectionString("Default")
     ?? "Host=localhost;Port=5433;Database=module_platform;Username=module_platform;Password=module_platform";
-builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(conn,
-    npg => npg.MigrationsHistoryTable("__EFMigrationsHistory", "splitshare")));
+builder.Services.AddSingleton<IDatabaseProvider>(provider);
+builder.Services.AddDbContext<AppDbContext>(o => provider.Configure(o, conn));
 builder.Services.AddScoped<LedgerService>();
 builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<TokenService>();

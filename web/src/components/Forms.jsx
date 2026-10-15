@@ -1,40 +1,142 @@
 import { useEffect, useState } from 'react';
 import {
-  Alert, Button, Checkbox, Group, Paper, SegmentedControl, Select, Stack, Text,
+  Alert, Button, Checkbox, Group, Paper, ScrollArea, SegmentedControl, Select, Stack, Text,
   TextInput,
 } from '@mantine/core';
+import { notifications } from '@mantine/notifications';
 import { api } from '../api.js';
 import { Err } from '../auth.jsx';
 import { displayNameOf } from './Net.jsx';
 
+const splitVal = (s, type) => {
+  if (!s) return '';
+  if (type === 'EXACT' && s.exact_cents != null) return (s.exact_cents / 100).toString();
+  if (type === 'PERCENT' && s.percent != null) return s.percent.toString();
+  if (type === 'SHARES' && s.shares != null) return s.shares.toString();
+  return '';
+};
+
+// Equal-percent distribution that sums to exactly 100.00 (mirrors server largest-remainder).
+const equalPercent = (n) => {
+  const base = Math.floor(10000 / n);
+  const out = Array(n).fill(base);
+  for (let i = 0; i < 10000 - base * n; i++) out[i] += 1;
+  return out.map((c) => (c / 100).toString());
+};
+
 // Expense create/edit with live split preview + un-settle confirm (tasks 8.2/8.3).
-export function ExpenseForm({ groupId, members, existing, onDone }) {
-  const [title, setTitle] = useState(existing?.title || '');
-  const [amount, setAmount] = useState(existing ? (existing.amount_cents / 100).toFixed(2) : '');
-  const [payer, setPayer] = useState(existing?.payer_id || members[0]?.user_id || '');
-  const [type, setType] = useState(existing?.split_type || 'EQUAL');
-  const [sel, setSel] = useState(() =>
-    existing ? existing.splits.map((s) => s.user_id) : members.map((m) => m.user_id));
-  const [detail, setDetail] = useState(''); // "id:val,id:val" for EXACT(amount)/PERCENT/SHARES
+// copyFrom: detail.expense payload to prefill a copy (task 4.1); images carried on save (4.2).
+export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
+  const source = existing ?? copyFrom ?? null;
+  const isCopy = !!copyFrom && !existing;
+  const activeIds = new Set(members.map((m) => m.user_id));
+
+  const initSel = () => {
+    if (existing) return existing.splits.map((s) => s.user_id);
+    if (copyFrom) {
+      const kept = copyFrom.splits.map((s) => s.user_id).filter((id) => activeIds.has(id));
+      return kept.length > 0 ? kept : members.map((m) => m.user_id);
+    }
+    return members.map((m) => m.user_id);
+  };
+  const initValues = (type, sel) => {
+    const out = {};
+    if (!source || !source.splits) return out;
+    for (const s of source.splits) {
+      if (!sel.includes(s.user_id)) continue;
+      const v = splitVal(s, type);
+      if (v !== '') out[s.user_id] = v;
+    }
+    return out;
+  };
+
+  const [title, setTitle] = useState(
+    existing?.title ?? (copyFrom ? `Copy of ${copyFrom.title}` : ''));
+  const [amount, setAmount] = useState(
+    source ? (source.amount_cents / 100).toFixed(2) : '');
+  const [payer, setPayer] = useState(() => {
+    const p = source?.payer_id;
+    if (p && activeIds.has(p)) return p;
+    return members[0]?.user_id || '';
+  });
+  const [type, setType] = useState(source?.split_type || 'EQUAL');
+  const [sel, setSel] = useState(initSel);
+  const [values, setValues] = useState(() => initValues(source?.split_type || 'EQUAL', initSel()));
+  const [stashed, setStashed] = useState({}); // values of unchecked participants
   const [preview, setPreview] = useState(null);
   const [confirm, setConfirm] = useState(null); // [names] un-settle list
   const [pending, setPending] = useState(null); // PATCH body awaiting confirm
+  const [saving, setSaving] = useState(false);
+  const [imgErrs, setImgErrs] = useState([]);
   const [e, setE] = useState(null);
 
-  const parseDetail = () => detail.split(',').map((p) => p.trim()).filter(Boolean).map((p) => {
-    const [id, v] = p.split(':');
-    return { id: id.trim(), v: Number(v) };
-  });
+  const dropped = copyFrom
+    ? copyFrom.splits.map((s) => s.user_id).filter((id) => !activeIds.has(id))
+    : [];
+  const copyImages = isCopy ? (copyFrom.images || []) : [];
+
+  const changeType = (t) => {
+    setType(t);
+    if (t === 'EQUAL') return;
+    // Prefill empty boxes with equal defaults (keeps typed values).
+    setValues((prev) => {
+      const checked = sel.filter((id) => !(id in prev) || prev[id] === '');
+      if (checked.length === 0) return prev;
+      const next = { ...prev };
+      if (t === 'PERCENT') {
+        const all = sel.filter((id) => !(id in next) || next[id] === '');
+        const dist = equalPercent(sel.length);
+        sel.forEach((id, i) => { if (all.includes(id)) next[id] = dist[i]; });
+      } else if (t === 'SHARES') {
+        checked.forEach((id) => { next[id] = '1'; });
+      }
+      return next;
+    });
+  };
+
+  const toggle = (id) => {
+    if (sel.includes(id)) {
+      setSel(sel.filter((x) => x !== id));
+      setStashed({ ...stashed, ...(id in values ? { [id]: values[id] } : {}) });
+      setValues((prev) => { const n = { ...prev }; delete n[id]; return n; });
+    } else {
+      setSel([...sel, id]);
+      if (id in stashed) setValues((prev) => ({ ...prev, [id]: stashed[id] }));
+    }
+  };
+  const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: v }));
 
   const build = () => {
     const body = {
       title, amount: Number(amount), payer_id: payer, split_type: type, participant_ids: sel,
     };
-    if (type === 'EXACT') body.exact = parseDetail().map((x) => ({ user_id: x.id, amount_cents: Math.round(x.v * 100) }));
-    if (type === 'PERCENT') body.percent = parseDetail().map((x) => ({ user_id: x.id, percent: x.v }));
-    if (type === 'SHARES') body.shares = parseDetail().map((x) => ({ user_id: x.id, shares: x.v }));
+    if (type === 'EXACT') {
+      body.exact = sel.map((id) => ({ user_id: id, amount_cents: Math.round(Number(values[id] || 0) * 100) }));
+    }
+    if (type === 'PERCENT') {
+      body.percent = sel.map((id) => ({ user_id: id, percent: Number(values[id] || 0) }));
+    }
+    if (type === 'SHARES') {
+      body.shares = sel.map((id) => ({ user_id: id, shares: Math.round(Number(values[id] || 0)) }));
+    }
     return body;
   };
+
+  // Local running totals (server 422 stays authoritative).
+  const totals = (() => {
+    if (type === 'EQUAL' || sel.length === 0) return null;
+    const nums = sel.map((id) => Number(values[id] || 0));
+    if (nums.some((n) => Number.isNaN(n))) return null;
+    if (type === 'EXACT') {
+      const sum = nums.reduce((a, b) => a + b, 0);
+      return { text: `sum = $${sum.toFixed(2)} of $${Number(amount || 0).toFixed(2)}`, ok: Math.abs(sum - Number(amount || 0)) < 0.005 };
+    }
+    if (type === 'PERCENT') {
+      const sum = nums.reduce((a, b) => a + b, 0);
+      return { text: `${sum}% of 100%`, ok: Math.abs(sum - 100) < 1e-9 };
+    }
+    return { text: `${nums.reduce((a, b) => a + b, 0)} shares total`, ok: true };
+  })();
 
   useEffect(() => {
     if (!amount || sel.length === 0) { setPreview(null); return; }
@@ -50,15 +152,47 @@ export function ExpenseForm({ groupId, members, existing, onDone }) {
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, type, detail, payer, sel.join(',')]);
+  }, [amount, type, payer, sel.join(','), Object.values(values).join('|')]);
+
+  // Task 4.2: carry source receipts onto the copy by download + re-upload.
+  const carryImages = async (newExpenseId) => {
+    const failures = [];
+    for (const img of copyImages) {
+      try {
+        const r = await fetch(`/api/v1/images/${img.image_id}`,
+          { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
+        if (!r.ok) throw new Error(`download ${r.status}`);
+        const blob = await r.blob();
+        const form = new FormData();
+        form.append('file', new File([blob], 'receipt', { type: img.mime || blob.type }));
+        await api.postForm(`/api/v1/expenses/${newExpenseId}/images`, form);
+      } catch (err) {
+        failures.push(`${img.image_id.slice(0, 8)}: ${err.message}`);
+      }
+    }
+    return failures;
+  };
 
   const submit = async (ev) => {
     ev.preventDefault();
+    if (saving) return; // double-submit guard
     setE(null);
+    setImgErrs([]);
+    setSaving(true);
     try {
       if (!existing) {
-        await api.post(`/api/v1/groups/${groupId}/expenses`, build());
-        onDone();
+        const r = await api.post(`/api/v1/groups/${groupId}/expenses`, build());
+        const newId = r.expense?.expense_id;
+        if (isCopy && newId && copyImages.length > 0) {
+          const failures = await carryImages(newId);
+          if (failures.length > 0) {
+            setImgErrs(failures);
+            notifications.show({ title: 'Expense copied; some receipts failed', message: failures.join('; '), color: 'orange' });
+          } else {
+            notifications.show({ title: 'Expense copied with receipts', color: 'teal' });
+          }
+        }
+        onDone(r);
       } else {
         const r = await api.patch(`/api/v1/expenses/${existing.expense_id}`,
           { expected_version: existing.version, ...build() });
@@ -66,6 +200,8 @@ export function ExpenseForm({ groupId, members, existing, onDone }) {
       }
     } catch (err) {
       setE(err);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -88,10 +224,20 @@ export function ExpenseForm({ groupId, members, existing, onDone }) {
     await submit(ev);
   };
 
+  const boxLabel = type === 'EXACT' ? 'Exact $' : type === 'PERCENT' ? 'Percent %' : 'Shares';
+
   return (
     <form onSubmit={existing ? submitEdit : submit}>
       <Stack gap="sm">
-        <Text fw={600}>{existing ? 'Edit expense' : 'New expense'}</Text>
+        <Text fw={600}>{existing ? 'Edit expense' : isCopy ? 'Copy expense' : 'New expense'}</Text>
+        {isCopy && dropped.length > 0 && (
+          <Alert color="yellow" variant="light" title="Former members excluded from the copy">
+            <Text size="sm">{dropped.map((id) => id.slice(0, 8)).join(', ')}</Text>
+          </Alert>
+        )}
+        {isCopy && copyImages.length > 0 && (
+          <Text size="sm" c="dimmed">{copyImages.length} receipt(s) will be carried over on save.</Text>
+        )}
         <TextInput label="Title" required value={title} onChange={(x) => setTitle(x.target.value)} />
         <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} />
         <Select
@@ -100,26 +246,38 @@ export function ExpenseForm({ groupId, members, existing, onDone }) {
           onChange={setPayer}
           data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
         />
-        <SegmentedControl
-          fullWidth
-          value={type}
-          onChange={setType}
-          data={['EQUAL', 'EXACT', 'PERCENT', 'SHARES']}
-        />
-        <Checkbox.Group label="Participants" value={sel} onChange={setSel}>
-          <Stack gap={4} mt={4}>
-            {members.map((m) => (
-              <Checkbox key={m.user_id} value={m.user_id} label={m.display_name} />
-            ))}
-          </Stack>
-        </Checkbox.Group>
-        {type !== 'EQUAL' && (
-          <TextInput
-            label="Split detail"
-            description={type === 'EXACT' ? 'user_id:dollars, …' : type === 'PERCENT' ? 'user_id:percent, …' : 'user_id:shares, …'}
-            value={detail}
-            onChange={(x) => setDetail(x.target.value)}
+        <ScrollArea type="scroll">
+          <SegmentedControl
+            value={type}
+            onChange={changeType}
+            data={['EQUAL', 'EXACT', 'PERCENT', 'SHARES']}
+            styles={{ root: { minWidth: 400 } }}
           />
+        </ScrollArea>
+        <Text size="sm" fw={500}>Participants</Text>
+        <Stack gap={4}>
+          {members.map((m) => (
+            <div key={m.user_id} className="split-row">
+              <Checkbox
+                checked={sel.includes(m.user_id)}
+                onChange={() => toggle(m.user_id)}
+                label={m.display_name}
+              />
+              {type !== 'EQUAL' && sel.includes(m.user_id) && (
+                <TextInput
+                  className="split-value"
+                  aria-label={`${boxLabel} for ${m.display_name}`}
+                  placeholder={boxLabel}
+                  inputMode="decimal"
+                  value={values[m.user_id] ?? ''}
+                  onChange={(x) => setVal(m.user_id, x.target.value)}
+                />
+              )}
+            </div>
+          ))}
+        </Stack>
+        {type !== 'EQUAL' && totals && (
+          <Text size="sm" c={totals.ok ? 'teal' : 'orange'}>{totals.text}</Text>
         )}
         {preview && (
           <Paper withBorder p="sm" radius="md">
@@ -140,14 +298,19 @@ export function ExpenseForm({ groupId, members, existing, onDone }) {
           <Alert color="orange" variant="light" title="This will un-settle the following members">
             <Text size="sm" mb="xs">{confirm.join(', ')}. Continue?</Text>
             <Group gap="xs">
-              <Button size="xs" type="submit">Yes, save</Button>
+              <Button size="xs" type="submit" loading={saving}>Yes, save</Button>
               <Button size="xs" variant="default" onClick={() => { setConfirm(null); setPending(null); }}>
                 Cancel
               </Button>
             </Group>
           </Alert>
         )}
-        {!confirm && <Button type="submit">{existing ? 'Save changes' : 'Add expense'}</Button>}
+        {!confirm && <Button type="submit" loading={saving}>{existing ? 'Save changes' : isCopy ? 'Save copy' : 'Add expense'}</Button>}
+        {imgErrs.length > 0 && (
+          <Alert color="orange" variant="light" title="Receipt carry-over failed">
+            <Text size="sm">{imgErrs.join('; ')}</Text>
+          </Alert>
+        )}
         <Err e={e} />
       </Stack>
     </form>
@@ -168,14 +331,17 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
   const [method, setMethod] = useState('transfer');
   const [note, setNote] = useState('');
   const [e, setE] = useState(null);
+  const [paying, setPaying] = useState(false);
 
   const go = async (ev) => {
     ev.preventDefault();
+    if (paying) return;
+    setPaying(true);
     try {
       const r = await api.post(`/api/v1/groups/${groupId}/payments`,
         { from_user_id: from, to_user_id: to, amount: Number(amount), method, note: note || null });
       onDone(r);
-    } catch (err) { setE(err); }
+    } catch (err) { setE(err); } finally { setPaying(false); }
   };
 
   const data = options.map((m) => ({ value: m.user_id, label: m.display_name }));
@@ -193,7 +359,7 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           data={['cash', 'transfer', 'other']}
         />
         <TextInput label="Note (optional)" value={note} onChange={(x) => setNote(x.target.value)} />
-        <Button type="submit">Record payment</Button>
+        <Button type="submit" loading={paying}>Record payment</Button>
         <Err e={e} />
       </Stack>
     </form>

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  ActionIcon, Anchor, Avatar, Badge, Button, Card, CopyButton, Grid, Group,
-  Modal, SegmentedControl, Stack, Table, Text, TextInput, Title,
+  ActionIcon, Anchor, Avatar, Badge, Button, Card, CopyButton, Grid, Group, Loader,
+  Modal, ScrollArea, SegmentedControl, Skeleton, Stack, Table, Tabs, Text, TextInput, Title,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
@@ -18,6 +19,8 @@ export function GroupDetail() {
   const nav = useNavigate();
   const [detail, setDetail] = useState(null);
   const [ledger, setLedger] = useState(null);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [summary, setSummary] = useState(null);
   const [me, setMe] = useState(null);
   const [type, setType] = useState('all');
   const [q, setQ] = useState('');
@@ -30,23 +33,45 @@ export function GroupDetail() {
   const [cq, setCq] = useState('');
   const [contacts, setContacts] = useState([]);
   const [e, setE] = useState(null);
+  const [inviting, setInviting] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const isMobile = useMediaQuery('(max-width: 36em)');
+  // Copy handoff from expense detail (task 4.1): opens the create form prefilled.
+  const location = useLocation();
+  const [copyFrom, setCopyFrom] = useState(() => location.state?.copyFrom ?? null);
+  useEffect(() => {
+    if (location.state?.copyFrom) {
+      setCopyFrom(location.state.copyFrom);
+      setShowExp(true);
+      nav(location.pathname, { replace: true }); // consume: no stale copy on reload
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '');
 
   const load = async () => {
     if (!validId) { setE({ message: 'Invalid group link.' }); return; }
     try {
-      const [d, m] = await Promise.all([
+      const [d, m, s] = await Promise.all([
         api.get(`/api/v1/groups/${id}`),
         api.get(`/api/v1/groups/${id}/me`),
+        api.get(`/api/v1/groups/${id}/summary`),
       ]);
-      setDetail(d); setMe(m); setE(null);
+      setDetail(d); setMe(m); setSummary(s); setE(null);
     } catch (err) { setE(err); }
   };
   const loadLedger = async () => {
     if (!validId) return;
+    setLedgerLoading(true);
     try {
       setLedger(await api.get(`/api/v1/groups/${id}/ledger?type=${type}&q=${encodeURIComponent(q)}`));
+    } catch (err) { setE(err); } finally { setLedgerLoading(false); }
+  };
+  const loadSummary = async () => {
+    if (!validId) return;
+    try {
+      setSummary(await api.get(`/api/v1/groups/${id}/summary`));
     } catch (err) { setE(err); }
   };
   useEffect(() => { load(); }, [id]);
@@ -56,17 +81,21 @@ export function GroupDetail() {
 
   const invite = async (ev) => {
     ev.preventDefault();
+    if (inviting) return;
+    setInviting(true);
     try {
       const r = await api.post(`/api/v1/groups/${id}/invites`, { emails: [email] });
       notifications.show({ title: 'Invite sent', message: `added: ${r.added} pending: ${r.pending}`, color: 'teal' });
       setEmail('');
       load();
-    } catch (err) { setE(err); }
+    } catch (err) { setE(err); } finally { setInviting(false); }
   };
   const searchContacts = async (ev) => {
     ev.preventDefault();
+    if (searching) return;
+    setSearching(true);
     try { setContacts(await api.get(`/api/v1/contacts?q=${encodeURIComponent(cq)}`)); }
-    catch (err) { setE(err); }
+    catch (err) { setE(err); } finally { setSearching(false); }
   };
   const addMember = async (uid) => {
     try {
@@ -76,17 +105,22 @@ export function GroupDetail() {
     } catch (err) { setE(err); }
   };
   const remove = (uid, name) => {
-    modals.openConfirmModal({
+    const mid = modals.openConfirmModal({
       title: 'Remove member',
       centered: true,
       children: <Text size="sm">Remove {name}? Blocked while they hold a balance. History is kept.</Text>,
       labels: { confirm: 'Remove', cancel: 'Cancel' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
+        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
         try {
           await api.del(`/api/v1/groups/${id}/members/${uid}`);
+          modals.closeModal(mid);
           load();
-        } catch (err) { setE(err); }
+        } catch (err) {
+          modals.closeModal(mid);
+          setE(err);
+        }
       },
     });
   };
@@ -98,15 +132,16 @@ export function GroupDetail() {
     } catch (err) { setE(err); }
   };
   const leave = () => {
-    modals.openConfirmModal({
+    const mid = modals.openConfirmModal({
       title: 'Leave group',
       centered: true,
       children: <Text size="sm">Leave this group? Blocked while you hold a balance.</Text>,
       labels: { confirm: 'Leave', cancel: 'Cancel' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        try { await api.post(`/api/v1/groups/${id}/leave`, {}); nav('/'); }
-        catch (err) { setE(err); }
+        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
+        try { await api.post(`/api/v1/groups/${id}/leave`, {}); modals.closeModal(mid); nav('/'); }
+        catch (err) { modals.closeModal(mid); setE(err); }
       },
     });
   };
@@ -114,7 +149,12 @@ export function GroupDetail() {
   if (!detail) {
     return (
       <Shell>
-        <Text c="dimmed">Loading…</Text>
+        <Skeleton height={32} width="60%" radius="md" />
+        <Stack gap="md" mt="md">
+          <Skeleton height={52} radius="md" />
+          <Skeleton height={180} radius="md" />
+          <Skeleton height={120} radius="md" />
+        </Stack>
         <Err e={e} />
       </Shell>
     );
@@ -151,15 +191,26 @@ export function GroupDetail() {
             <ExpenseForm
               groupId={id}
               members={members}
-              onDone={() => { setShowExp(false); load(); loadLedger(); }}
+              copyFrom={copyFrom}
+              onDone={() => { setShowExp(false); setCopyFrom(null); load(); loadLedger(); loadSummary(); }}
             />
           </Card>
         )}
 
         <Card withBorder shadow="sm" padding="md" radius="md">
+          <Tabs defaultValue="ledger">
+            <Tabs.List mb="sm">
+              <Tabs.Tab value="ledger">Ledger</Tabs.Tab>
+              <Tabs.Tab value="balances">Balances</Tabs.Tab>
+            </Tabs.List>
+
+            <Tabs.Panel value="ledger">
           <Group justify="space-between" mb="sm">
             <Title order={4}>Ledger</Title>
-            {ledger && <Text size="sm" c="dimmed">{ledger.total} total</Text>}
+            <Group gap="xs">
+              {ledgerLoading && <Loader size="sm" />}
+              {ledger && <Text size="sm" c="dimmed">{ledger.total} total</Text>}
+            </Group>
           </Group>
           <Group gap="xs" mb="sm">
             <SegmentedControl
@@ -179,12 +230,14 @@ export function GroupDetail() {
               onChange={(x) => setQ(x.target.value)}
               style={{ flex: 1 }}
             />
-            <Button size="xs" variant="default" onClick={loadLedger}>Go</Button>
+            <Button size="xs" variant="default" onClick={loadLedger} loading={ledgerLoading}>Go</Button>
           </Group>
-          <Table striped highlightOnHover withTableBorder>
+          <ScrollArea>
+          <Table striped highlightOnHover withTableBorder miw={560}>
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Item</Table.Th>
+                <Table.Th>Payer / Parties</Table.Th>
                 <Table.Th>Amount</Table.Th>
                 <Table.Th>My share</Table.Th>
                 <Table.Th>Status</Table.Th>
@@ -202,6 +255,11 @@ export function GroupDetail() {
                     {t.has_image && <Text span size="sm"> 🧾</Text>}
                     {t.reversed && <Text span size="xs" c="dimmed"> (reversed)</Text>}
                   </Table.Td>
+                  <Table.Td>
+                    {t.kind === 'expense'
+                      ? (t.payer_name || displayNameOf(members, t.payer_id))
+                      : `${t.from_name || t.from_user_id?.slice(0, 8)} → ${t.to_name || t.to_user_id?.slice(0, 8)}`}
+                  </Table.Td>
                   <Table.Td>{fmt(t.amount_cents, detail.currency)}</Table.Td>
                   <Table.Td>{t.my_share_cents != null ? fmt(t.my_share_cents, detail.currency) : '—'}</Table.Td>
                   <Table.Td>
@@ -213,6 +271,45 @@ export function GroupDetail() {
               ))}
             </Table.Tbody>
           </Table>
+          </ScrollArea>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="balances">
+              <Text size="xs" c="dimmed" mb="sm">
+                Paid = expense totals paid (all non-deleted expenses) · Owe = current net debt
+              </Text>
+              <ScrollArea>
+              <Table striped highlightOnHover withTableBorder miw={520}>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Member</Table.Th>
+                    <Table.Th>Total paid</Table.Th>
+                    <Table.Th>Share</Table.Th>
+                    <Table.Th>Owe</Table.Th>
+                    <Table.Th>Net</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {summary?.map((m) => (
+                    <Table.Tr key={m.user_id}>
+                      <Table.Td>{m.display_name}</Table.Td>
+                      <Table.Td>{fmt(m.total_paid_cents, detail.currency)}</Table.Td>
+                      <Table.Td>{fmt(m.total_share_cents, detail.currency)}</Table.Td>
+                      <Table.Td>{m.owe_cents > 0 ? fmt(m.owe_cents, detail.currency) : '—'}</Table.Td>
+                      <Table.Td>
+                        {m.net_cents === 0 ? 'settled' : (
+                          <Text span c={m.net_cents < 0 ? 'red' : 'teal'}>
+                            {fmt(m.net_cents, detail.currency)}
+                          </Text>
+                        )}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+              </ScrollArea>
+            </Tabs.Panel>
+          </Tabs>
         </Card>
 
         <Grid>
@@ -230,7 +327,7 @@ export function GroupDetail() {
                       </div>
                     </Group>
                     {detail.my_role === 'owner' && (
-                      <Button size="xs" variant="subtle" color="red" onClick={() => remove(m.user_id, m.display_name)}>
+                      <Button size="xs" variant="subtle" color="red" mih={44} onClick={() => remove(m.user_id, m.display_name)}>
                         Remove
                       </Button>
                     )}
@@ -254,7 +351,7 @@ export function GroupDetail() {
                     onChange={(x) => setEmail(x.target.value)}
                     style={{ flex: 1 }}
                   />
-                  <Button type="submit">Invite</Button>
+                  <Button type="submit" loading={inviting}>Invite</Button>
                 </Group>
               </form>
               <form onSubmit={searchContacts}>
@@ -266,7 +363,7 @@ export function GroupDetail() {
                     onChange={(x) => setCq(x.target.value)}
                     style={{ flex: 1 }}
                   />
-                  <Button type="submit" variant="default">Search</Button>
+                  <Button type="submit" variant="default" loading={searching}>Search</Button>
                 </Group>
               </form>
               <Stack gap="xs" mt="sm">
@@ -292,7 +389,7 @@ export function GroupDetail() {
         </Grid>
       </Stack>
 
-      <Modal opened={payOpen} onClose={() => setPayOpen(false)} title="Record payment" centered>
+      <Modal opened={payOpen} onClose={() => setPayOpen(false)} title="Record payment" centered fullScreen={isMobile}>
         <PaymentForm
           groupId={id}
           members={members}
@@ -302,6 +399,7 @@ export function GroupDetail() {
             setPayPreset(null);
             load();
             loadLedger();
+            loadSummary();
             notifications.show({
               title: r.fully_settled ? 'Fully settled' : 'Payment recorded',
               color: 'teal',
@@ -310,7 +408,7 @@ export function GroupDetail() {
         />
       </Modal>
 
-      <Modal opened={inviteOpen} onClose={() => setInviteOpen(false)} title="New invite link" centered>
+      <Modal opened={inviteOpen} onClose={() => setInviteOpen(false)} title="New invite link" centered fullScreen={isMobile}>
         <Text size="sm" c="dimmed" mb="xs">The old link is dead. Share this one:</Text>
         <TextInput readOnly value={inviteLink} />
         <CopyButton value={inviteLink}>

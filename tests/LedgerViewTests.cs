@@ -40,6 +40,32 @@ public sealed class LedgerViewTests
         => new("all", null, null, null, null, null, null, null, "-created_at", page, limit);
 
     [Fact]
+    public async Task Summary_PerMember_Paid_Share_Net_Owe()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db);
+        await exp.CreateAsync(a.Id, g.Id, "Hotel", null, 20m, a.Id, SplitType.Equal, [a.Id, b.Id], null, null, null);
+        await exp.CreateAsync(a.Id, g.Id, "Taxi", null, 10m, b.Id, SplitType.Equal, [a.Id, b.Id], null, null, null);
+        db.Payments.Add(new Payment
+            { GroupId = g.Id, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 300, CreatedBy = b.Id });
+        await db.SaveChangesAsync();
+
+        var summary = (await ledger.BuildSummaryAsync(g.Id))!;
+        Assert.Equal(2, summary.Count);
+        var ra = summary.Single(m => m.UserId == a.Id);
+        Assert.Equal(2000, ra.TotalPaidCents);
+        Assert.Equal(1500, ra.TotalShareCents);
+        Assert.Equal(200, ra.NetCents);
+        Assert.Equal(0, ra.OweCents);
+        var rb = summary.Single(m => m.UserId == b.Id);
+        Assert.Equal(1000, rb.TotalPaidCents);
+        Assert.Equal(1500, rb.TotalShareCents);
+        Assert.Equal(-200, rb.NetCents);
+        Assert.Equal(200, rb.OweCents);
+        Assert.Null(await ledger.BuildSummaryAsync(Guid.NewGuid()));
+    }
+
+    [Fact]
     public async Task Ledger_Filters_Type_Status_Search_Pagination()
     {
         var (db, auth, exp, ledger) = Setup();

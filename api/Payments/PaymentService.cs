@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using SplitShare.Api.Data;
+using SplitShare.Api.Data.Providers;
 using SplitShare.Api.Models;
 using SplitShare.Api.Services;
 
@@ -11,7 +12,7 @@ public sealed record PaymentOp(bool Ok, string? ErrorCode, string? Error, object
 public sealed record PaymentRecorded(Payment Payment, bool FullySettled, int SettlementVersion);
 public sealed record PaymentReversed(Payment Payment, int SettlementVersion);
 
-public sealed class PaymentService(AppDbContext db, LedgerService ledger)
+public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatabaseProvider? provider = null)
 {
     private static readonly HashSet<string> Methods =
         new(StringComparer.OrdinalIgnoreCase) { "cash", "transfer", "other" };
@@ -51,8 +52,8 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger)
 
         // Serializable re-check: concurrent overpayments serialize; the loser
         // retries the read and is rejected as OVERPAYMENT below.
-        // (Skipped on non-relational providers, e.g. InMemory unit tests.)
-        var tx = db.Database.IsNpgsql()
+        // (Skipped when no transactional provider is wired, e.g. InMemory unit tests.)
+        var tx = provider?.SupportsTransactions == true
             ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable)
             : null;
         try
@@ -79,7 +80,7 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger)
             if (tx is not null) await tx.CommitAsync();
             return new(true, null, null, new PaymentRecorded(p, settled, plan.VersionSeq));
         }
-        catch (DbUpdateException ex) when (IsSerializationFailure(ex))
+        catch (DbUpdateException ex) when (provider?.IsConcurrencyConflict(ex) == true)
         {
             if (tx is not null) await tx.RollbackAsync();
             return new(false, "OVERPAYMENT", "Concurrent payment changed balances; re-check and retry.");
@@ -125,8 +126,4 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger)
         var (plan, _) = await ledger.RecomputeAsync(p.GroupId);
         return new(true, null, null, new PaymentReversed(p, plan.VersionSeq));
     }
-
-    private static bool IsSerializationFailure(DbUpdateException ex)
-        => ex.InnerException?.Message.Contains("40001") == true
-        || ex.InnerException?.Message.Contains("could not serialize") == true;
 }

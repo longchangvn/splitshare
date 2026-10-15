@@ -47,9 +47,12 @@ export function Login() {
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [e, setE] = useState(null);
+  const [busy, setBusy] = useState(false);
   const go = async (ev) => {
     ev.preventDefault();
-    try { await login(id, pw); nav('/'); } catch (err) { setE(err); }
+    if (busy) return;
+    setBusy(true);
+    try { await login(id, pw); nav('/'); } catch (err) { setE(err); } finally { setBusy(false); }
   };
   return (
     <AuthLayout>
@@ -59,7 +62,7 @@ export function Login() {
           <Stack gap="sm">
             <TextInput label="Username or email" required value={id} onChange={(x) => setId(x.target.value)} />
             <PasswordInput label="Password" required value={pw} onChange={(x) => setPw(x.target.value)} />
-            <Button fullWidth type="submit">Log in</Button>
+            <Button fullWidth type="submit" loading={busy}>Log in</Button>
           </Stack>
         </form>
         <Err e={e} />
@@ -79,13 +82,16 @@ export function Register() {
   const [f, setF] = useState({ username: '', email: '', display_name: '', password: '' });
   const [e, setE] = useState(null);
   const [done, setDone] = useState(null);
+  const [busy, setBusy] = useState(false);
   const go = async (ev) => {
     ev.preventDefault();
+    if (busy) return;
+    setBusy(true);
     try {
       const d = await register(f.username, f.email, f.display_name, f.password);
       setDone(d);
       nav('/');
-    } catch (err) { setE(err); }
+    } catch (err) { setE(err); } finally { setBusy(false); }
   };
   const set = (k) => (x) => setF({ ...f, [k]: x.target.value });
   return (
@@ -104,7 +110,7 @@ export function Register() {
               value={f.password}
               onChange={set('password')}
             />
-            <Button fullWidth type="submit">Register</Button>
+            <Button fullWidth type="submit" loading={busy}>Register</Button>
           </Stack>
         </form>
         <Err e={e} />

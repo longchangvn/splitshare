@@ -35,30 +35,36 @@ export function ExpenseDetail() {
   useEffect(() => { load(); }, [eid]);
 
   const del = () => {
-    modals.openConfirmModal({
+    const mid = modals.openConfirmModal({
       title: 'Delete expense',
       centered: true,
       children: <Text size="sm">Delete this expense? Balances recompute.</Text>,
       labels: { confirm: 'Delete', cancel: 'Cancel' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        try { await api.del(`/api/v1/expenses/${eid}`); nav(`/groups/${id}`); }
-        catch (err) { setE(err); }
+        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
+        try { await api.del(`/api/v1/expenses/${eid}`); modals.closeModal(mid); nav(`/groups/${id}`); }
+        catch (err) { modals.closeModal(mid); setE(err); }
       },
     });
   };
+  const [uploading, setUploading] = useState(false);
   const upload = async (file) => {
-    if (!file) return;
+    if (!file || uploading) return;
     const form = new FormData();
     form.append('file', file);
+    setUploading(true);
     try {
       await api.postForm(`/api/v1/expenses/${eid}/images`, form);
       notifications.show({ title: 'Receipt uploaded', color: 'teal' });
       load();
-    } catch (err) { setE(err); }
+    } catch (err) { setE(err); } finally { setUploading(false); }
   };
+  const [deletingImg, setDeletingImg] = useState(null);
   const delImg = async (iid) => {
-    try { await api.del(`/api/v1/images/${iid}`); load(); } catch (err) { setE(err); }
+    if (deletingImg) return;
+    setDeletingImg(iid);
+    try { await api.del(`/api/v1/images/${iid}`); load(); } catch (err) { setE(err); } finally { setDeletingImg(null); }
   };
 
   if (!d) {
@@ -79,6 +85,7 @@ export function ExpenseDetail() {
           <Badge color={statusColor(x.status)} variant="light">{x.status}</Badge>
         </Group>
         {x.description && <Text mb="sm">{x.description}</Text>}
+        <Text size="sm" mb="sm">Paid by <b>{displayNameOf(members, x.payer_id)}</b></Text>
         <Group gap="xs" mb="sm">
           <Badge variant="outline">Total {fmt(x.amount_cents, '')}</Badge>
           <Badge variant="outline">v{x.version}</Badge>
@@ -90,6 +97,13 @@ export function ExpenseDetail() {
             {edit ? 'Close editor' : 'Edit'}
           </Button>
           <Button variant="light" color="red" onClick={del}>Delete</Button>
+          <Button
+            variant="light"
+            color="teal"
+            onClick={() => nav(`/groups/${id}`, { state: { copyFrom: x } })}
+          >
+            Copy
+          </Button>
         </Group>
       </Card>
 
@@ -118,8 +132,8 @@ export function ExpenseDetail() {
       <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
         <Group justify="space-between" mb="sm">
           <Title order={4}>Receipts</Title>
-          <FileButton onChange={upload} accept="image/*">
-            {(props) => <Button size="xs" {...props}>Upload receipt</Button>}
+          <FileButton onChange={upload} accept="image/*" disabled={uploading}>
+            {(props) => <Button size="xs" {...props} loading={uploading}>Upload receipt</Button>}
           </FileButton>
         </Group>
         {x.images.length === 0 && <Text size="sm" c="dimmed">No receipts attached.</Text>}
@@ -127,7 +141,8 @@ export function ExpenseDetail() {
           {x.images.map((i) => (
             <Stack key={i.image_id} gap={4} align="center">
               <ImgView id={i.image_id} mime={i.mime} size={i.size_bytes} />
-              <Button size="xs" variant="subtle" color="red" onClick={() => delImg(i.image_id)}>
+              <Button size="xs" variant="subtle" color="red" mih={44}
+                loading={deletingImg === i.image_id} onClick={() => delImg(i.image_id)}>
                 Delete
               </Button>
             </Stack>

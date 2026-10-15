@@ -21,7 +21,7 @@
         "ASPNETCORE_URLS": "http://localhost:8080",
         "ASPIRE_DASHBOARD_OTLP_ENDPOINT_URL": "http://localhost:4317",
         "ASPIRE_DASHBOARD_OTLP_HTTP_ENDPOINT_URL": "http://localhost:4318",
-        "ConnectionStrings__module-platform": "Host=localhost;Port=55432;Database=module_platform;Username=module_platform;Password=module_platform"
+        "ConnectionStrings__module-platform": "Host=localhost;Port=5432;Database=splitshare;Username=module_platform;Password=module_platform"
       },
       "serverReadyAction": {
         "action": "openExternally",
@@ -47,7 +47,7 @@
       "internalConsoleOptions": "neverOpen",
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ConnectionStrings__module-platform": "Host=localhost;Port=55432;Database=module_platform;Username=module_platform;Password=module_platform"
+        "ConnectionStrings__module-platform": "Host=localhost;Port=5432;Database=splitshare;Username=module_platform;Password=module_platform"
       },
       "serverReadyAction": {
         "action": "openExternally",
@@ -62,7 +62,7 @@
       "command": "npm run dev",
       "cwd": "${workspaceFolder}/web",
       "env": {
-        "VITE_API_URL": "http://localhost:8081"
+        "VITE_API_URL": "https://rbmp9mvb-8081.use.devtunnels.ms"
       },
       "serverReadyAction": {
         "action": "openExternally",

@@ -117,7 +117,14 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
             GroupId = groupId, Title = title.Trim(), Description = description,
             AmountCents = cents, PayerId = payerId, SplitType = splitType,
             CreatedBy = actorId,
-            Splits = map.Select(kv => new ExpenseSplit { UserId = kv.Key, ShareCents = kv.Value }).ToList()
+            Splits = map.Select(kv => new ExpenseSplit
+            {
+                UserId = kv.Key,
+                ShareCents = kv.Value,
+                ExactCents = exact?.FirstOrDefault(x => x.UserId == kv.Key)?.AmountCents,
+                Percent = percent?.FirstOrDefault(x => x.UserId == kv.Key)?.Percent,
+                Shares = shares?.FirstOrDefault(x => x.UserId == kv.Key)?.Shares
+            }).ToList()
         };
         db.Expenses.Add(e);
         await db.SaveChangesAsync();
@@ -200,7 +207,19 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         e.UpdatedAt = DateTime.UtcNow;
         e.Version++;
         db.ExpenseSplits.RemoveRange(e.Splits);
-        e.Splits = map.Select(kv => new ExpenseSplit { ExpenseId = e.Id, UserId = kv.Key, ShareCents = kv.Value }).ToList();
+        var oldSplits = e.Splits.ToList(); // snapshot: RemoveRange only marks deleted, reassignment below would alias
+        e.Splits = map.Select(kv => new ExpenseSplit
+        {
+            ExpenseId = e.Id,
+            UserId = kv.Key,
+            ShareCents = kv.Value,
+            ExactCents = exact?.FirstOrDefault(x => x.UserId == kv.Key)?.AmountCents
+                ?? oldSplits.FirstOrDefault(s => s.UserId == kv.Key)?.ExactCents,
+            Percent = percent?.FirstOrDefault(x => x.UserId == kv.Key)?.Percent
+                ?? oldSplits.FirstOrDefault(s => s.UserId == kv.Key)?.Percent,
+            Shares = shares?.FirstOrDefault(x => x.UserId == kv.Key)?.Shares
+                ?? oldSplits.FirstOrDefault(s => s.UserId == kv.Key)?.Shares
+        }).ToList();
         db.ExpenseAudits.Add(new ExpenseAudit
         {
             ExpenseId = e.Id, ActorId = actorId, DiffJson = JsonSerializer.Serialize(diff)
@@ -340,7 +359,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         created_at = e.CreatedAt,
         updated_at = e.UpdatedAt,
         version = e.Version,
-        splits = e.Splits.Select(s => new { user_id = s.UserId, share_cents = s.ShareCents }),
+        splits = e.Splits.Select(s => new { user_id = s.UserId, share_cents = s.ShareCents, exact_cents = s.ExactCents, percent = s.Percent, shares = s.Shares }),
         images = e.Images.Select(i => new { image_id = i.Id, mime = i.Mime, size_bytes = i.SizeBytes })
     };
 

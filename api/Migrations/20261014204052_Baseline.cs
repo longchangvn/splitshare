@@ -6,13 +6,29 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace SplitShare.Api.Migrations
 {
     /// <inheritdoc />
-    public partial class InitialLedger : Migration
+    public partial class Baseline : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.EnsureSchema(
                 name: "splitshare");
+
+            migrationBuilder.CreateTable(
+                name: "EmailVerificationTokens",
+                schema: "splitshare",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    TokenHash = table.Column<string>(type: "text", nullable: false),
+                    ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UsedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_EmailVerificationTokens", x => x.Id);
+                });
 
             migrationBuilder.CreateTable(
                 name: "ExpenseAudits",
@@ -89,6 +105,36 @@ namespace SplitShare.Api.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "MembershipArchives",
+                schema: "splitshare",
+                columns: table => new
+                {
+                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    RemovedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_MembershipArchives", x => new { x.GroupId, x.UserId });
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PasswordResetTokens",
+                schema: "splitshare",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    TokenHash = table.Column<string>(type: "text", nullable: false),
+                    ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    UsedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PasswordResetTokens", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Payments",
                 schema: "splitshare",
                 columns: table => new
@@ -108,6 +154,40 @@ namespace SplitShare.Api.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Payments", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "PendingInvites",
+                schema: "splitshare",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Email = table.Column<string>(type: "text", nullable: false),
+                    InvitedBy = table.Column<Guid>(type: "uuid", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    ConsumedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_PendingInvites", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "RefreshTokens",
+                schema: "splitshare",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    TokenHash = table.Column<string>(type: "text", nullable: false),
+                    ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    RevokedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_RefreshTokens", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -140,7 +220,10 @@ namespace SplitShare.Api.Migrations
                     Phone = table.Column<string>(type: "text", nullable: true),
                     PasswordHash = table.Column<string>(type: "text", nullable: true),
                     GoogleSub = table.Column<string>(type: "text", nullable: true),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    EmailVerifiedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    FailedLoginAttempts = table.Column<int>(type: "integer", nullable: false),
+                    LockedUntilUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -181,7 +264,7 @@ namespace SplitShare.Api.Migrations
                     UserId = table.Column<Guid>(type: "uuid", nullable: false),
                     ShareCents = table.Column<long>(type: "bigint", nullable: false),
                     ExactCents = table.Column<long>(type: "bigint", nullable: true),
-                    Percent = table.Column<decimal>(type: "numeric", nullable: true),
+                    Percent = table.Column<decimal>(type: "numeric(5,2)", precision: 5, scale: 2, nullable: true),
                     Shares = table.Column<int>(type: "integer", nullable: true)
                 },
                 constraints: table =>
@@ -219,6 +302,13 @@ namespace SplitShare.Api.Migrations
                 });
 
             migrationBuilder.CreateIndex(
+                name: "IX_EmailVerificationTokens_TokenHash",
+                schema: "splitshare",
+                table: "EmailVerificationTokens",
+                column: "TokenHash",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ExpenseAudits_ExpenseId",
                 schema: "splitshare",
                 table: "ExpenseAudits",
@@ -244,10 +334,37 @@ namespace SplitShare.Api.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
+                name: "IX_PasswordResetTokens_TokenHash",
+                schema: "splitshare",
+                table: "PasswordResetTokens",
+                column: "TokenHash",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
                 name: "IX_Payments_GroupId",
                 schema: "splitshare",
                 table: "Payments",
                 column: "GroupId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_PendingInvites_GroupId_Email",
+                schema: "splitshare",
+                table: "PendingInvites",
+                columns: new[] { "GroupId", "Email" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_TokenHash",
+                schema: "splitshare",
+                table: "RefreshTokens",
+                column: "TokenHash",
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_RefreshTokens_UserId",
+                schema: "splitshare",
+                table: "RefreshTokens",
+                column: "UserId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_SettlementPlans_GroupId_VersionSeq",
@@ -275,6 +392,10 @@ namespace SplitShare.Api.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
+                name: "EmailVerificationTokens",
+                schema: "splitshare");
+
+            migrationBuilder.DropTable(
                 name: "ExpenseAudits",
                 schema: "splitshare");
 
@@ -295,7 +416,23 @@ namespace SplitShare.Api.Migrations
                 schema: "splitshare");
 
             migrationBuilder.DropTable(
+                name: "MembershipArchives",
+                schema: "splitshare");
+
+            migrationBuilder.DropTable(
+                name: "PasswordResetTokens",
+                schema: "splitshare");
+
+            migrationBuilder.DropTable(
                 name: "Payments",
+                schema: "splitshare");
+
+            migrationBuilder.DropTable(
+                name: "PendingInvites",
+                schema: "splitshare");
+
+            migrationBuilder.DropTable(
+                name: "RefreshTokens",
                 schema: "splitshare");
 
             migrationBuilder.DropTable(

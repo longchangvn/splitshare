@@ -59,6 +59,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         b.Entity<ExpenseSplit>(e =>
         {
             e.HasKey(x => new { x.ExpenseId, x.UserId });
+            e.Property(x => x.Percent).HasPrecision(5, 2); // explicit: no silent truncation on any provider
         });
         b.Entity<ExpenseImage>(e =>
         {

@@ -1,5 +1,7 @@
 # secrets / local env
 .env
+.env.development
+.env.local
 !.env.example
 
 # dotnet

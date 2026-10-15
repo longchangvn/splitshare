@@ -12,8 +12,8 @@ using SplitShare.Api.Data;
 namespace SplitShare.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20261013200457_AddAuth")]
-    partial class AddAuth
+    [Migration("20261014204052_Baseline")]
+    partial class Baseline
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -178,7 +178,8 @@ namespace SplitShare.Api.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<decimal?>("Percent")
-                        .HasColumnType("numeric");
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
 
                     b.Property<long>("ShareCents")
                         .HasColumnType("bigint");
@@ -271,6 +272,22 @@ namespace SplitShare.Api.Migrations
                     b.ToTable("IdempotencyKeys", "splitshare");
                 });
 
+            modelBuilder.Entity("SplitShare.Api.Models.MembershipArchive", b =>
+                {
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("RemovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("GroupId", "UserId");
+
+                    b.ToTable("MembershipArchives", "splitshare");
+                });
+
             modelBuilder.Entity("SplitShare.Api.Models.PasswordResetToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -342,6 +359,36 @@ namespace SplitShare.Api.Migrations
                     b.HasIndex("GroupId");
 
                     b.ToTable("Payments", "splitshare");
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.PendingInvite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("InvitedBy")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId", "Email")
+                        .IsUnique();
+
+                    b.ToTable("PendingInvites", "splitshare");
                 });
 
             modelBuilder.Entity("SplitShare.Api.Models.RefreshToken", b =>

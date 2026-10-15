@@ -175,7 +175,8 @@ namespace SplitShare.Api.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<decimal?>("Percent")
-                        .HasColumnType("numeric");
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
 
                     b.Property<long>("ShareCents")
                         .HasColumnType("bigint");

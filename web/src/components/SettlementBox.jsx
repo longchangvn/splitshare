@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Accordion, Alert, Button, Group, List, Select, Spoiler, Stack, Table, Text,
+  Accordion, Alert, Button, Group, List, Select, Skeleton, Spoiler, Stack, Table, Text,
 } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
@@ -21,7 +21,7 @@ export function SettlementBox({ groupId, currency, members, onPay }) {
     catch (err) { setE(err); }
   };
   const view = viewV ? hist.find((h) => h.version === viewV) : plan;
-  if (!view && !e) return <Text c="dimmed">Loading settlement…</Text>;
+  if (!view && !e) return <Skeleton height={52} radius="md" />;
 
   const ex = view?.explanation || {};
   const transfers = view?.transfers || [];
