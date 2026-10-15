@@ -35,6 +35,7 @@ internal sealed class AuthOperationTransformer : IOpenApiOperationTransformer
         {
             [new OpenApiSecuritySchemeReference("Bearer")] = [],
         });
+        operation.Responses ??= new OpenApiResponses();
         operation.Responses.TryAdd("401", new OpenApiResponse { Description = "Unauthorized — missing or expired token." });
         operation.Responses.TryAdd("403", new OpenApiResponse { Description = "Forbidden." });
         return Task.CompletedTask;

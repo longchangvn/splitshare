@@ -1,0 +1,19 @@
+# Keep the build context small: the api image only needs api/ + servicedefaults/.
+.git
+node_modules
+web/node_modules
+web/dist
+**/bin
+**/obj
+**/TestResults
+uploads
+pgdata
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vscode
+openspec
+tests
+apphost

@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-module_platform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-module_platform}
-      POSTGRES_DB: ${POSTGRES_DB:-module_platform}
+      POSTGRES_DB: ${POSTGRES_DB:-splitshare}
     ports:
       - "5433:5432" # host localhost:5433 -> container 5432
     volumes:
@@ -17,19 +17,29 @@ services:
       retries: 10
 
   api:
-    build: ./api
+    build:
+      context: .
+      dockerfile: ./api/Dockerfile
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      # In compose, host is `db:5432`. Local dev (no compose) uses localhost:5433 via appsettings.json.
-      ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB:-module_platform};Username=${POSTGRES_USER:-module_platform};Password=${POSTGRES_PASSWORD:-module_platform}
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      # DB host/port are overridable so the API can point at a host-side
+      # Postgres (e.g. env.remote) instead of the compose `db` service.
+      # Resolution order in Program.cs: Database:Postgres (or :SqlServer) >
+      # ConnectionStrings:module-platform > ConnectionStrings:Default.
+      Database__Provider: ${DB_PROVIDER:-postgres}
+      Database__Postgres: Host=${DB_HOST:-db};Port=${DB_PORT:-5432};Database=${POSTGRES_DB:-splitshare};Username=${POSTGRES_USER:-module_platform};Password=${POSTGRES_PASSWORD:-module_platform}
+      ConnectionStrings__Default: Host=${DB_HOST:-db};Port=${DB_PORT:-5432};Database=${POSTGRES_DB:-splitshare};Username=${POSTGRES_USER:-module_platform};Password=${POSTGRES_PASSWORD:-module_platform}
       Jwt__Key: ${JWT_KEY:-dev-only-insecure-key-change-in-prod-0123456789}
       Uploads__Path: /data/uploads
-      Cors__AllowedOrigins__0: http://localhost:3000
-      Cors__AllowedOrigins__1: http://localhost:5173
+      Cors__AllowedOrigins__0: ${WEB_URL:-http://localhost:3000}
+      Cors__AllowedOrigins__1: http://localhost:3000
+      Cors__AllowedOrigins__2: http://localhost:5173
     ports:
       - "8081:8080"
     volumes:
