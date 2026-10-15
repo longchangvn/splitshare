@@ -56,3 +56,10 @@ a {
   outline: 2px solid var(--mantine-color-teal-6);
   outline-offset: 2px;
 }
+
+/* Trip report printing. */
+.only-print { display: none; }
+@media print {
+  .no-print { display: none !important; }
+  .only-print { display: block !important; }
+}

@@ -14,12 +14,13 @@ public static class LedgerEndpoints
         api.MapGet("/groups/{id:guid}/ledger", async (Guid id, ClaimsPrincipal p,
             string? type, string? q, string? status,
             long? min_amount, long? max_amount, DateTime? from_date, DateTime? to_date,
-            Guid? payer_id, string? sort, int? page, int? limit,
-            Services.LedgerService ledger) =>
+            Guid? payer_id, string? category, string? sort, int? page, int? limit,
+            Services.LedgerService ledger, Services.RecurringService recurring) =>
         {
             var me = Me(p);
             if (!await ledger.CanViewAsync(id, me))
                 return ApiResults.Error("FORBIDDEN", "Not a group member.", 403);
+            await RecurringEndpoints.Materialize(id, recurring);
             var t = (type ?? "all").ToLower();
             if (t is not ("all" or "expense" or "payment"))
                 return ApiResults.Validation("type must be all|expense|payment.");
@@ -28,7 +29,7 @@ public static class LedgerEndpoints
             var filters = new Services.LedgerService.LedgerFilters(
                 t, q, status, min_amount, max_amount, from_date, to_date, payer_id,
                 sort == "created_at" ? "created_at" : "-created_at",
-                Math.Max(1, page ?? 1), Math.Clamp(limit ?? 20, 1, 100));
+                Math.Max(1, page ?? 1), Math.Clamp(limit ?? 20, 1, 100), category);
             var (items, total) = await ledger.GetLedgerAsync(id, me, filters);
             return Results.Ok(new { items, page = filters.Page, limit = filters.Limit, total });
         });

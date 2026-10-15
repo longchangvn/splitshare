@@ -18,11 +18,28 @@ export function Profile() {
   const [e, setE] = useState(null);
   const [saving, setSaving] = useState(false);
   const [pwBusy, setPwBusy] = useState(false);
+  const [handles, setHandles] = useState([]);
+  const [hLabel, setHLabel] = useState('');
+  const [hDetails, setHDetails] = useState('');
 
   useEffect(() => {
     api.get('/api/v1/me').then((d) => { setMe(d); setUser(d); setName(d.display_name); setPhone(d.phone || ''); }).catch(setE);
+    api.get('/api/v1/me/handles').then(setHandles).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const addHandle = async (ev) => {
+    ev.preventDefault();
+    try {
+      const h = await api.post('/api/v1/me/handles', { label: hLabel, details: hDetails });
+      setHandles([...handles, h]);
+      setHLabel(''); setHDetails('');
+    } catch (err) { setE(err); }
+  };
+  const delHandle = async (hid) => {
+    try { await api.del(`/api/v1/me/handles/${hid}`); setHandles(handles.filter((h) => h.handle_id !== hid)); }
+    catch (err) { setE(err); }
+  };
 
   const save = async (ev) => {
     ev.preventDefault();
@@ -83,6 +100,26 @@ export function Profile() {
             <PasswordInput label="New password" description="8+ characters with a letter and a digit" autoComplete="new-password" value={next} onChange={(x) => setNext(x.target.value)} />
             <Group><Button type="submit" loading={pwBusy}>Change password</Button></Group>
           </Stack>
+        </form>
+      </Card>
+      <Card withBorder shadow="sm" padding="md" radius="md" mb="md">
+        <Title order={4} mb="sm">Payment accounts</Title>
+        <Text size="sm" c="dimmed" mb="sm">Shown to group mates on the settle sheet so they pay to the right place.</Text>
+        <Stack gap="xs" mb="sm">
+          {handles.map((h) => (
+            <Group key={h.handle_id} justify="space-between" wrap="nowrap">
+              <Text size="sm"><b>{h.label}</b>: {h.details}</Text>
+              <Button size="xs" variant="subtle" color="red" onClick={() => delHandle(h.handle_id)}>Remove</Button>
+            </Group>
+          ))}
+          {handles.length === 0 && <Text size="sm" c="dimmed">None yet.</Text>}
+        </Stack>
+        <form onSubmit={addHandle}>
+          <Group gap="xs" align="flex-end">
+            <TextInput label="Label" placeholder="Vietcombank" required value={hLabel} onChange={(x) => setHLabel(x.target.value)} style={{ flex: 1 }} />
+            <TextInput label="Details" placeholder="Account no / QR text" required value={hDetails} onChange={(x) => setHDetails(x.target.value)} style={{ flex: 2 }} />
+            <Button type="submit">Add</Button>
+          </Group>
         </form>
       </Card>
       <Card withBorder shadow="sm" padding="md" radius="md">

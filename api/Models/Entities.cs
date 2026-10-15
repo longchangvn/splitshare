@@ -28,12 +28,19 @@ public sealed class Group
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? DeletedAt { get; set; }
     public List<GroupMember> Members { get; set; } = [];
+    // Trip-pack: budgets, modes, event fees, public sharing (all optional/additive).
+    public long? BudgetCents { get; set; }
+    public int BudgetAlertPct { get; set; } = 80;
+    public string Mode { get; set; } = "shared"; // shared|trip|event
+    public long? FlatFeeCents { get; set; } // event mode per-head fee
+    public string? ShareToken { get; set; } // public read-only page, rotated on demand
 }
 
 public sealed class GroupMember
 {
     public Guid GroupId { get; set; }
     public Guid UserId { get; set; }
-    public string Role { get; set; } = "member"; // owner|member
+    public string Role { get; set; } = "member"; // owner|treasurer|member
     public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
+    public bool DepositPaid { get; set; } // event-mode fee tracking
 }

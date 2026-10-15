@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Avatar, Badge, Button, Card, Group, Modal, SimpleGrid, Skeleton, Stack, Text,
+  Avatar, Badge, Button, Card, Group, Modal, Select, SimpleGrid, Skeleton, Stack, Text,
   TextInput, Title, Center,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
@@ -17,6 +17,7 @@ export function Dashboard() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [cur, setCur] = useState('USD');
+  const [tpl, setTpl] = useState('');
   const [creating, setCreating] = useState(false);
   const isMobile = useMediaQuery('(max-width: 36em)');
 
@@ -27,7 +28,9 @@ export function Dashboard() {
     ev.preventDefault();
     setCreating(true);
     try {
-      const g = await api.post('/api/v1/groups', { name, currency: cur });
+      const g = tpl
+        ? await api.post('/api/v1/groups/from-template', { name, currency: cur, template: tpl })
+        : await api.post('/api/v1/groups', { name, currency: cur });
       const gid = g.group_id ?? g.group?.id; // create returns nested {group:{id}}
       if (!gid) {
         setE({ message: 'Server did not return a group id.' });
@@ -35,6 +38,7 @@ export function Dashboard() {
       }
       setOpen(false);
       setName('');
+      setTpl('');
       nav(`/groups/${gid}`);
     } catch (err) { setE(err); } finally { setCreating(false); }
   };
@@ -161,6 +165,19 @@ export function Dashboard() {
             mt="sm"
             value={cur}
             onChange={(x) => setCur(x.target.value)}
+          />
+          <Select
+            label="Template (optional)"
+            description="Roommates seeds rent/wifi drafts · beach-trip sets a budget · wedding sets event fee"
+            mt="sm"
+            clearable
+            value={tpl}
+            onChange={(v) => setTpl(v || '')}
+            data={[
+              { value: 'roommates', label: 'Roommates' },
+              { value: 'beach-trip', label: 'Beach trip' },
+              { value: 'wedding', label: 'Wedding / event' },
+            ]}
           />
           <Button fullWidth mt="md" type="submit" loading={creating}>Create group</Button>
         </form>

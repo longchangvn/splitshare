@@ -129,7 +129,7 @@ public sealed class LedgerService(AppDbContext db)
 
     public sealed record LedgerFilters(string Type, string? Q, string? Status,
         long? MinAmount, long? MaxAmount, DateTime? FromDate, DateTime? ToDate,
-        Guid? PayerId, string Sort, int Page, int Limit);
+        Guid? PayerId, string Sort, int Page, int Limit, string? Category = null);
 
     public sealed record LedgerItem(string Kind, Guid Id, string Title, DateTime CreatedAt,
         long AmountCents, Guid? PayerId, string? PayerName, Guid? FromUserId, string? FromName,
@@ -219,6 +219,11 @@ public sealed class LedgerService(AppDbContext db)
             if (f.FromDate is not null) q = q.Where(e => e.CreatedAt >= f.FromDate);
             if (f.ToDate is not null) q = q.Where(e => e.CreatedAt <= f.ToDate);
             if (f.PayerId is not null) q = q.Where(e => e.PayerId == f.PayerId);
+            if (!string.IsNullOrWhiteSpace(f.Category))
+            {
+                var c = f.Category.Trim().ToLowerInvariant();
+                q = q.Where(e => e.Category == c);
+            }
             if (!string.IsNullOrWhiteSpace(f.Q))
             {
                 var s = f.Q.ToLower();

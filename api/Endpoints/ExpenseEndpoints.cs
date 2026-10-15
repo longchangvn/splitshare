@@ -58,7 +58,8 @@ public static class ExpenseEndpoints
                 type, d.ParticipantIds ?? [],
                 d.Exact?.Select(x => new ExactEntry(x.UserId, x.AmountCents)).ToList(),
                 d.Percent?.Select(x => new PercentEntry(x.UserId, x.Percent)).ToList(),
-                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList());
+                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList(),
+                Opts(d));
             if (!r.Ok) return ToResult(r);
             var body = JsonSerializer.Serialize(CreatedDto((ExpenseCreated)r.Data!));
             if (key is not null) await idem.StoreAsync(key, endpoint, 201, body);
@@ -73,7 +74,8 @@ public static class ExpenseEndpoints
             var r = await svc.PreviewAsync(Me(p), id, d.Amount, type, d.ParticipantIds ?? [],
                 d.Exact?.Select(x => new ExactEntry(x.UserId, x.AmountCents)).ToList(),
                 d.Percent?.Select(x => new PercentEntry(x.UserId, x.Percent)).ToList(),
-                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList());
+                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList(),
+                Opts(d));
             if (!r.Ok) return ToResult(r);
             var preview = (ExpensePreview)r.Data!;
             return Results.Ok(new { shares = preview.Shares.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value) });
@@ -96,7 +98,8 @@ public static class ExpenseEndpoints
                 d.Amount, d.PayerId, type, d.ParticipantIds,
                 d.Exact?.Select(x => new ExactEntry(x.UserId, x.AmountCents)).ToList(),
                 d.Percent?.Select(x => new PercentEntry(x.UserId, x.Percent)).ToList(),
-                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList());
+                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList(),
+                Opts(d));
             return !r.Ok ? ToResult(r) : Results.Ok(UpdatedDto((ExpenseUpdated)r.Data!));
         });
 
@@ -113,7 +116,8 @@ public static class ExpenseEndpoints
             var r = await svc.PreviewEditAsync(Me(p), id, d.Amount, d.PayerId, type, d.ParticipantIds,
                 d.Exact?.Select(x => new ExactEntry(x.UserId, x.AmountCents)).ToList(),
                 d.Percent?.Select(x => new PercentEntry(x.UserId, x.Percent)).ToList(),
-                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList());
+                d.Shares?.Select(x => new ShareEntry(x.UserId, x.Shares)).ToList(),
+                Opts(d));
             if (!r.Ok) return ToResult(r);
             var preview = (EditPreview)r.Data!;
             return Results.Ok(new
@@ -172,14 +176,48 @@ public static class ExpenseEndpoints
     public sealed record MoneyEntry(Guid UserId, long AmountCents);
     public sealed record PctEntry(Guid UserId, decimal Percent);
     public sealed record ShrEntry(Guid UserId, int Shares);
+    public sealed record GuestDto(string Label, long AmountCents, Guid CoveredBy);
+    public interface IRichness
+    {
+        string? Category { get; }
+        DateTime? SpentAt { get; }
+        decimal? Tax { get; }
+        decimal? Tip { get; }
+        decimal? Fee { get; }
+        string? OrigCurrency { get; }
+        decimal? OrigAmount { get; }
+        decimal? FxRate { get; }
+        List<GuestDto>? Guests { get; }
+        bool? OnlyPresent { get; }
+    }
+    private static ExpenseOptions Opts(IRichness d) => new(
+        d.Category, d.SpentAt, d.Tax, d.Tip, d.Fee, d.OrigCurrency, d.OrigAmount, d.FxRate,
+        d.Guests?.Select(g => new GuestEntry(g.Label, g.AmountCents, g.CoveredBy)).ToList(),
+        d.OnlyPresent ?? false);
     public sealed record CreateExpenseDto(string Title, string? Description, decimal Amount,
         Guid PayerId, string SplitType, List<Guid>? ParticipantIds,
-        List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares);
+        List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares,
+        string? Category = null, DateTime? SpentAt = null,
+        decimal? Tax = null, decimal? Tip = null, decimal? Fee = null,
+        string? OrigCurrency = null, decimal? OrigAmount = null, decimal? FxRate = null,
+        List<GuestDto>? Guests = null, bool? OnlyPresent = null) : IRichness;
     public sealed record PreviewDto(decimal Amount, string SplitType, List<Guid>? ParticipantIds,
-        List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares);
+        List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares,
+        string? Category = null, DateTime? SpentAt = null,
+        decimal? Tax = null, decimal? Tip = null, decimal? Fee = null,
+        string? OrigCurrency = null, decimal? OrigAmount = null, decimal? FxRate = null,
+        List<GuestDto>? Guests = null, bool? OnlyPresent = null) : IRichness;
     public sealed record UpdateExpenseDto(int ExpectedVersion, string? Title, string? Description,
         decimal? Amount, Guid? PayerId, string? SplitType, List<Guid>? ParticipantIds,
-        List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares);
+        List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares,
+        string? Category = null, DateTime? SpentAt = null,
+        decimal? Tax = null, decimal? Tip = null, decimal? Fee = null,
+        string? OrigCurrency = null, decimal? OrigAmount = null, decimal? FxRate = null,
+        List<GuestDto>? Guests = null, bool? OnlyPresent = null) : IRichness;
     public sealed record PreviewEditDto(decimal? Amount, Guid? PayerId, string? SplitType,
-        List<Guid>? ParticipantIds, List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares);
+        List<Guid>? ParticipantIds, List<MoneyEntry>? Exact, List<PctEntry>? Percent, List<ShrEntry>? Shares,
+        string? Category = null, DateTime? SpentAt = null,
+        decimal? Tax = null, decimal? Tip = null, decimal? Fee = null,
+        string? OrigCurrency = null, decimal? OrigAmount = null, decimal? FxRate = null,
+        List<GuestDto>? Guests = null, bool? OnlyPresent = null) : IRichness;
 }

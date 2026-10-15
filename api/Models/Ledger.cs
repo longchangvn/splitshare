@@ -22,7 +22,7 @@ public sealed class Expense
     public Guid GroupId { get; set; }
     public string Title { get; set; } = "";
     public string? Description { get; set; }
-    public long AmountCents { get; set; }
+    public long AmountCents { get; set; } // split total incl. extras + guests
     public Guid PayerId { get; set; }
     public SplitType SplitType { get; set; } = SplitType.Equal;
     public ExpenseStatus Status { get; set; } = ExpenseStatus.Open;
@@ -33,6 +33,16 @@ public sealed class Expense
     public DateTime? DeletedAt { get; set; } // soft delete
     public List<ExpenseSplit> Splits { get; set; } = [];
     public List<ExpenseImage> Images { get; set; } = [];
+    // Trip-pack richness (all optional, additive).
+    public string Category { get; set; } = "other"; // food|transport|stay|activity|shopping|health|bills|other
+    public DateTime SpentAt { get; set; } = DateTime.UtcNow;
+    public long TaxCents { get; set; }
+    public long TipCents { get; set; }
+    public long FeeCents { get; set; }
+    public string? OrigCurrency { get; set; } // manual FX triple
+    public long? OrigAmountCents { get; set; }
+    public decimal? FxRate { get; set; }
+    public List<ExpenseGuest> Guests { get; set; } = [];
 }
 
 public sealed class ExpenseSplit
@@ -69,6 +79,7 @@ public sealed class Payment
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ReversedAt { get; set; }
     public ExpenseStatus Status { get; set; } = ExpenseStatus.Open; // locked on group settle
+    public string? ProofRef { get; set; } // txn id / reference supplied by payer
 }
 
 public sealed class SettlementPlan

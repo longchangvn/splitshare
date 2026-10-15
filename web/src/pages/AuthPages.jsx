@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Anchor, Box, Button, Center, Container, Divider, Grid, List, Paper,
   PasswordInput, Stack, Text, TextInput, Title,
@@ -70,6 +70,7 @@ export function Login() {
         <GoogleBtn />
         <Text ta="center" size="sm">
           No account? <Anchor component={Link} to="/register">Register</Anchor>
+          {' · '}<Anchor component={Link} to="/forgot">Forgot password?</Anchor>
         </Text>
       </Stack>
     </AuthLayout>
@@ -152,5 +153,89 @@ function GoogleBtn() {
       <Button fullWidth variant="light" onClick={start}>Continue with Google</Button>
       <Err e={e} />
     </>
+  );
+}
+
+export function Forgot() {
+  const [email, setEmail] = useState('');
+  const [e, setE] = useState(null);
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const go = async (ev) => {
+    ev.preventDefault();
+    setBusy(true);
+    try { await api.post('/api/v1/auth/forgot', { email }); setDone(true); setE(null); }
+    catch (err) { setE(err); } finally { setBusy(false); }
+  };
+  return (
+    <AuthLayout>
+      <Stack gap="sm">
+        <Title order={3}>Reset password</Title>
+        {done
+          ? <Text size="sm">If that email exists, a reset link is on its way (15 min, single use).</Text>
+          : (
+            <form onSubmit={go}>
+              <Stack gap="sm">
+                <TextInput label="Email" required value={email} onChange={(x) => setEmail(x.target.value)} />
+                <Button fullWidth type="submit" loading={busy}>Send reset link</Button>
+              </Stack>
+            </form>
+          )}
+        <Err e={e} />
+        <Text ta="center" size="sm"><Anchor component={Link} to="/login">Back to login</Anchor></Text>
+      </Stack>
+    </AuthLayout>
+  );
+}
+
+export function Reset() {
+  const { setUser } = useAuth();
+  const { token } = useParams();
+  const nav = useNavigate();
+  const [pw, setPw] = useState('');
+  const [e, setE] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const go = async (ev) => {
+    ev.preventDefault();
+    setBusy(true);
+    try {
+      const d = await api.post('/api/v1/auth/reset', { token, new_password: pw });
+      setTokens(d.access_token, d.refresh_token);
+      setUser(d.user);
+      nav('/');
+    } catch (err) { setE(err); } finally { setBusy(false); }
+  };
+  return (
+    <AuthLayout>
+      <Stack gap="sm">
+        <Title order={3}>New password</Title>
+        <form onSubmit={go}>
+          <Stack gap="sm">
+            <PasswordInput label="New password" required description="8+ characters with a letter and a digit" value={pw} onChange={(x) => setPw(x.target.value)} />
+            <Button fullWidth type="submit" loading={busy}>Set password</Button>
+          </Stack>
+        </form>
+        <Err e={e} />
+      </Stack>
+    </AuthLayout>
+  );
+}
+
+export function Verify() {
+  const { token } = useParams();
+  const [msg, setMsg] = useState('Verifying…');
+  useEffect(() => {
+    api.post('/api/v1/auth/verify-email', { token })
+      .then(() => setMsg('Email verified — you can now join groups.'))
+      .catch((err) => setMsg(`Verification failed: ${err.message}`));
+  }, [token]);
+  return (
+    <AuthLayout>
+      <Stack gap="sm">
+        <Title order={3}>Email verification</Title>
+        <Text size="sm">{msg}</Text>
+        <Text ta="center" size="sm"><Anchor component={Link} to="/">Home</Anchor></Text>
+      </Stack>
+    </AuthLayout>
   );
 }

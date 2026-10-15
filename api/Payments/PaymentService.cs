@@ -33,7 +33,7 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
             .SumAsync(s => (long?)s.ShareCents) ?? 0;
 
     public async Task<PaymentOp> RecordAsync(Guid actorId, Guid groupId, Guid from, Guid to,
-        decimal amount, string method, string? note)
+        decimal amount, string method, string? note, string? proofRef = null)
     {
         var g = await db.Groups.FindAsync(groupId);
         if (g is null || g.DeletedAt is not null) return new(false, "NOT_FOUND", "Group not found.");
@@ -42,13 +42,14 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
         if (from == to) return new(false, "VALIDATION", "Payer and payee must differ.");
         if (!Methods.Contains(method)) return new(false, "VALIDATION", "method must be cash|transfer|other.");
         if (note is not null && note.Length > 280) return new(false, "VALIDATION", "Note max 280 chars.");
+        if (proofRef is not null && proofRef.Length > 140) return new(false, "VALIDATION", "proof_ref max 140 chars.");
         if (amount <= 0) return new(false, "VALIDATION", "Amount must be > 0.");
         if (amount * 100m != Math.Floor(amount * 100m))
             return new(false, "VALIDATION", "Amount supports max 2 decimals.");
         if (!await IsCurrentOrFormerAsync(groupId, from) || !await IsCurrentOrFormerAsync(groupId, to))
             return new(false, "VALIDATION", "Both parties must be current or former members.");
-        if (actorId != from && actorId != to && role != "owner")
-            return new(false, "FORBIDDEN", "Only the debtor, creditor, or an owner can record.");
+        if (actorId != from && actorId != to && role != "owner" && role != "treasurer")
+            return new(false, "FORBIDDEN", "Only the debtor, creditor, owner or treasurer can record.");
 
         // Serializable re-check: concurrent overpayments serialize; the loser
         // retries the read and is rejected as OVERPAYMENT below.
@@ -71,7 +72,7 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
             var p = new Payment
             {
                 GroupId = groupId, FromUserId = from, ToUserId = to, AmountCents = cents,
-                Method = method.ToLowerInvariant(), Note = note, CreatedBy = actorId
+                Method = method.ToLowerInvariant(), Note = note, ProofRef = proofRef, CreatedBy = actorId
             };
             db.Payments.Add(p);
             await db.SaveChangesAsync();
@@ -114,8 +115,8 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
         if (p is null || p.ReversedAt is not null) return new(false, "NOT_FOUND", "Payment not found.");
         var g = await db.Groups.FindAsync(p.GroupId);
         if (g is null || g.DeletedAt is not null) return new(false, "NOT_FOUND", "Group not found.");
-        if ((await db.GroupMembers.FindAsync(p.GroupId, actorId))?.Role != "owner")
-            return new(false, "FORBIDDEN", "Owner only.");
+        if ((await db.GroupMembers.FindAsync(p.GroupId, actorId))?.Role is not ("owner" or "treasurer"))
+            return new(false, "FORBIDDEN", "Owner or treasurer only.");
         if (DateTime.UtcNow - p.CreatedAt > TimeSpan.FromHours(24))
             return new(false, "VALIDATION", "Reversal window (24h) expired; record a counter-payment.");
         if (await db.Expenses.AnyAsync(e => e.GroupId == p.GroupId && e.Status == ExpenseStatus.Locked)

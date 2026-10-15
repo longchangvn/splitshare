@@ -46,6 +46,8 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<GroupService>();
 builder.Services.AddScoped<ExpenseService>();
 builder.Services.AddScoped<PaymentService>();
+builder.Services.AddScoped<RecurringService>();
+builder.Services.AddSingleton<IOcrService, DisabledOcrService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
 builder.Services.AddSingleton<IEmailSender, StubEmailSender>();
@@ -147,6 +149,7 @@ app.MapGet("/db-ping", async (AppDbContext db) =>
 var v1 = app.MapGroup("/api/v1");
 v1.MapGet("/health", () => Results.Ok(new { status = "ok", service = "splitshare-api", time = DateTime.UtcNow }));
 AuthEndpoints.Map(v1); // public: auth/* (rate-limited)
+TripPackEndpoints.MapPublic(v1); // public: capabilities + shared links (anonymous)
 
 var api = v1.MapGroup("/").RequireAuthorization(); // everything else needs JWT (task 3.4)
 SettlementEndpoints.Map(api);
@@ -155,6 +158,8 @@ GroupEndpoints.Map(api);
 ExpenseEndpoints.Map(api);
 PaymentEndpoints.Map(api);
 LedgerEndpoints.Map(api);
+RecurringEndpoints.Map(api);
+TripPackEndpoints.Map(api);
 
 // Migrations own the schema (task 1.2); startup stays up when DB is down.
 using (var scope = app.Services.CreateScope())

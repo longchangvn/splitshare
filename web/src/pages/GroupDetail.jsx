@@ -26,6 +26,23 @@ export function GroupDetail() {
   const [type, setType] = useState('all');
   const [q, setQ] = useState('');
   const [payer, setPayer] = useState('');
+  const [fStatus, setFStatus] = useState('');
+  const [fCat, setFCat] = useState('');
+  const [fMin, setFMin] = useState('');
+  const [fMax, setFMax] = useState('');
+  const [fFrom, setFFrom] = useState('');
+  const [fTo, setFTo] = useState('');
+  const [fSort, setFSort] = useState('newest');
+  const [activity, setActivity] = useState([]);
+  const [rules, setRules] = useState([]);
+  const [setOpen, setSetOpen] = useState(false);
+  const [renName, setRenName] = useState('');
+  const [sBudget, setSBudget] = useState('');
+  const [sAlert, setSAlert] = useState('80');
+  const [sMode, setSMode] = useState('shared');
+  const [sFee, setSFee] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [shareLink, setShareLink] = useState('');
   const [showExp, setShowExp] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payPreset, setPayPreset] = useState(null);
@@ -65,8 +82,23 @@ export function GroupDetail() {
     try {
       const params = new URLSearchParams({ type, q, limit: '100' });
       if (payer) params.set('payer_id', payer);
+      if (fStatus) params.set('status', fStatus);
+      if (fCat) params.set('category', fCat);
+      if (fMin !== '') params.set('min_amount', String(Math.round(Number(fMin) * 100)));
+      if (fMax !== '') params.set('max_amount', String(Math.round(Number(fMax) * 100)));
+      if (fFrom) params.set('from_date', new Date(`${fFrom}T00:00:00Z`).toISOString());
+      if (fTo) params.set('to_date', new Date(`${fTo}T23:59:59Z`).toISOString());
+      if (fSort === 'oldest') params.set('sort', 'created_at');
       setLedger(await api.get(`/api/v1/groups/${id}/ledger?${params.toString()}`));
     } catch (err) { setE(err); } finally { setLedgerLoading(false); }
+  };
+  const loadActivity = async () => {
+    try { setActivity(await api.get(`/api/v1/groups/${id}/activity?limit=50`)); }
+    catch (err) { setE(err); }
+  };
+  const loadRules = async () => {
+    try { setRules(await api.get(`/api/v1/groups/${id}/recurring`)); }
+    catch (err) { setE(err); }
   };
   const loadSummary = async () => {
     if (!validId) return;
@@ -143,6 +175,87 @@ export function GroupDetail() {
   };
   const editExpense = (item) => nav(`/groups/${id}/expenses/${item.id}`, { state: { openEdit: true } });
 
+  const nudge = async (uid, name) => {
+    try {
+      await api.post(`/api/v1/groups/${id}/nudges`, { user_ids: [uid] });
+      notifications.show({ title: `Nudged ${name}`, color: 'teal' });
+      loadActivity();
+    } catch (err) { setE(err); }
+  };
+  const reversePay = async (pid) => {
+    try {
+      await api.post(`/api/v1/payments/${pid}/reverse`, {});
+      notifications.show({ title: 'Payment reversed', color: 'teal' });
+      load(); loadLedger(); loadSummary();
+    } catch (err) { setE(err); }
+  };
+  const setRole = async (uid, role) => {
+    try {
+      await api.patch(`/api/v1/groups/${id}/members/${uid}`, { role });
+      notifications.show({ title: `Role → ${role}`, color: 'teal' });
+      load();
+    } catch (err) { setE(err); }
+  };
+  const setDeposit = async (uid, paid) => {
+    try {
+      await api.patch(`/api/v1/groups/${id}/members/${uid}/deposit`, { paid });
+      load();
+    } catch (err) { setE(err); }
+  };
+  const billFlatFee = async () => {
+    try {
+      const first = members[0]?.user_id;
+      if (!first) return;
+      await api.post(`/api/v1/groups/${id}/flat-fee`, { payer_id: first });
+      notifications.show({ title: 'Flat fee billed', color: 'teal' });
+      load(); loadLedger(); loadSummary();
+    } catch (err) { setE(err); }
+  };
+  const exportCsv = async () => {
+    try {
+      const r = await fetch(`/api/v1/groups/${id}/export.csv`,
+        { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
+      if (!r.ok) throw new Error(`export ${r.status}`);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${detail?.name || 'group'}-export.csv`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) { setE(err); }
+  };
+  const makeShareLink = async () => {
+    try {
+      const r = await api.post(`/api/v1/groups/${id}/share-link`, {});
+      setShareLink(r.invite_link);
+    } catch (err) { setE(err); }
+  };
+  const openSettings = () => {
+    setRenName(detail?.name || '');
+    setSBudget(detail?.budget ? (detail.budget.budget_cents / 100).toFixed(2) : '');
+    setSAlert(String(detail?.budget?.alert_pct || 80));
+    setSMode(detail?.mode || 'shared');
+    setSFee(detail?.flat_fee_cents ? (detail.flat_fee_cents / 100).toFixed(2) : '');
+    setSetOpen(true);
+  };
+  const saveSettings = async (ev) => {
+    ev.preventDefault();
+    setSaving(true);
+    try {
+      if (renName.trim() !== detail?.name) await api.patch(`/api/v1/groups/${id}`, { name: renName.trim() });
+      const body = {};
+      const initBudget = detail?.budget ? (detail.budget.budget_cents / 100).toFixed(2) : '';
+      if (sBudget !== initBudget) body.budget = sBudget === '' ? 0 : Number(sBudget);
+      if (sAlert !== String(detail?.budget?.alert_pct || 80)) body.budget_alert_pct = Number(sAlert) || 80;
+      if (sMode !== (detail?.mode || 'shared')) body.mode = sMode;
+      const initFee = detail?.flat_fee_cents ? (detail.flat_fee_cents / 100).toFixed(2) : '';
+      if (sFee !== initFee) body.flat_fee = sFee === '' ? 0 : Number(sFee);
+      if (Object.keys(body).length > 0) await api.patch(`/api/v1/groups/${id}/settings`, body);
+      setSetOpen(false);
+      load();
+      notifications.show({ title: 'Group updated', color: 'teal' });
+    } catch (err) { setE(err); } finally { setSaving(false); }
+  };
+
   // Ledger totals over the loaded page.
   const totals = useMemo(() => {
     const items = ledger?.items || [];
@@ -193,8 +306,52 @@ export function GroupDetail() {
         <Title order={2}>{detail.name}</Title>
         <Badge variant="light">{detail.currency}</Badge>
         {detail.my_role && <Badge variant="outline">{detail.my_role}</Badge>}
+        {detail.mode && detail.mode !== 'shared' && <Badge variant="outline">{detail.mode}</Badge>}
       </Group>
       {me && <Net v={me.net_cents} c={detail.currency} />}
+      {detail.budget && (
+        <Card withBorder padding="sm" radius="md" mt="sm">
+          <Group justify="space-between">
+            <Text size="sm" fw={600}>
+              Budget {fmt(detail.budget.spent_cents, detail.currency)} / {fmt(detail.budget.budget_cents, detail.currency)}
+              {' '}({detail.budget.pct}%)
+            </Text>
+            {detail.budget.over
+              ? <Badge color="red">over budget</Badge>
+              : detail.budget.alert ? <Badge color="orange">alert threshold</Badge> : <Badge color="teal">on track</Badge>}
+          </Group>
+        </Card>
+      )}
+      <Group gap="xs" mt="sm">
+        <Button size="xs" variant="default" onClick={() => nav(`/groups/${id}/statement`)}>Statement</Button>
+        <Button size="xs" variant="default" onClick={() => nav(`/groups/${id}/report`)}>Report</Button>
+        <Button size="xs" variant="default" onClick={exportCsv}>Export CSV</Button>
+        {detail.my_role === 'owner' && (
+          <>
+            <Button size="xs" variant="default" onClick={openSettings}>Settings</Button>
+            <Button size="xs" variant="default" onClick={makeShareLink}>Share link</Button>
+          </>
+        )}
+        {detail.mode === 'event' && detail.flat_fee_cents > 0
+          && (detail.my_role === 'owner' || detail.my_role === 'treasurer') && (
+          <Button size="xs" variant="light" onClick={billFlatFee}>
+            Bill flat fee ({fmt(detail.flat_fee_cents, detail.currency)})
+          </Button>
+        )}
+      </Group>
+      {shareLink && (
+        <Card withBorder padding="sm" radius="md" mt="sm">
+          <Text size="sm" c="dimmed">Public read-only page (names + totals only):</Text>
+          <TextInput readOnly value={shareLink} mt="xs" />
+          <CopyButton value={shareLink}>
+            {({ copied, copy }) => (
+              <Button size="xs" mt="xs" color={copied ? 'teal' : 'blue'} onClick={copy}>
+                {copied ? 'Copied' : 'Copy link'}
+              </Button>
+            )}
+          </CopyButton>
+        </Card>
+      )}
       <Err e={e} />
 
       <Stack gap="md" mt="md">
@@ -224,13 +381,18 @@ export function GroupDetail() {
         )}
 
         <Card withBorder shadow="sm" padding="md" radius="md">
-          <Tabs defaultValue="ledger">
+          <Tabs defaultValue="ledger" onChange={(v) => {
+            if (v === 'activity' && activity.length === 0) loadActivity();
+            if (v === 'recurring' && rules.length === 0) loadRules();
+          }}>
             <Tabs.List mb="sm">
               <Tabs.Tab value="ledger">Ledger</Tabs.Tab>
               <Tabs.Tab value="balances">Balances</Tabs.Tab>
               <Tabs.Tab value="paid">Total paid</Tabs.Tab>
               <Tabs.Tab value="share">Total share</Tabs.Tab>
               <Tabs.Tab value="payments">Payments</Tabs.Tab>
+              <Tabs.Tab value="activity">Activity</Tabs.Tab>
+              <Tabs.Tab value="recurring">Recurring</Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="ledger">
@@ -270,6 +432,16 @@ export function GroupDetail() {
                 style={{ flex: 1 }}
               />
               <Button size="xs" variant="default" onClick={loadLedger} loading={ledgerLoading}>Go</Button>
+            </Group>
+            <Group gap="xs" mb="sm">
+              <Select size="xs" placeholder="Status" clearable value={fStatus} onChange={(v) => setFStatus(v || '')} data={['OPEN', 'LOCKED']} style={{ width: 110 }} />
+              <Select size="xs" placeholder="Category" clearable value={fCat} onChange={(v) => setFCat(v || '')}
+                data={['food', 'transport', 'stay', 'activity', 'shopping', 'health', 'bills', 'other']} style={{ width: 130 }} />
+              <TextInput size="xs" placeholder="Min $" inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} style={{ width: 80 }} />
+              <TextInput size="xs" placeholder="Max $" inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} style={{ width: 80 }} />
+              <TextInput size="xs" type="date" value={fFrom} onChange={(x) => setFFrom(x.target.value)} style={{ width: 135 }} />
+              <TextInput size="xs" type="date" value={fTo} onChange={(x) => setFTo(x.target.value)} style={{ width: 135 }} />
+              <Select size="xs" value={fSort} onChange={setFSort} data={[{ value: 'newest', label: 'Newest' }, { value: 'oldest', label: 'Oldest' }]} style={{ width: 100 }} />
             </Group>
           </form>
           <ScrollArea>
@@ -344,7 +516,10 @@ export function GroupDetail() {
                     <Group gap="sm" wrap="nowrap">
                       <Avatar color="red" radius="xl" size="sm">{initialsOf(displayNameOf(members, from))}</Avatar>
                       <div style={{ flex: 1 }}>
-                        <Text size="sm" fw={600}>{displayNameOf(members, from)} owes</Text>
+                        <Group gap="xs">
+                          <Text size="sm" fw={600}>{displayNameOf(members, from)} owes</Text>
+                          <Button size="xs" variant="subtle" onClick={() => nudge(from, displayNameOf(members, from))}>Nudge</Button>
+                        </Group>
                         {list.map((t, i) => (
                           <Group key={i} gap="xs" mt={2}>
                             <Text size="sm">
@@ -359,7 +534,10 @@ export function GroupDetail() {
                 ))}
                 {byDebtor.length === 0 && debtors.map((m) => (
                   <Card key={m.user_id} withBorder radius="md" padding="sm">
-                    <Text size="sm"><b>{m.display_name}</b> owes <b>{fmt(m.owe_cents, detail.currency)}</b></Text>
+                    <Group gap="xs">
+                      <Text size="sm"><b>{m.display_name}</b> owes <b>{fmt(m.owe_cents, detail.currency)}</b></Text>
+                      <Button size="xs" variant="subtle" onClick={() => nudge(m.user_id, m.display_name)}>Nudge</Button>
+                    </Group>
                   </Card>
                 ))}
               </Stack>
@@ -432,9 +610,55 @@ export function GroupDetail() {
                           {new Date(p.created_at).toLocaleString()}{p.reversed ? ' · reversed' : ''} · {p.status}
                         </Text>
                       </Text>
+                      {!p.reversed && p.status === 'OPEN' && (
+                        <Button size="xs" variant="subtle" onClick={() => reversePay(p.id)}>Reverse</Button>
+                      )}
                     </Group>
                   </Card>
                 ))}
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="activity">
+              <Group justify="space-between" mb="sm">
+                <Title order={4}>Activity</Title>
+                <Button size="xs" variant="default" onClick={loadActivity}>Refresh</Button>
+              </Group>
+              {activity.length === 0 && <Text size="sm" c="dimmed">Nothing yet — load to catch up.</Text>}
+              <Stack gap="xs">
+                {activity.map((a, i) => (
+                  <Group key={i} gap="xs" wrap="nowrap">
+                    <Badge size="xs" variant="light">{a.kind}</Badge>
+                    <Text size="sm">{a.text} <Text span size="xs" c="dimmed">{new Date(a.at).toLocaleString()}</Text></Text>
+                  </Group>
+                ))}
+              </Stack>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="recurring">
+              <Group justify="space-between" mb="sm">
+                <Title order={4}>Recurring bills</Title>
+                <Button size="xs" variant="default" onClick={loadRules}>Refresh</Button>
+              </Group>
+              <RecurringForm groupId={id} members={members} onDone={loadRules} />
+              <Stack gap="xs" mt="sm">
+                {rules.map((r) => (
+                  <Card key={r.rule_id} withBorder radius="md" padding="sm">
+                    <Group justify="space-between" wrap="nowrap">
+                      <div>
+                        <Text size="sm" fw={600}>{r.title} <Text span c="dimmed">· {r.frequency} · next {new Date(r.next_run_at).toLocaleDateString()}</Text></Text>
+                        <Text size="xs" c="dimmed">{fmt(r.amount_cents, detail.currency)} · {r.active ? 'active' : 'paused'}</Text>
+                      </div>
+                      <Group gap="xs">
+                        <Button size="xs" variant="subtle" onClick={async () => { await api.patch(`/api/v1/groups/${id}/recurring/${r.rule_id}`, { active: !r.active }); loadRules(); }}>
+                          {r.active ? 'Pause' : 'Resume'}
+                        </Button>
+                        <Button size="xs" variant="subtle" color="red" onClick={async () => { await api.del(`/api/v1/groups/${id}/recurring/${r.rule_id}`); loadRules(); }}>Delete</Button>
+                      </Group>
+                    </Group>
+                  </Card>
+                ))}
+                {rules.length === 0 && <Text size="sm" c="dimmed">No rules — add rent, wifi, subscriptions.</Text>}
               </Stack>
             </Tabs.Panel>
           </Tabs>
@@ -450,15 +674,34 @@ export function GroupDetail() {
                     <Group gap="sm" wrap="nowrap">
                       <Avatar color="teal" radius="xl" size="sm">{initialsOf(m.display_name)}</Avatar>
                       <div>
-                        <Text size="sm" fw={500}>{m.display_name}</Text>
+                        <Text size="sm" fw={500}>
+                          {m.display_name}
+                          {detail.mode === 'event' && (
+                            <Text span size="xs" c={m.deposit_paid ? 'teal' : 'dimmed'}>
+                              {' '}· {m.deposit_paid ? 'deposit ✓' : 'deposit due'}
+                            </Text>
+                          )}
+                        </Text>
                         <Text size="xs" c="dimmed">@{m.username} · {m.role}</Text>
                       </div>
                     </Group>
-                    {detail.my_role === 'owner' && (
-                      <Button size="xs" variant="subtle" color="red" mih={44} onClick={() => remove(m.user_id, m.display_name)}>
-                        Remove
-                      </Button>
-                    )}
+                    <Group gap={2} wrap="nowrap">
+                      {detail.mode === 'event' && (
+                        <Button size="xs" variant="subtle" title="Toggle deposit" onClick={() => setDeposit(m.user_id, !m.deposit_paid)}>
+                          {m.deposit_paid ? 'Unmark' : 'Paid'}
+                        </Button>
+                      )}
+                      {detail.my_role === 'owner' && m.role !== 'owner' && (
+                        <Button size="xs" variant="subtle" title="Toggle treasurer" onClick={() => setRole(m.user_id, m.role === 'treasurer' ? 'member' : 'treasurer')}>
+                          {m.role === 'treasurer' ? 'Untreasurer' : 'Treasurer'}
+                        </Button>
+                      )}
+                      {detail.my_role === 'owner' && (
+                        <Button size="xs" variant="subtle" color="red" mih={44} onClick={() => remove(m.user_id, m.display_name)}>
+                          Remove
+                        </Button>
+                      )}
+                    </Group>
                   </Group>
                 ))}
               </Stack>
@@ -514,6 +757,53 @@ export function GroupDetail() {
           )}
         </CopyButton>
       </Modal>
+
+      <Modal opened={setOpen} onClose={() => setSetOpen(false)} title="Group settings" centered fullScreen={isMobile}>
+        <form onSubmit={saveSettings}>
+          <Stack gap="sm">
+            <TextInput label="Group name" required value={renName} onChange={(x) => setRenName(x.target.value)} />
+            <TextInput label="Budget (0 clears)" inputMode="decimal" value={sBudget} onChange={(x) => setSBudget(x.target.value)} />
+            <TextInput label="Alert at %" inputMode="numeric" value={sAlert} onChange={(x) => setSAlert(x.target.value)} />
+            <Select label="Mode" value={sMode} onChange={setSMode} data={['shared', 'trip', 'event']} />
+            <TextInput label="Flat fee per head, event mode (0 clears)" inputMode="decimal" value={sFee} onChange={(x) => setSFee(x.target.value)} />
+            <Button type="submit" loading={saving}>Save</Button>
+            <Err e={e} />
+          </Stack>
+        </form>
+      </Modal>
     </Shell>
+  );
+}
+
+function RecurringForm({ groupId, members, onDone }) {
+  const [title, setTitle] = useState('');
+  const [amount, setAmount] = useState('');
+  const [payer, setPayer] = useState(members[0]?.user_id || '');
+  const [freq, setFreq] = useState('monthly');
+  const [e, setE] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const go = async (ev) => {
+    ev.preventDefault();
+    setBusy(true);
+    try {
+      await api.post(`/api/v1/groups/${groupId}/recurring`, {
+        title, amount: Number(amount), split_type: 'EQUAL', payer_id: payer,
+        participant_ids: members.map((m) => m.user_id), frequency: freq,
+      });
+      setTitle(''); setAmount('');
+      onDone();
+    } catch (err) { setE(err); } finally { setBusy(false); }
+  };
+  return (
+    <form onSubmit={go}>
+      <Group gap="xs" align="flex-end">
+        <TextInput label="Title" required placeholder="Rent" value={title} onChange={(x) => setTitle(x.target.value)} style={{ flex: 2 }} />
+        <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} style={{ flex: 1 }} />
+        <Select label="Payer" value={payer} onChange={setPayer} data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} style={{ flex: 2 }} />
+        <Select label="Every" value={freq} onChange={setFreq} data={['weekly', 'monthly']} style={{ width: 110 }} />
+        <Button type="submit" loading={busy}>Add</Button>
+      </Group>
+      <Err e={e} />
+    </form>
   );
 }

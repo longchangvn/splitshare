@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Anchor, Badge, Button, Card, Code, FileButton, Group, Image, List, Stack,
-  Text, Title,
+  Text, TextInput, Title,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
@@ -91,7 +91,26 @@ export function ExpenseDetail() {
           <Badge variant="outline">Total {fmt(x.amount_cents, '')}</Badge>
           <Badge variant="outline">v{x.version}</Badge>
           <Badge variant="outline">settlement v{d.settlement_version}</Badge>
+          {x.category && <Badge variant="light">{x.category}</Badge>}
+          {x.spent_at && <Badge variant="light">{String(x.spent_at).slice(0, 10)}</Badge>}
         </Group>
+        {(x.tax_cents > 0 || x.tip_cents > 0 || x.fee_cents > 0) && (
+          <Text size="sm" mb="sm" c="dimmed">
+            incl. {x.tax_cents > 0 && <>tax {fmt(x.tax_cents, '')} </>}
+            {x.tip_cents > 0 && <>tip {fmt(x.tip_cents, '')} </>}
+            {x.fee_cents > 0 && <>fee {fmt(x.fee_cents, '')}</>}
+          </Text>
+        )}
+        {x.orig_currency && (
+          <Text size="sm" mb="sm" c="dimmed">
+            Paid {(x.orig_amount_cents / 100).toFixed(2)} {x.orig_currency} @ {x.fx_rate}
+          </Text>
+        )}
+        {(x.guests || []).length > 0 && (
+          <Text size="sm" mb="sm">
+            Guests: {(x.guests || []).map((g) => `${g.label} (${fmt(g.share_cents, '')} via ${displayNameOf(members, g.covered_by)})`).join(' · ')}
+          </Text>
+        )}
         <Err e={e} />
         <Group gap="sm">
           <Button variant="light" onClick={() => setEdit(!edit)}>
@@ -163,7 +182,52 @@ export function ExpenseDetail() {
           ))}
         </List>
       </Card>
+
+      <Comments eid={eid} members={members} />
     </Shell>
+  );
+}
+
+function Comments({ eid, members }) {
+  const [items, setItems] = useState([]);
+  const [body, setBody] = useState('');
+  const [e, setE] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get(`/api/v1/expenses/${eid}/comments`).then(setItems).catch(setE);
+  useEffect(() => { load(); }, [eid]);
+  const send = async (ev) => {
+    ev.preventDefault();
+    if (busy || !body.trim()) return;
+    setBusy(true);
+    try { await api.post(`/api/v1/expenses/${eid}/comments`, { body: body.trim() }); setBody(''); load(); }
+    catch (err) { setE(err); } finally { setBusy(false); }
+  };
+  const del = async (cid) => {
+    try { await api.del(`/api/v1/comments/${cid}`); load(); } catch (err) { setE(err); }
+  };
+  return (
+    <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+      <Title order={4} mb="sm">Comments ({items.length})</Title>
+      <Err e={e} />
+      <Stack gap="xs" mb="sm">
+        {items.map((c) => (
+          <Group key={c.comment_id} justify="space-between" wrap="nowrap" align="flex-start">
+            <div>
+              <Text size="sm"><b>{displayNameOf(members, c.author_id)}</b> <Text span size="xs" c="dimmed">{new Date(c.created_at).toLocaleString()}</Text></Text>
+              <Text size="sm">{c.body}</Text>
+            </div>
+            <Button size="xs" variant="subtle" color="red" onClick={() => del(c.comment_id)}>Delete</Button>
+          </Group>
+        ))}
+        {items.length === 0 && <Text size="sm" c="dimmed">No comments yet.</Text>}
+      </Stack>
+      <form onSubmit={send}>
+        <Group gap="xs" align="flex-end">
+          <TextInput placeholder="Ask about this bill…" value={body} onChange={(x) => setBody(x.target.value)} style={{ flex: 1 }} />
+          <Button type="submit" size="sm" loading={busy}>Send</Button>
+        </Group>
+      </form>
+    </Card>
   );
 }
 

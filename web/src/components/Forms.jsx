@@ -69,6 +69,22 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
   const [saving, setSaving] = useState(false);
   const [imgErrs, setImgErrs] = useState([]);
   const [e, setE] = useState(null);
+  // Trip-pack richness.
+  const CATS = ['food', 'transport', 'stay', 'activity', 'shopping', 'health', 'bills', 'other'];
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+  const [category, setCategory] = useState(source?.category || 'other');
+  const [spentAt, setSpentAt] = useState(() =>
+    source?.spent_at ? String(source.spent_at).slice(0, 10) : todayStr());
+  const [tax, setTax] = useState(source?.tax_cents ? (source.tax_cents / 100).toFixed(2) : '');
+  const [tip, setTip] = useState(source?.tip_cents ? (source.tip_cents / 100).toFixed(2) : '');
+  const [fee, setFee] = useState(source?.fee_cents ? (source.fee_cents / 100).toFixed(2) : '');
+  const [origCur, setOrigCur] = useState(source?.orig_currency || '');
+  const [origAmt, setOrigAmt] = useState(source?.orig_amount_cents ? (source.orig_amount_cents / 100).toFixed(2) : '');
+  const [fxRate, setFxRate] = useState(source?.fx_rate != null ? String(source.fx_rate) : '');
+  const [guests, setGuests] = useState(() => (source?.guests || []).map((g) => ({
+    label: g.label, amount: (g.share_cents / 100).toFixed(2), covered_by: g.covered_by,
+  })));
+  const [onlyPresent, setOnlyPresent] = useState(false);
 
   const dropped = copyFrom
     ? copyFrom.splits.map((s) => s.user_id).filter((id) => !activeIds.has(id))
@@ -109,7 +125,22 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
   const build = () => {
     const body = {
       title, amount: Number(amount), payer_id: payer, split_type: type, participant_ids: sel,
+      category, spent_at: spentAt ? new Date(`${spentAt}T12:00:00Z`).toISOString() : null,
+      only_present: onlyPresent,
     };
+    if (tax !== '') body.tax = Number(tax);
+    if (tip !== '') body.tip = Number(tip);
+    if (fee !== '') body.fee = Number(fee);
+    if (origCur.trim() !== '') {
+      body.orig_currency = origCur.trim().toUpperCase();
+      body.orig_amount = Number(origAmt);
+      body.fx_rate = Number(fxRate);
+    }
+    if (guests.length > 0) {
+      body.guests = guests.map((g) => ({
+        label: g.label, amount_cents: Math.round(Number(g.amount || 0) * 100), covered_by: g.covered_by,
+      }));
+    }
     if (type === 'EXACT') {
       body.exact = sel.map((id) => ({ user_id: id, amount_cents: Math.round(Number(values[id] || 0) * 100) }));
     }
@@ -152,7 +183,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, type, payer, sel.join(','), Object.values(values).join('|')]);
+  }, [amount, type, payer, category, spentAt, tax, tip, fee, origCur, origAmt, fxRate,
+    JSON.stringify(guests), onlyPresent, sel.join(','), Object.values(values).join('|')]);
 
   // Task 4.2: carry source receipts onto the copy by download + re-upload.
   const carryImages = async (newExpenseId) => {
@@ -240,6 +272,50 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
         )}
         <TextInput label="Title" required value={title} onChange={(x) => setTitle(x.target.value)} />
         <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} />
+        <Group gap="xs" grow>
+          <Select label="Category" value={category} onChange={setCategory} data={CATS} />
+          <TextInput label="Spent on" type="date" value={spentAt} onChange={(x) => setSpentAt(x.target.value)} />
+        </Group>
+        <Group gap="xs" grow>
+          <TextInput label="Tax (opt)" inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
+          <TextInput label="Tip (opt)" inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
+          <TextInput label="Fee (opt)" inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
+        </Group>
+        <Paper withBorder p="sm" radius="md">
+          <Text size="sm" fw={500} mb={4}>Foreign currency (optional)</Text>
+          <Group gap="xs" grow>
+            <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
+            <TextInput placeholder="Amount" inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
+            <TextInput placeholder="Rate" inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
+          </Group>
+          {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
+            <Text size="xs" c="dimmed" mt={4}>≈ {(Number(origAmt) * Number(fxRate)).toFixed(2)} in group currency</Text>
+          )}
+        </Paper>
+        <Paper withBorder p="sm" radius="md">
+          <Group justify="space-between" mb={4}>
+            <Text size="sm" fw={500}>Guest shares (optional)</Text>
+            <Button size="xs" variant="light" onClick={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}>+ Guest</Button>
+          </Group>
+          {guests.map((g, i) => (
+            <Group key={i} gap="xs" mb={4}>
+              <TextInput placeholder="Label (Kid)" value={g.label} style={{ flex: 2 }}
+                onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: x.target.value } : gg)))} />
+              <TextInput placeholder="$" inputMode="decimal" value={g.amount} style={{ flex: 1 }}
+                onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))} />
+              <Select value={g.covered_by} style={{ flex: 2 }}
+                onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
+                data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
+              <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((gg, j) => j !== i))}>X</Button>
+            </Group>
+          ))}
+          {guests.length === 0 && <Text size="xs" c="dimmed">Extra mouths covered by a member (added on top of their share).</Text>}
+        </Paper>
+        <Checkbox
+          checked={onlyPresent}
+          onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
+          label="Only members present (joined before spent date)"
+        />
         <Select
           label="Payer"
           value={payer}
@@ -330,8 +406,16 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
   const [amount, setAmount] = useState(preset?.amount_cents != null ? (preset.amount_cents / 100).toFixed(2) : '');
   const [method, setMethod] = useState('transfer');
   const [note, setNote] = useState('');
+  const [proofRef, setProofRef] = useState('');
+  const [handles, setHandles] = useState([]);
   const [e, setE] = useState(null);
   const [paying, setPaying] = useState(false);
+
+  // Settle sheet: show the receiver's payment handles + exact amount.
+  useEffect(() => {
+    if (!to) { setHandles([]); return; }
+    api.get(`/api/v1/users/${to}/handles`).then(setHandles).catch(() => setHandles([]));
+  }, [to]);
 
   const go = async (ev) => {
     ev.preventDefault();
@@ -339,12 +423,13 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
     setPaying(true);
     try {
       const r = await api.post(`/api/v1/groups/${groupId}/payments`,
-        { from_user_id: from, to_user_id: to, amount: Number(amount), method, note: note || null });
+        { from_user_id: from, to_user_id: to, amount: Number(amount), method, note: note || null, proof_ref: proofRef || null });
       onDone(r);
     } catch (err) { setE(err); } finally { setPaying(false); }
   };
 
   const data = options.map((m) => ({ value: m.user_id, label: m.display_name }));
+  const toName = options.find((m) => m.user_id === to)?.display_name;
   return (
     <form onSubmit={go}>
       <Stack gap="sm">
@@ -352,6 +437,16 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
         <Select label="From" required searchable value={from} onChange={setFrom} data={data} />
         <Select label="To" required searchable value={to} onChange={setTo} data={data} />
         <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} />
+        {to && (
+          <Paper withBorder p="sm" radius="md">
+            <Text size="sm" fw={600} mb={4}>Pay {toName} {amount && `· ${amount}`}</Text>
+            {handles.length === 0
+              ? <Text size="xs" c="dimmed">No payment accounts on file — ask {toName} to add one in Profile.</Text>
+              : handles.map((h) => (
+                <Text key={h.handle_id} size="sm">{h.label}: <b>{h.details}</b></Text>
+              ))}
+          </Paper>
+        )}
         <SegmentedControl
           fullWidth
           value={method}
@@ -359,6 +454,7 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           data={['cash', 'transfer', 'other']}
         />
         <TextInput label="Note (optional)" value={note} onChange={(x) => setNote(x.target.value)} />
+        <TextInput label="Proof ref (optional)" description="Transaction id after you paid" value={proofRef} onChange={(x) => setProofRef(x.target.value)} />
         <Button type="submit" loading={paying}>Record payment</Button>
         <Err e={e} />
       </Stack>

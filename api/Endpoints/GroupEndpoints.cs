@@ -22,7 +22,7 @@ public static class GroupEndpoints
 
     private static Guid Me(ClaimsPrincipal p) => AuthEndpoints.CurrentUserId(p)!.Value;
 
-    private static async Task<object> DetailAsync(AppDbContext db, Guid groupId, Guid me)
+    private static async Task<object> DetailAsync(AppDbContext db, Guid groupId, Guid me, Groups.GroupService svc)
     {
         var g = (await db.Groups.FindAsync(groupId))!;
         var members = await db.GroupMembers.Where(m => m.GroupId == groupId).ToListAsync();
@@ -35,10 +35,15 @@ public static class GroupEndpoints
             name = g.Name,
             currency = g.Currency,
             my_role = members.FirstOrDefault(m => m.UserId == me)?.Role,
+            mode = g.Mode,
+            flat_fee_cents = g.FlatFeeCents,
+            has_share_link = g.ShareToken != null,
+            budget = await svc.BudgetViewAsync(groupId),
             members = members.Select(m => new
             {
                 user_id = m.UserId,
                 role = m.Role,
+                deposit_paid = m.DepositPaid,
                 display_name = users.TryGetValue(m.UserId, out var u) ? u.DisplayName : "Unknown",
                 username = users.TryGetValue(m.UserId, out var u2) ? u2.Username : "?"
             })
@@ -59,15 +64,34 @@ public static class GroupEndpoints
             return Results.Ok(groups);
         });
 
-        api.MapGet("/groups/{id:guid}", async (Guid id, ClaimsPrincipal p, AppDbContext db, GroupService svc) =>
+        api.MapGet("/groups/{id:guid}", async (Guid id, ClaimsPrincipal p, AppDbContext db, GroupService svc, Services.RecurringService recurring) =>
         {
             var me = Me(p);
             if (await svc.RoleAsync(id, me) is null) return ApiResults.Error("FORBIDDEN", "Not a group member.", 403);
-            return Results.Ok(await DetailAsync(db, id, me));
+            await RecurringEndpoints.Materialize(id, recurring);
+            return Results.Ok(await DetailAsync(db, id, me, svc));
         });
 
         api.MapPatch("/groups/{id:guid}", async (Guid id, RenameGroupDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.RenameAsync(Me(p), id, d.Name)));
+
+        api.MapPatch("/groups/{id:guid}/settings", async (Guid id, SettingsDto d, ClaimsPrincipal p, GroupService svc) =>
+            ToResult(await svc.UpdateSettingsAsync(Me(p), id, d.Budget, d.BudgetAlertPct, d.Mode, d.FlatFee)));
+
+        api.MapPost("/groups/from-template", async (TemplateDto d, ClaimsPrincipal p, GroupService svc) =>
+            ToResult(await svc.FromTemplateAsync(Me(p), d.Name, d.Currency, d.Template, d.Budget, d.FlatFee)));
+
+        api.MapPatch("/groups/{id:guid}/members/{uid:guid}", async (Guid id, Guid uid, RoleDto d, ClaimsPrincipal p, GroupService svc) =>
+            ToResult(await svc.SetRoleAsync(Me(p), id, uid, d.Role)));
+
+        api.MapPatch("/groups/{id:guid}/members/{uid:guid}/deposit", async (Guid id, Guid uid, DepositDto d, ClaimsPrincipal p, GroupService svc) =>
+            ToResult(await svc.SetDepositAsync(Me(p), id, uid, d.Paid)));
+
+        api.MapPost("/groups/{id:guid}/flat-fee", async (Guid id, FlatFeeDto d, ClaimsPrincipal p, GroupService svc, Expenses.ExpenseService expenses) =>
+            ToResult(await svc.FlatFeeAsync(Me(p), id, d.PayerId, d.Title, expenses)));
+
+        api.MapPost("/groups/{id:guid}/share-link", async (Guid id, ClaimsPrincipal p, GroupService svc) =>
+            ToResult(await svc.ShareLinkAsync(Me(p), id)));
 
         api.MapDelete("/groups/{id:guid}", async (Guid id, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.DeleteAsync(Me(p), id)));
@@ -94,6 +118,11 @@ public static class GroupEndpoints
 
     public sealed record CreateGroupDto(string Name, string? Currency, List<Guid>? MemberIds, List<string>? InviteEmails);
     public sealed record RenameGroupDto(string Name);
+    public sealed record SettingsDto(decimal? Budget, int? BudgetAlertPct, string? Mode, decimal? FlatFee);
+    public sealed record TemplateDto(string Name, string? Currency, string Template, decimal? Budget, decimal? FlatFee);
+    public sealed record RoleDto(string Role);
+    public sealed record DepositDto(bool Paid);
+    public sealed record FlatFeeDto(Guid PayerId, string? Title);
     public sealed record AddMembersDto(List<Guid>? UserIds);
     public sealed record InviteDto(List<string>? Emails);
     public sealed record JoinDto(string Token);

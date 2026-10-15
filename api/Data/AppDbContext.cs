@@ -20,6 +20,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
     public DbSet<PendingInvite> PendingInvites => Set<PendingInvite>();
     public DbSet<MembershipArchive> MembershipArchives => Set<MembershipArchive>();
+    public DbSet<ExpenseGuest> ExpenseGuests => Set<ExpenseGuest>();
+    public DbSet<ExpenseComment> ExpenseComments => Set<ExpenseComment>();
+    public DbSet<Nudge> Nudges => Set<Nudge>();
+    public DbSet<RecurringRule> RecurringRules => Set<RecurringRule>();
+    public DbSet<PaymentHandle> PaymentHandles => Set<PaymentHandle>();
+    public DbSet<PaymentProof> PaymentProofs => Set<PaymentProof>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -41,6 +47,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.InviteToken).IsUnique();
             e.Property(x => x.Name).HasMaxLength(50);
             e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.Mode).HasMaxLength(16);
             e.HasMany(x => x.Members).WithOne().HasForeignKey(m => m.GroupId);
         });
         b.Entity<GroupMember>(e =>
@@ -53,8 +60,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.GroupId);
             e.Property(x => x.Title).HasMaxLength(100);
             e.Property(x => x.Description).HasMaxLength(1000);
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.OrigCurrency).HasMaxLength(3);
+            e.Property(x => x.FxRate).HasPrecision(18, 8);
             e.HasMany(x => x.Splits).WithOne().HasForeignKey(s => s.ExpenseId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(x => x.Images).WithOne().HasForeignKey(i => i.ExpenseId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Guests).WithOne().HasForeignKey(g => g.ExpenseId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<ExpenseSplit>(e =>
         {
@@ -74,6 +85,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.GroupId);
             e.Property(x => x.Method).HasMaxLength(16);
             e.Property(x => x.Note).HasMaxLength(280);
+            e.Property(x => x.ProofRef).HasMaxLength(140);
         });
         b.Entity<SettlementPlan>(e =>
         {
@@ -114,6 +126,44 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         b.Entity<MembershipArchive>(e =>
         {
             e.HasKey(x => new { x.GroupId, x.UserId });
+        });
+        b.Entity<ExpenseGuest>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ExpenseId);
+            e.Property(x => x.Label).HasMaxLength(50);
+        });
+        b.Entity<ExpenseComment>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ExpenseId);
+            e.Property(x => x.Body).HasMaxLength(1000);
+        });
+        b.Entity<Nudge>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.GroupId, x.FromUserId, x.ToUserId, x.CreatedAt });
+        });
+        b.Entity<RecurringRule>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.GroupId);
+            e.Property(x => x.Title).HasMaxLength(100);
+            e.Property(x => x.Frequency).HasMaxLength(16);
+        });
+        b.Entity<PaymentHandle>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.UserId);
+            e.Property(x => x.Label).HasMaxLength(64);
+            e.Property(x => x.Details).HasMaxLength(280);
+        });
+        b.Entity<PaymentProof>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.PaymentId);
+            e.Property(x => x.StorageKey).HasMaxLength(512);
+            e.Property(x => x.Mime).HasMaxLength(64);
         });
     }
 }
