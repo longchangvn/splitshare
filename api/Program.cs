@@ -3,6 +3,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Scalar.AspNetCore;
 using SplitShare.Api.Auth;
 using SplitShare.Api.Common;
 using SplitShare.Api.Data;
@@ -17,7 +18,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults(); // Aspire: OTel, resilience, service discovery (no-op standalone)
 
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
+    options.AddOperationTransformer<AuthOperationTransformer>();
+});
 builder.Services.ConfigureHttpJsonOptions(o =>
 {
     // Property names only: dictionary keys (user ids, hashes, emails) must pass through untouched.
@@ -105,7 +110,13 @@ app.UseExceptionHandler(err => err.Run(async ctx =>
 }));
 
 if (app.Environment.IsDevelopment())
+{
     app.MapOpenApi("/openapi.json");
+    app.MapOpenApi(); // default /openapi/v1.json — consumed by Scalar below
+    app.MapScalarApiReference(o => o
+        .WithTitle("SplitShare API")
+        .WithOpenApiRoutePattern("/openapi/{documentName}.json"));
+}
 
 app.UseCors();
 app.UseRateLimiter();
