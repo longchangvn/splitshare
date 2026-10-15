@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SplitShare — Mobile Design V1 (360px)</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:#0f172a;color:#0f172a;padding:32px 20px}
+  .page{max-width:1400px;margin:0 auto}
+  .hero{color:#fff;margin-bottom:8px}
+  .hero h1{font-size:28px;font-weight:800}
+  .hero h1 span{color:#2dd4bf}
+  .hero p{color:#94a3b8;margin-top:8px;font-size:14px;line-height:1.6;max-width:900px}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 28px}
+  .pill{font-size:12px;background:#1e293b;color:#cbd5e1;border:1px solid #334155;padding:6px 12px;border-radius:999px}
+  .pill b{color:#2dd4bf}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:28px;justify-items:center}
+  .frame-wrap{display:flex;flex-direction:column;gap:12px;width:100%;max-width:390px}
+  .frame-label{color:#fff}
+  .frame-label h3{font-size:15px}
+  .frame-label p{font-size:12px;color:#94a3b8;margin-top:4px;line-height:1.5}
+  .frame-label code{color:#2dd4bf;font-size:11px}
+  .phone{width:360px;height:780px;background:#f1f5f9;border-radius:44px;padding:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);border:1px solid #334155}
+  .screen{background:#f8fafc;width:100%;height:100%;border-radius:34px;overflow:hidden;display:flex;flex-direction:column;position:relative}
+  .notch{height:30px;display:flex;justify-content:center;align-items:center;background:#fff}
+  .notch i{display:block;width:110px;height:24px;background:#0f172a;border-radius:999px}
+  .appbar{background:#fff;padding:12px 16px 10px;border-bottom:1px solid #e2e8f0}
+  .appbar .row{display:flex;align-items:center;justify-content:space-between}
+  .appbar h2{font-size:17px;font-weight:800}
+  .appbar small{font-size:12px;color:#64748b}
+  .teal{color:#0d9488}
+  .content{flex:1;overflow:hidden;padding:14px 14px 10px;display:flex;flex-direction:column;gap:10px}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:12px 13px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;background:#0d9488;color:#fff;border-radius:12px;padding:13px;font-size:14px;font-weight:700;border:0;width:100%}
+  .btn-sec{background:#ccfbf1;color:#0f766e}
+  .btn-dark{background:#0f172a}
+  .btn-ghost{background:#fff;border:1px solid #cbd5e1;color:#0f172a}
+  .inp{background:#fff;border:1px solid #cbd5e1;border-radius:12px;padding:12px;font-size:13px;color:#334155}
+  .inp b{color:#0f172a}
+  .avatar{width:32px;height:32px;border-radius:999px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800;flex:none}
+  .badge{font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;letter-spacing:.02em}
+  .b-open{background:#fef9c3;color:#854d0e;border:1px solid #fde047}
+  .b-lock{background:#e2e8f0;color:#475569;border:1px solid #cbd5e1}
+  .b-red{background:#fee2e2;color:#b91c1c;border:1px solid #fecaca}
+  .b-teal{background:#ccfbf1;color:#0f766e;border:1px solid #99f6e4}
+  .b-orange{background:#ffedd5;color:#9a3412;border:1px solid #fed7aa}
+  .tabbar{background:#fff;border-top:1px solid #e2e8f0;display:flex;padding:8px 4px calc(10px + env(safe-area-inset-bottom))}
+  .tab{flex:1;text-align:center;font-size:10px;color:#94a3b8;font-weight:600}
+  .tab.on{color:#0d9488}
+  .tab i{font-style:normal;font-size:19px;display:block}
+  .row2{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .muted{font-size:12px;color:#64748b;line-height:1.5}
+  .small{font-size:11px}
+  .h{font-size:13px;font-weight:800}
+  .amt{font-size:14px;font-weight:800}
+  .thumb{width:52px;height:52px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;font-size:20px;color:#fff;font-weight:800}
+  .seg{display:flex;background:#e2e8f0;border-radius:10px;padding:3px;gap:3px}
+  .seg span{flex:1;text-align:center;font-size:11px;font-weight:700;padding:7px 0;border-radius:8px;color:#64748b}
+  .seg span.on{background:#fff;color:#0f766e;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+  .step{background:#f0fdfa;border:1px dashed #5eead4;border-radius:10px;padding:8px 10px;font-size:11px;color:#0f766e;line-height:1.5}
+  .ledger-row{display:flex;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #f1f5f9}
+  .sticky{margin:0 -14px -10px;padding:10px 14px 14px;background:#fff;border-top:1px solid #e2e8f0}
+  .modal{position:absolute;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;z-index:5}
+  .sheet{background:#fff;border-radius:20px 20px 0 0;padding:16px;width:100%}
+  .grab{width:40px;height:4px;background:#cbd5e1;border-radius:999px;margin:0 auto 12px}
+  .kbd{font-size:10px;background:#0f172a;color:#5eead4;border-radius:6px;padding:2px 6px;font-family:monospace}
+  .legend{background:#1e293b;border:1px solid #334155;border-radius:16px;padding:16px;color:#cbd5e1;font-size:12px;line-height:1.7;margin-top:28px}
+  .legend b{color:#fff}
+  @media print{.hero,.frame-label,.legend{display:none}body{background:#fff}}
+</style>
+</head>
+<body>
+<div class="page">
+<div class="hero">
+<h1>SplitShare <span>Mobile Design V1</span> — 360px · iOS</h1>
+<p>Teal primary (<b style="color:#2dd4bf">#0d9488</b>) matches web Mantine theme. Touch targets ≥44pt, sticky money-action bar, scroll-snap tab rail, snake_case API. All amounts single-currency per group (FR locked decision #1). Covers FR-1 → FR-11 + NFR.</p>
+<div class="meta">
+<span class="pill"><b>Canvas</b> 360 × 780</span>
+<span class="pill"><b>Font</b> Inter 11–17px</span>
+<span class="pill"><b>Radius</b> 12–16px</span>
+<span class="pill"><b>Nav</b> Home · Groups · Add · Activity · Profile</span>
+<span class="pill"><b>API</b> /api/v1 snake_case</span>
+</div>
+</div>
+
+<div class="grid">
+
+<!-- 1 AUTH -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>1 · Auth — login / biometric / Google</h3><p>FR-1 · JWT 15min + rotating refresh 30d → Keychain/Keystore. Rate-limit 5/min/IP. <code>POST /auth/login · /auth/google · /auth/forgot</code></p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="content" style="justify-content:center">
+<div style="text-align:center;margin-bottom:4px"><div style="width:56px;height:56px;background:#0d9488;border-radius:18px;margin:0 auto;display:flex;align-items:center;justify-content:center;font-size:26px;color:#fff;font-weight:800">S</div>
+<div class="h" style="font-size:19px;margin-top:10px">SplitShare</div><div class="muted">Split less. Settle smart.</div></div>
+<div class="card"><div class="h">Welcome back 👋</div><div class="muted">Login to sync offline drafts</div>
+<div style="display:flex;flex-direction:column;gap:8px;margin-top:10px"><div class="inp">📧 <b>mia@example.com</b></div><div class="inp">🔒 •••••••• <span style="float:right" class="teal small"><b>Show</b></span></div></div>
+<div class="btn" style="margin-top:10px">Log in</div>
+<div class="btn btn-sec" style="margin-top:8px">🔓 &nbsp;Face ID / Fingerprint</div>
+<div class="row2" style="margin-top:8px"><span class="small teal"><b>Forgot password?</b></span><span class="small teal"><b>Create account</b></span></div></div>
+<div class="card" style="text-align:center"><div class="btn btn-ghost">Ⓖ Continue with Google</div><div class="muted small" style="margin-top:8px">Unverified Google email → rejected · link if email exists</div></div>
+<div class="muted small" style="text-align:center">username 3–30 <span class="kbd">a-z0-9_.-</span> · password 8+ letter+digit</div>
+</div>
+<div class="tabbar"><div class="tab">—</div></div>
+</div></div>
+</div>
+
+<!-- 2 HOME -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>2 · Home — balances by currency</h3><p>FR-11 · <code>GET /me/balances</code> grouped by currency, never summed. Flag &gt;30d. Badge = total owed. <code>GET /groups/:id/me</code></p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="appbar"><div class="row"><div><h2>Hi, Mia 👋</h2><small>3 active groups · owes <b style="color:#b91c1c">$42.10</b></small></div><div class="avatar" style="background:#0d9488">M</div></div></div>
+<div class="content">
+<div class="card" style="background:#0f172a;color:#fff;border-color:#0f172a"><div class="row2"><span class="small" style="color:#94a3b8">YOU OWE · USD</span><span class="badge b-red">2 groups</span></div><div style="font-size:26px;font-weight:800;margin:4px 0">$42.10</div><div class="small" style="color:#94a3b8">You are owed €18.00 in EUR group · never summed</div></div>
+<div><div class="h" style="margin-bottom:6px">USD · $ — 2 groups</div>
+<div class="card"><div class="row2"><div style="display:flex;gap:8px;align-items:center"><div class="avatar" style="background:#f59e0b">🏠</div><div><div class="h">Bali Trip 🌴</div><div class="muted small">You owe $32.10 · 4 members</div></div></div><span class="badge b-orange">>30d ⚠</span></div></div>
+<div class="card" style="margin-top:8px"><div class="row2"><div style="display:flex;gap:8px;align-items:center"><div class="avatar" style="background:#0ea5e9">🍜</div><div><div class="h">Friday Dinners</div><div class="muted small">You owe $10.00 · settled soon</div></div></div><span class="badge b-open">OPEN</span></div></div></div>
+<div><div class="h" style="margin-bottom:6px">EUR · € — 1 group</div>
+<div class="card"><div class="row2"><div style="display:flex;gap:8px;align-items:center"><div class="avatar" style="background:#8b5cf6">✈</div><div><div class="h">Lisbon Flat</div><div class="muted small" style="color:#0f766e"><b>Owed €18.00</b></div></div></div><span class="badge b-teal">OWED</span></div></div></div>
+</div>
+<div class="tabbar"><div class="tab on"><i>⌂</i>Home</div><div class="tab"><i>◫</i>Groups</div><div class="tab"><i>⊕</i>Add</div><div class="tab"><i>◷</i>Activity</div><div class="tab"><i>☺</i>You</div></div>
+</div></div>
+</div>
+
+<!-- 3 GROUP LEDGER -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>3 · Group — ledger + header</h3><p>FR-10/11 · <code>GET /groups/:id/ledger · /groups/:id/me</code> filters title/payer/amount/date/status. Thumb + my-share + OPEN/LOCKED.</p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="appbar"><div class="row"><span class="teal"><b>‹</b></span><h2>🏠 Bali Trip · $</h2><span class="small">•••</span></div><small>USD · 1 currency locked · 4/50 members</small></div>
+<div class="content">
+<div class="card" style="background:#fef2f2;border-color:#fecaca"><div class="row2"><span class="h">You owe $32.10</span><span class="badge b-red">DEBTOR</span></div><div class="muted small">owes [{to: Ana, $32.10}] · net −$32.10</div></div>
+<div class="seg"><span class="on">Ledger</span><span>Settle (2)</span><span>Members</span><span>Photos</span></div>
+<div class="inp small">🔍 Filter — title · payer · $ · date · status</div>
+<div class="card" style="padding-top:4px">
+<div class="ledger-row"><div class="thumb" style="background:#f59e0b">🧾</div><div style="flex:1"><div class="row2"><span class="h">Villa deposit</span><span class="amt">$200.00</span></div><div class="row2"><span class="muted small">Ana paid · my share $50.00</span><span class="badge b-open">OPEN</span></div></div></div>
+<div class="ledger-row"><div class="thumb" style="background:#0ea5e9">🍜</div><div style="flex:1"><div class="row2"><span class="h">Scooter x3</span><span class="amt">$60.00</span></div><div class="row2"><span class="muted small">Ben paid · my share $20.00</span><span class="badge b-open">OPEN</span></div></div></div>
+<div class="ledger-row"><div class="thumb" style="background:#94a3b8">⛽</div><div style="flex:1"><div class="row2"><span class="h">Airport taxi</span><span class="amt">$36.00</span></div><div class="row2"><span class="muted small">Settled · snapshot</span><span class="badge b-lock">LOCKED</span></div></div></div>
+</div>
+</div>
+<div class="sticky" style="margin:0 -14px -10px"><div class="btn">＋ Add expense · 📷 receipt</div></div>
+<div class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab on"><i>◫</i>Groups</div><div class="tab"><i>⊕</i>Add</div><div class="tab"><i>◷</i>Activity</div><div class="tab"><i>☺</i>You</div></div>
+</div></div>
+</div>
+
+<!-- 4 ADD EXPENSE -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>4 · Add expense — receipt + split</h3><p>FR-5/6 · 0–5 imgs ≤10MB jpg/png/webp/heic, EXIF-GPS stripped. <code>POST /expenses/preview-split</code> live. EQUAL +1¢ to first user_id.</p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="appbar"><div class="row"><span class="teal"><b>✕ Cancel</b></span><h2>New expense</h2><span class="small">Draft ●</span></div></div>
+<div class="content">
+<div class="card"><div class="row2"><div class="thumb" style="background:#0f172a">📷</div><div class="thumb" style="background:#f59e0b">🧾</div><div class="thumb" style="border:2px dashed #cbd5e1;background:#f8fafc;color:#94a3b8">＋</div><div style="flex:1" class="muted small">2/5 · auto-compress · signed URL 15-min</div></div></div>
+<div class="card"><div class="inp"><b>Villa deposit</b> · $ <b>200.00</b></div><div class="muted small" style="margin-top:6px">Payer: <b>Ana (member ✓)</b> · Group USD</div>
+<div class="seg" style="margin-top:8px"><span class="on">Equal</span><span>Exact</span><span>Percent</span><span>Shares</span></div>
+<div class="step" style="margin-top:8px">EQUAL: $50.00 ×4 — floor + remainder 1¢ → <b>Cid (…a1) gets +1¢</b> · sum == total ✓</div>
+<div class="muted small" style="margin-top:8px">◉ Mia $50.00 &nbsp; ◉ Ana $50.00 &nbsp; ◉ Ben $50.00 &nbsp; ◉ Cid $50.00</div></div>
+<div class="card" style="background:#f0fdfa;border-color:#99f6e4"><div class="h teal">Live preview · preview-split</div><div class="muted small">No persist · largest-remainder for %/shares</div></div>
+</div>
+<div class="sticky"><div class="btn">Save expense · Idempotency-Key ✓</div><div class="muted small" style="text-align:center;margin-top:6px">Offline? queued → auto-sync, no duplicate</div></div>
+</div></div>
+</div>
+
+<!-- 5 SETTLEMENT -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>5 · Settlement — minimize transfers ★</h3><p>FR-7 normative · greedy ≤n−1. <code>GET /groups/:id/settlement</code> {version, hash, transfers, explanation}. B→A/C→B ⇒ C→A.</p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="appbar"><div class="row"><span class="teal"><b>‹</b></span><h2>Settlement · v12</h2><span class="badge b-teal">WHY?</span></div></div>
+<div class="content">
+<div class="card" style="border-color:#5eead4"><div class="h">Optimized: 5 debts → <span class="teal">2 transfers</span> (saved 3) · v12 · <u>Why?</u></div>
+<div class="muted small">inputs <span class="kbd">a3f9…c1</span> · just now · aria-expanded ✓</div>
+<div class="step" style="margin-top:8px">nets: Ana +$82.10 · Ben $0.00 · Cid −$50.00 · Mia −$32.10<br>1️⃣ Cid → Ana $50.00 (most-negative first)<br>2️⃣ Mia → Ana $32.10 · done in 2 ≤ n−1=3 ✓</div>
+<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+<div class="row2" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 10px"><span class="small"><b>Cid → Ana</b> $50.00</span><span class="badge b-teal" style="padding:6px 12px">Pay ›</span></div>
+<div class="row2" style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:8px 10px"><span class="small"><b>You → Ana</b> $32.10</span><span class="badge b-red" style="padding:6px 12px">Pay $32.10 ›</span></div>
+</div>
+<div class="muted small" style="margin-top:6px">☐ raw debts toggle · history v11 v10… read-only + diff</div></div>
+<div class="card"><div class="row2"><span class="h">Empty state</span><span class="badge b-teal">v13</span></div><div class="muted">All settled — nets $0.00 🎉 → locks all OPEN</div></div>
+</div>
+<div class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab on"><i>◫</i>Groups</div><div class="tab"><i>⊕</i>Add</div><div class="tab"><i>◷</i>Activity</div><div class="tab"><i>☺</i>You</div></div>
+</div></div>
+</div>
+
+<!-- 6 PAY + UNSETTLE -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>6 · Pay + un-settle guard + lock</h3><p>FR-8/9 · <code>POST /groups/:id/payments {from,to,amount_cents,method,note}</code> + Idempotency-Key. OVERPAYMENT 422 returns max. LOCKED 403.</p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="appbar"><div class="row"><span class="teal"><b>✕</b></span><h2>Pay Ana</h2><span class="badge b-open">OPEN</span></div></div>
+<div class="content">
+<div class="card"><div class="row2"><div class="avatar" style="background:#ec4899">M</div><span>→</span><div class="avatar" style="background:#0d9488">A</div><div style="flex:1"><div class="h">Mia → Ana</div><div class="muted small">max owed $32.10 · overpay blocked</div></div></div>
+<div style="font-size:32px;font-weight:800;text-align:center;margin:8px 0">$32.10</div>
+<div class="seg"><span>cash</span><span class="on">transfer</span><span>other</span></div>
+<div class="inp" style="margin-top:8px">note ≤280: “villa balance 🙏”</div>
+<div class="btn" style="margin-top:8px">Record payment · from/to/owner only</div></div>
+</div>
+<div class="modal"><div class="sheet"><div class="grab"></div>
+<div class="h" style="font-size:15px">⚠️ This will un-settle Ben</div>
+<div class="muted" style="margin:6px 0">Ben $0.00 → −$15.00 · Settlement v12 → v13. Push + email to affected. Continue?</div>
+<div class="step">preview <span class="kbd">unsettled_preview[]</span> non-empty → blocking confirm (web + mobile)</div>
+<div style="display:flex;gap:8px;margin-top:10px"><div class="btn btn-ghost" style="flex:1">Back</div><div class="btn" style="flex:1;background:#b91c1c">Un-settle & save</div></div>
+<div class="muted small" style="text-align:center;margin-top:8px">On success: toast “v12 → v13, Ben un-settled” + Why-box link</div>
+</div></div>
+</div></div>
+</div>
+
+<!-- 7 INVITE -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>7 · New group wizard + invite</h3><p>FR-3/4 · max 50/group, 200/user. <code>POST /groups · /members · /invites · /join · /rotate-invite</code>. Email-only, token 32B, 410 INVITE_ROTATED.</p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="appbar"><div class="row"><span class="teal"><b>‹</b></span><h2>New group · 2/3</h2><span class="small">USD ▾ locked</span></div><small>● ● ○ invite members</small></div>
+<div class="content">
+<div class="card"><div class="h">Add from contacts 🔍</div><div class="muted small">Derived: share ≥1 active group · &lt;200ms p95</div>
+<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><span class="badge b-teal">Ana ✓</span><span class="badge b-teal">Ben ✓</span><span class="badge b-open">+ Cid</span></div>
+<div class="inp" style="margin-top:8px">✉ invite_emails[]: leo@…, kim@…</div></div>
+<div class="card" style="background:#0f172a;color:#fff;border-color:#0f172a"><div class="h" style="color:#fff">🔗 Invite link</div><div class="kbd" style="margin:6px 0">https://app…/g/9f2K…Qz · splitshare://g/9f2K</div><div style="display:flex;gap:8px"><div class="btn" style="flex:1">Copy link</div><div class="btn btn-sec" style="flex:1">⎙ Share sheet</div></div><div class="muted small" style="color:#94a3b8;margin-top:6px">Any member can invite · only owner removes / rotates / deletes</div></div>
+<div class="muted small">Pending email auto-consumed ≤30d on register · join idempotent · removed shown as “Name (removed)”</div>
+</div>
+<div class="sticky"><div class="btn">Create group · 3 members</div></div>
+</div></div>
+</div>
+
+<!-- 8 SYSTEM -->
+<div class="frame-wrap">
+<div class="frame-label"><h3>8 · System — offline · push · profile</h3><p>NFR · biometric, push per-group opt-out, camera+compress, offline queue auto-sync, deep link <code>splitshare://g/&lt;token&gt;</code>, badge owed.</p></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="appbar"><div class="row"><h2>Activity 🔔<span class="badge b-red" style="margin-left:6px">3</span></h2><div class="avatar" style="background:#0d9488">M</div></div></div>
+<div class="content">
+<div class="card"><div class="row2"><span class="h">📶 Offline queue (2)</span><span class="badge b-orange">AUTO-SYNC</span></div><div class="muted small">✈ Expense $18.00 + Payment $10 → same Idempotency-Key, no duplicate</div></div>
+<div class="card"><div class="h">🔔 Push</div><div class="muted small">“Ana recorded $200 — you owe $50” · “Ben un-settled (−$15)” · per-group opt-out ✓</div></div>
+<div class="card"><div class="row2"><div class="h">👤 mia · Mia L.</div><span class="badge b-teal">✓ verified</span></div><div class="muted small">change-password · delete blocked if net ≠ 0 · Keychain biometric on</div></div>
+<div class="card" style="background:#f0fdfa;border-color:#99f6e4"><div class="h teal">🔒 Settled group</div><div class="muted small">All nets $0 → LOCKED snapshot · reverse owner-only 24h else counter-payment</div></div>
+</div>
+<div class="tabbar"><div class="tab"><i>⌂</i>Home</div><div class="tab"><i>◫</i>Groups</div><div class="tab"><i>⊕</i>Add</div><div class="tab on"><i>◷</i>Activity</div><div class="tab"><i>☺</i>You</div></div>
+</div></div>
+</div>
+
+</div>
+
+<div class="legend">
+<b>How to read this design → implementation:</b> 1 Auth → Keychain/Keystore, Google ID-token, 15-min forgot link · 2 Home → <span class="kbd">GET /me/balances</span> grouped, badge owed · 3 Group → header net + ledger filters + thumb + OPEN/LOCKED · 4 Expense → 2-phase draft→attach→commit or atomic + Idempotency-Key, <span class="kbd">POST /expenses/preview-split</span> · 5 Settlement → greedy debtor↑ creditor↓, <span class="kbd">GET /settlement</span> + history 100, superseded:true on stale pay · 6 Pay → overpay 422+max, un-settle modal if <span class="kbd">unsettled_preview[]</span>, 422 <span class="kbd">INVOLVES_REMOVED_MEMBER</span> / 403 <span class="kbd">EXPENSE_LOCKED</span> · 7 Invite → email-only, owner-only remove/rotate/delete, 410 rotated · 8 System → offline queue, push, deep-link, &lt;200ms contacts / &lt;500ms ledger. Visual spec: teal #0d9488, 44pt targets, sticky bar only ≤36em, tab-rail scroll-snap.
+</div>
+</div>
+</body>
+</html>

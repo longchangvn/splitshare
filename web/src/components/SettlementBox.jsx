@@ -37,9 +37,13 @@ export function SettlementBox({ groupId, currency, members, onPay }) {
     : `Optimized: ${ex.raw_debts ?? '?'} debts → ${transfers.length} transfers (saved ${ex.saved ?? '?'}) • v${view?.version} • Why?`;
 
   return (
-    <Accordion variant="separated" radius="md">
+    <Accordion
+      variant="separated"
+      radius="md"
+      styles={{ item: { borderColor: transfers.length > 0 ? 'var(--mantine-color-teal-3)' : undefined } }}
+    >
       <Accordion.Item value="plan">
-        <Accordion.Control>{head}</Accordion.Control>
+        <Accordion.Control aria-expanded={undefined}>{head}</Accordion.Control>
         <Accordion.Panel>
           <Stack gap="sm">
             {historical && (
@@ -59,25 +63,32 @@ export function SettlementBox({ groupId, currency, members, onPay }) {
               </Table.Tbody>
             </Table>
             <Text fw={600} size="sm">Steps</Text>
-            <List size="sm" spacing="xs">
+            <List size="sm" spacing="xs" type="ordered">
               {(ex.steps || []).map((s, i) => <List.Item key={i}>{s}</List.Item>)}
             </List>
             <Text fw={600} size="sm">Final transfers</Text>
-            <List size="sm" spacing="xs">
+            <Stack gap="xs">
               {transfers.map((t, i) => (
-                <List.Item key={i}>
-                  <Group gap="xs">
-                    <Text size="sm">
-                      {displayNameOf(members, t.from_user_id)} → {displayNameOf(members, t.to_user_id)}:{' '}
-                      <b>{fmt(t.amount_cents, currency)}</b>
-                    </Text>
-                    {!historical && (
-                      <Button size="xs" variant="light" onClick={() => onPay(t)}>Pay</Button>
-                    )}
-                  </Group>
-                </List.Item>
+                <Group
+                  key={i}
+                  justify="space-between"
+                  wrap="nowrap"
+                  p="xs"
+                  style={{ background: 'var(--mantine-color-gray-0)', borderRadius: 'var(--mantine-radius-md)' }}
+                >
+                  <Text size="sm">
+                    <b>{displayNameOf(members, t.from_user_id)} → {displayNameOf(members, t.to_user_id)}</b>{' '}
+                    {fmt(t.amount_cents, currency)}
+                  </Text>
+                  {!historical && (
+                    <Button size="xs" variant="filled" color="teal" onClick={() => onPay(t)}>Pay</Button>
+                  )}
+                </Group>
               ))}
-            </List>
+              {transfers.length === 0 && (
+                <Text size="sm" c="dimmed">All settled — nets $0.00 🎉</Text>
+              )}
+            </Stack>
             <Text size="xs" c="dimmed">v{view.version} · {view.computed_at} · {view.inputs_hash}</Text>
             <Text fw={600} size="sm" mt="sm">Completed transfers ({payments.length})</Text>
             {payments.length === 0 ? (

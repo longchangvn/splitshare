@@ -20,6 +20,7 @@ export function ExpenseDetail() {
   const location = useLocation();
   const [d, setD] = useState(null);
   const [members, setMembers] = useState([]);
+  const [groupCur, setGroupCur] = useState('');
   const [edit, setEdit] = useState(!!location.state?.openEdit);
   const [e, setE] = useState(null);
 
@@ -30,7 +31,7 @@ export function ExpenseDetail() {
         api.get(`/api/v1/groups/${id}`).catch(() => null),
       ]);
       setD(det);
-      if (g) setMembers(g.members);
+      if (g) { setMembers(g.members); setGroupCur(g.currency || ''); }
     } catch (err) { setE(err); }
   };
   useEffect(() => { load(); }, [eid]);
@@ -133,6 +134,7 @@ export function ExpenseDetail() {
             groupId={id}
             members={members}
             existing={x}
+            currency={groupCur}
             onDone={() => { setEdit(false); load(); }}
           />
         </Card>

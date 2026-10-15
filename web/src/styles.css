@@ -63,3 +63,36 @@ a {
   .no-print { display: none !important; }
   .only-print { display: block !important; }
 }
+
+/* Mobile redesign: scroll-snap tab rail (never wraps). */
+.tab-rail {
+  overflow-x: auto;
+  white-space: nowrap;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  mask-image: linear-gradient(to right, black 92%, transparent 100%);
+}
+.tab-rail::-webkit-scrollbar { display: none; }
+.tab-rail .mantine-Tabs-list {
+  flex-wrap: nowrap;
+  display: inline-flex;
+  min-width: 100%;
+}
+.tab-rail .mantine-Tabs-tab {
+  scroll-snap-align: start;
+  flex: none;
+}
+
+/* Sticky money-action bar: static on desktop, docked above the mobile tab bar. */
+@media (max-width: 36em) {
+  .sticky-bar {
+    position: sticky;
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    z-index: 50;
+    background: var(--mantine-color-body);
+    padding: 8px 0 calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--mantine-color-gray-3);
+  }
+  .sticky-spacer { height: 8px; }
+}

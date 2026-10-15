@@ -113,17 +113,26 @@ export function InvitePage() {
         </Stack>
       </Card>
 
-      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
-        <Title order={4} mb="sm">Shareable link</Title>
-        {detail?.my_role === 'owner' && <Button variant="default" onClick={rotate}>New invite link (rotates, kills old)</Button>}
+      <Card shadow="sm" padding="md" radius="md" mt="md" style={{ background: '#0f172a', borderColor: '#0f172a' }}>
+        <Title order={4} c="white">🔗 Shareable link</Title>
+        {detail?.my_role === 'owner' && <Button variant="light" color="teal" mt="sm" onClick={rotate}>New invite link (rotates, kills old)</Button>}
         {(link) && (
           <>
-            <TextInput readOnly mt="sm" value={link} />
+            <Text size="xs" c="dimmed" mt="sm" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+              {link}
+            </Text>
             <CopyButton value={link}>
               {({ copied, copy }) => (
-                <Button fullWidth mt="sm" color={copied ? 'teal' : 'blue'} onClick={copy}>
-                  {copied ? 'Copied' : 'Copy link'}
-                </Button>
+                <Group gap="xs" mt="sm">
+                  <Button color={copied ? 'teal' : 'blue'} onClick={copy}>
+                    {copied ? 'Copied' : 'Copy link'}
+                  </Button>
+                  {navigator.share && (
+                    <Button variant="light" color="teal" onClick={() => navigator.share({ url: link }).catch(() => {})}>
+                      Share…
+                    </Button>
+                  )}
+                </Group>
               )}
             </CopyButton>
           </>

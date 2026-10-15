@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Anchor, Button, Card, Group, List, Stack, Table, Text, Title } from '@mantine/core';
+import { Anchor, Box, Button, Card, Group, List, Stack, Table, Text, Title } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { displayNameOf } from '../components/Net.jsx';
+import { NameValueList } from '../components/Mobile.jsx';
 
 // Printable trip summary: totals, per-person, settlement, categories.
 export function Report() {
@@ -49,6 +50,21 @@ export function Report() {
         </Card>
         <Card withBorder padding="md" radius="md">
           <Title order={4} mb="sm">Per person</Title>
+          <Box hiddenFrom="sm">
+            <Stack gap="xs">
+              {(summary || []).map((m) => (
+                <Card key={m.user_id} withBorder radius="md" padding="sm">
+                  <Text size="sm" fw={600}>{m.display_name}</Text>
+                  <Group gap="md" mt={2}>
+                    <Text size="xs" c="dimmed">paid <Text span fw={600} c="dark">{fmt(m.total_paid_cents, c)}</Text></Text>
+                    <Text size="xs" c="dimmed">share <Text span fw={600} c="dark">{fmt(m.total_share_cents, c)}</Text></Text>
+                    <Text size="xs" c="dimmed">net <Text span fw={600} c="dark">{m.net_cents === 0 ? 'settled' : fmt(m.net_cents, c)}</Text></Text>
+                  </Group>
+                </Card>
+              ))}
+            </Stack>
+          </Box>
+          <Box visibleFrom="sm">
           <Table striped withTableBorder>
             <Table.Thead><Table.Tr><Table.Th>Member</Table.Th><Table.Th>Paid</Table.Th><Table.Th>Share</Table.Th><Table.Th>Net</Table.Th></Table.Tr></Table.Thead>
             <Table.Tbody>
@@ -62,21 +78,15 @@ export function Report() {
               ))}
             </Table.Tbody>
           </Table>
+          </Box>
         </Card>
         <Card withBorder padding="md" radius="md">
           <Title order={4} mb="sm">By category</Title>
-          <Table striped withTableBorder>
-            <Table.Thead><Table.Tr><Table.Th>Category</Table.Th><Table.Th>Bills</Table.Th><Table.Th>Paid</Table.Th></Table.Tr></Table.Thead>
-            <Table.Tbody>
-              {breakdown.map((b) => (
-                <Table.Tr key={b.category}>
-                  <Table.Td>{b.category}</Table.Td>
-                  <Table.Td>{b.expense_count}</Table.Td>
-                  <Table.Td>{fmt(b.paid_cents, c)}</Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
+          <NameValueList
+            currency={c}
+            rows={breakdown.map((b) => ({ key: b.category, label: `${b.category} (${b.expense_count})`, value: b.paid_cents }))}
+            total={breakdown.reduce((a, b) => a + b.paid_cents, 0)}
+          />
         </Card>
         <Card withBorder padding="md" radius="md">
           <Title order={4} mb="sm">Settlement</Title>

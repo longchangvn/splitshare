@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Anchor, Card, Select, Stack, Table, Text, Title, ScrollArea } from '@mantine/core';
+import { Anchor, Box, Card, Group, Select, Stack, Table, Text, Title, ScrollArea } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
@@ -38,6 +38,33 @@ export function Statement() {
           data={(detail?.members || []).map((m) => ({ value: m.user_id, label: m.display_name }))}
           mb="sm"
         />
+        <Box hiddenFrom="sm">
+          <Stack gap="xs">
+            {(stmt?.entries || []).map((r, i) => (
+              <Card key={i} withBorder radius="md" padding="sm">
+                <Group justify="space-between" wrap="nowrap">
+                  <div style={{ minWidth: 0 }}>
+                    <Text size="sm" fw={600} truncate>{r.entry.title}</Text>
+                    <Text size="xs" c="dimmed">{r.entry.kind} · {new Date(r.entry.at).toLocaleDateString()}</Text>
+                  </div>
+                  <div style={{ textAlign: 'right', flex: 'none' }}>
+                    <Text size="sm">{fmt(r.entry.amount_cents, detail?.currency || '')}</Text>
+                    <Text size="xs" c="dimmed">→ {fmt(r.running_cents, detail?.currency || '')}</Text>
+                  </div>
+                </Group>
+              </Card>
+            ))}
+            {stmt && (
+              <Card withBorder radius="md" padding="sm">
+                <Group justify="space-between">
+                  <Text size="sm" fw={600}>Closing net</Text>
+                  <Text size="sm" fw={600}>{fmt(stmt.closing_cents, detail?.currency || '')}</Text>
+                </Group>
+              </Card>
+            )}
+          </Stack>
+        </Box>
+        <Box visibleFrom="sm">
         <ScrollArea>
           <Table striped highlightOnHover withTableBorder miw={520}>
             <Table.Thead>
@@ -61,6 +88,7 @@ export function Statement() {
             </Table.Tfoot>
           </Table>
         </ScrollArea>
+        </Box>
         <Stack gap={2} mt="sm">
           <Text size="xs" c="dimmed">paid = you paid the bill · share = your part · payment_out = you paid someone (reduces your debt).</Text>
         </Stack>

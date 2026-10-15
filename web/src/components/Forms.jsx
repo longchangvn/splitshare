@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  Alert, Button, Checkbox, Group, Paper, ScrollArea, SegmentedControl, Select, Stack, Text,
+  Accordion, Alert, Box, Button, Checkbox, Group, Paper, ScrollArea, SegmentedControl, Select, Stack, Text,
   TextInput,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { api } from '../api.js';
+import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { displayNameOf } from './Net.jsx';
 
@@ -26,7 +27,7 @@ const equalPercent = (n) => {
 
 // Expense create/edit with live split preview + un-settle confirm (tasks 8.2/8.3).
 // copyFrom: detail.expense payload to prefill a copy (task 4.1); images carried on save (4.2).
-export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
+export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, currency = '' }) {
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const activeIds = new Set(members.map((m) => m.user_id));
@@ -232,6 +233,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
       }
     } catch (err) {
       setE(err);
+      setOpenSections(['basics', 'bill', 'split']); // surface the failing section on mobile
     } finally {
       setSaving(false);
     }
@@ -257,6 +259,176 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
   };
 
   const boxLabel = type === 'EXACT' ? 'Exact $' : type === 'PERCENT' ? 'Percent %' : 'Shares';
+  const isMobile = useMediaQuery('(max-width: 36em)');
+  const [openSections, setOpenSections] = useState(['basics']);
+
+  // Receipt strip (mockup screen 4): carried/thumbnail count + where to attach.
+  // Uploads stay on the expense page (single-phase JSON create); this is display only.
+  const receiptCount = isCopy ? copyImages.length : (source?.images?.length || 0);
+  const receiptStrip = (
+    <Paper withBorder p="sm" radius="md">
+      <Group gap="xs" wrap="nowrap">
+        {receiptCount > 0 ? (
+          Array.from({ length: Math.min(receiptCount, 5) }).map((_, i) => (
+            <Box key={i} w={52} h={52} style={{ background: 'var(--mantine-color-orange-1)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flex: 'none' }} aria-hidden>🧾</Box>
+          ))
+        ) : (
+          <Box w={52} h={52} style={{ border: '2px dashed var(--mantine-color-gray-3)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--mantine-color-dimmed)', flex: 'none' }} aria-hidden>＋</Box>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Text size="sm" fw={600}>{receiptCount}/5 receipts</Text>
+          <Text size="xs" c="dimmed">
+            {isCopy
+              ? 'Carried over on save.'
+              : existing
+                ? 'Manage receipts on the expense page.'
+                : 'Attach on the expense page after save · jpg/png/webp/heic ≤10MB, GPS stripped'}
+          </Text>
+        </div>
+      </Group>
+    </Paper>
+  );
+
+  // EQUAL explainer (mockup screen 4): floor + remainder 1¢, who gets +1¢.
+  const equalNote = (() => {
+    if (type !== 'EQUAL' || !preview?.shares) return null;
+    const entries = Object.entries(preview.shares);
+    if (entries.length === 0) return null;
+    const vals = entries.map(([, v]) => v);
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const base = `EQUAL: ${fmt(lo, currency)} × ${entries.length}`;
+    if (hi === lo) return `${base} · sum == total ✓`;
+    const lucky = entries.filter(([, v]) => v === hi).map(([id]) => displayNameOf(members, id)).join(', ');
+    return `${base} — floor + remainder 1¢ → ${lucky} gets +1¢ · sum == total ✓`;
+  })();
+
+  const basics = (
+    <Stack gap="sm">
+      {receiptStrip}
+      <TextInput label="Title" required value={title} onChange={(x) => setTitle(x.target.value)} />
+      <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} />
+      <Group gap="xs" grow>
+        <Select label="Category" value={category} onChange={setCategory} data={CATS} />
+        <TextInput label="Spent on" type="date" value={spentAt} onChange={(x) => setSpentAt(x.target.value)} />
+      </Group>
+      <Select
+        label="Payer"
+        value={payer}
+        onChange={setPayer}
+        data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
+      />
+    </Stack>
+  );
+
+  const bill = (
+    <Stack gap="sm">
+      <Group gap="xs" grow>
+        <TextInput label="Tax (opt)" inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
+        <TextInput label="Tip (opt)" inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
+        <TextInput label="Fee (opt)" inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
+      </Group>
+      <Paper withBorder p="sm" radius="md">
+        <Text size="sm" fw={500} mb={4}>Foreign currency (optional)</Text>
+        <Group gap="xs" grow>
+          <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
+          <TextInput placeholder="Amount" inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
+          <TextInput placeholder="Rate" inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
+        </Group>
+        {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
+          <Text size="xs" c="dimmed" mt={4}>≈ {(Number(origAmt) * Number(fxRate)).toFixed(2)} in group currency</Text>
+        )}
+      </Paper>
+      <Paper withBorder p="sm" radius="md">
+        <Group justify="space-between" mb={4}>
+          <Text size="sm" fw={500}>Guest shares (optional)</Text>
+          <Button size="xs" variant="light" onClick={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}>+ Guest</Button>
+        </Group>
+        {guests.map((g, i) => (
+          <Group key={i} gap="xs" mb={4}>
+            <TextInput placeholder="Label (Kid)" value={g.label} style={{ flex: 2 }}
+              onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: x.target.value } : gg)))} />
+            <TextInput placeholder="$" inputMode="decimal" value={g.amount} style={{ flex: 1 }}
+              onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))} />
+            <Select value={g.covered_by} style={{ flex: 2 }}
+              onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
+              data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
+            <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((gg, j) => j !== i))}>X</Button>
+          </Group>
+        ))}
+        {guests.length === 0 && <Text size="xs" c="dimmed">Extra mouths covered by a member (added on top of their share).</Text>}
+      </Paper>
+      <Checkbox
+        checked={onlyPresent}
+        onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
+        label="Only members present (joined before spent date)"
+      />
+    </Stack>
+  );
+
+  const split = (
+    <Stack gap="sm">
+      <ScrollArea type="scroll">
+        <SegmentedControl
+          value={type}
+          onChange={changeType}
+          data={['EQUAL', 'EXACT', 'PERCENT', 'SHARES']}
+          styles={{ root: { minWidth: 400 } }}
+        />
+      </ScrollArea>
+      {equalNote && (
+        <Paper p="sm" radius="md" style={{ background: 'var(--mantine-color-teal-0)', border: '1px dashed var(--mantine-color-teal-3)' }}>
+          <Text size="xs" c="teal.9">{equalNote}</Text>
+        </Paper>
+      )}
+      <Text size="sm" fw={500}>Participants</Text>
+      <Stack gap={4}>
+        {members.map((m) => (
+          <div key={m.user_id} className="split-row">
+            <Checkbox
+              checked={sel.includes(m.user_id)}
+              onChange={() => toggle(m.user_id)}
+              label={m.display_name}
+            />
+            {type !== 'EQUAL' && sel.includes(m.user_id) && (
+              <TextInput
+                className="split-value"
+                aria-label={`${boxLabel} for ${m.display_name}`}
+                placeholder={boxLabel}
+                inputMode="decimal"
+                value={values[m.user_id] ?? ''}
+                onChange={(x) => setVal(m.user_id, x.target.value)}
+              />
+            )}
+          </div>
+        ))}
+      </Stack>
+      {type !== 'EQUAL' && totals && (
+        <Text size="sm" c={totals.ok ? 'teal' : 'orange'}>{totals.text}</Text>
+      )}
+      {preview && (
+        <Paper p="sm" radius="md" style={{ background: 'var(--mantine-color-teal-0)', border: '1px solid var(--mantine-color-teal-2)' }}>
+          <Text size="sm" fw={600} c="teal.9">Live preview · preview-split</Text>
+          <Text size="sm" mt={4}>
+            {Object.entries(preview.shares || {}).map(([id, v]) => (
+              `${displayNameOf(members, id)} ${fmt(v, currency)}`
+            )).join(' · ')}
+          </Text>
+          {preview.unsettled_user_ids?.length > 0 && (
+            <Text size="sm" fw={600} c="orange" mt={4}>
+              Will un-settle {preview.unsettled_user_ids.length} member(s)
+            </Text>
+          )}
+        </Paper>
+      )}
+    </Stack>
+  );
+
+  const saveBtn = !confirm && (
+    <Button type="submit" loading={saving} fullWidth={isMobile}>
+      {existing ? 'Save changes' : isCopy ? 'Save copy' : 'Add expense'}
+    </Button>
+  );
 
   return (
     <form onSubmit={existing ? submitEdit : submit}>
@@ -270,106 +442,29 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
         {isCopy && copyImages.length > 0 && (
           <Text size="sm" c="dimmed">{copyImages.length} receipt(s) will be carried over on save.</Text>
         )}
-        <TextInput label="Title" required value={title} onChange={(x) => setTitle(x.target.value)} />
-        <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} />
-        <Group gap="xs" grow>
-          <Select label="Category" value={category} onChange={setCategory} data={CATS} />
-          <TextInput label="Spent on" type="date" value={spentAt} onChange={(x) => setSpentAt(x.target.value)} />
-        </Group>
-        <Group gap="xs" grow>
-          <TextInput label="Tax (opt)" inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
-          <TextInput label="Tip (opt)" inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
-          <TextInput label="Fee (opt)" inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
-        </Group>
-        <Paper withBorder p="sm" radius="md">
-          <Text size="sm" fw={500} mb={4}>Foreign currency (optional)</Text>
-          <Group gap="xs" grow>
-            <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
-            <TextInput placeholder="Amount" inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
-            <TextInput placeholder="Rate" inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
-          </Group>
-          {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
-            <Text size="xs" c="dimmed" mt={4}>≈ {(Number(origAmt) * Number(fxRate)).toFixed(2)} in group currency</Text>
-          )}
-        </Paper>
-        <Paper withBorder p="sm" radius="md">
-          <Group justify="space-between" mb={4}>
-            <Text size="sm" fw={500}>Guest shares (optional)</Text>
-            <Button size="xs" variant="light" onClick={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}>+ Guest</Button>
-          </Group>
-          {guests.map((g, i) => (
-            <Group key={i} gap="xs" mb={4}>
-              <TextInput placeholder="Label (Kid)" value={g.label} style={{ flex: 2 }}
-                onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: x.target.value } : gg)))} />
-              <TextInput placeholder="$" inputMode="decimal" value={g.amount} style={{ flex: 1 }}
-                onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))} />
-              <Select value={g.covered_by} style={{ flex: 2 }}
-                onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
-                data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
-              <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((gg, j) => j !== i))}>X</Button>
-            </Group>
-          ))}
-          {guests.length === 0 && <Text size="xs" c="dimmed">Extra mouths covered by a member (added on top of their share).</Text>}
-        </Paper>
-        <Checkbox
-          checked={onlyPresent}
-          onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
-          label="Only members present (joined before spent date)"
-        />
-        <Select
-          label="Payer"
-          value={payer}
-          onChange={setPayer}
-          data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
-        />
-        <ScrollArea type="scroll">
-          <SegmentedControl
-            value={type}
-            onChange={changeType}
-            data={['EQUAL', 'EXACT', 'PERCENT', 'SHARES']}
-            styles={{ root: { minWidth: 400 } }}
-          />
-        </ScrollArea>
-        <Text size="sm" fw={500}>Participants</Text>
-        <Stack gap={4}>
-          {members.map((m) => (
-            <div key={m.user_id} className="split-row">
-              <Checkbox
-                checked={sel.includes(m.user_id)}
-                onChange={() => toggle(m.user_id)}
-                label={m.display_name}
-              />
-              {type !== 'EQUAL' && sel.includes(m.user_id) && (
-                <TextInput
-                  className="split-value"
-                  aria-label={`${boxLabel} for ${m.display_name}`}
-                  placeholder={boxLabel}
-                  inputMode="decimal"
-                  value={values[m.user_id] ?? ''}
-                  onChange={(x) => setVal(m.user_id, x.target.value)}
-                />
-              )}
-            </div>
-          ))}
-        </Stack>
-        {type !== 'EQUAL' && totals && (
-          <Text size="sm" c={totals.ok ? 'teal' : 'orange'}>{totals.text}</Text>
-        )}
-        {preview && (
-          <Paper withBorder p="sm" radius="md">
-            <Text size="sm">
-              Preview:{' '}
-              {Object.entries(preview.shares || {}).map(([id, v]) => (
-                `${displayNameOf(members, id)} ${(v / 100).toFixed(2)}`
-              )).join(' · ')}
-            </Text>
-            {preview.unsettled_user_ids?.length > 0 && (
-              <Text size="sm" fw={600} c="orange">
-                Will un-settle {preview.unsettled_user_ids.length} member(s)
-              </Text>
-            )}
-          </Paper>
-        )}
+        <Box visibleFrom="sm">
+          <Stack gap="sm">
+            {basics}
+            {bill}
+            {split}
+          </Stack>
+        </Box>
+        <Box hiddenFrom="sm">
+          <Accordion multiple value={openSections} onChange={setOpenSections} variant="separated" radius="md">
+            <Accordion.Item value="basics">
+              <Accordion.Control>Basics</Accordion.Control>
+              <Accordion.Panel>{basics}</Accordion.Panel>
+            </Accordion.Item>
+            <Accordion.Item value="bill">
+              <Accordion.Control>Bill details</Accordion.Control>
+              <Accordion.Panel>{bill}</Accordion.Panel>
+            </Accordion.Item>
+            <Accordion.Item value="split">
+              <Accordion.Control>Split</Accordion.Control>
+              <Accordion.Panel>{split}</Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+        </Box>
         {confirm && (
           <Alert color="orange" variant="light" title="This will un-settle the following members">
             <Text size="sm" mb="xs">{confirm.join(', ')}. Continue?</Text>
@@ -381,7 +476,12 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone }) {
             </Group>
           </Alert>
         )}
-        {!confirm && <Button type="submit" loading={saving}>{existing ? 'Save changes' : isCopy ? 'Save copy' : 'Add expense'}</Button>}
+        {!confirm && (
+          <>
+            <Box visibleFrom="sm">{saveBtn}</Box>
+            <Box hiddenFrom="sm" className="sticky-bar">{saveBtn}</Box>
+          </>
+        )}
         {imgErrs.length > 0 && (
           <Alert color="orange" variant="light" title="Receipt carry-over failed">
             <Text size="sm">{imgErrs.join('; ')}</Text>

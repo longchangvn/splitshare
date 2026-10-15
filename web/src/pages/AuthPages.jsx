@@ -7,24 +7,62 @@ import {
 import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
 
+function AuthBrand({ compact }) {
+  return (
+    <>
+      <Box
+        w={compact ? 52 : 48}
+        h={compact ? 52 : 48}
+        mb="sm"
+        mt={compact ? undefined : 0}
+        mx={compact ? 'auto' : undefined}
+        style={{
+          background: 'rgba(255,255,255,0.18)',
+          border: '1px solid rgba(255,255,255,0.35)',
+          borderRadius: 14,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontWeight: 800,
+          fontSize: 24,
+        }}
+        aria-hidden
+      >
+        S
+      </Box>
+      <Text fw={800} size={compact ? 22 : 26}>SplitShare</Text>
+      <Text size="sm" mt={4} style={{ opacity: 0.9 }}>
+        {compact ? 'Split less. Settle smart.' : 'Split expenses with friends, settle up in seconds'}
+      </Text>
+    </>
+  );
+}
+
 function AuthLayout({ children }) {
   return (
-    <Container size={720} my="md">
+    <Container size={760} my="md">
       <Center mih="calc(100vh - 140px)">
         <Paper withBorder shadow="md" radius="lg" style={{ overflow: 'hidden', width: '100%' }}>
+          {/* Mobile brand banner: compact, matches mockup screen 1 */}
+          <Box
+            hiddenFrom="sm"
+            p="lg"
+            ta="center"
+            c="white"
+            style={{ background: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)' }}
+          >
+            <AuthBrand compact />
+          </Box>
           <Grid gutter={0}>
-            <Grid.Col span={{ base: 12, sm: 5 }}>
+            <Grid.Col span={{ base: 12, sm: 5 }} visibleFrom="sm">
               <Box
                 p="xl"
                 h="100%"
                 c="white"
                 style={{ background: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)' }}
               >
-                <Text fw={800} size={26}>SplitShare</Text>
-                <Text size="sm" mt={4} style={{ opacity: 0.9 }}>
-                  Split expenses with friends, settle up in seconds
-                </Text>
-                <List size="sm" mt="lg" spacing="sm" visibleFrom="sm">
+                <AuthBrand />
+                <List size="sm" mt="lg" spacing="sm">
                   <List.Item>Snap a receipt, split it any way you like</List.Item>
                   <List.Item>Fewest transfers, fully explained</List.Item>
                   <List.Item>Settle up and lock it in</List.Item>
@@ -57,7 +95,10 @@ export function Login() {
   return (
     <AuthLayout>
       <Stack gap="sm">
-        <Title order={3}>Log in</Title>
+        <div>
+          <Title order={3}>Welcome back 👋</Title>
+          <Text size="sm" c="dimmed">Log in to sync your groups</Text>
+        </div>
         <form onSubmit={go}>
           <Stack gap="sm">
             <TextInput label="Username or email" required autoFocus autoComplete="username" name="username" value={id} onChange={(x) => setId(x.target.value)} />
@@ -71,6 +112,9 @@ export function Login() {
         <Text ta="center" size="sm">
           No account? <Anchor component={Link} to="/register">Register</Anchor>
           {' · '}<Anchor component={Link} to="/forgot">Forgot password?</Anchor>
+        </Text>
+        <Text ta="center" size="xs" c="dimmed">
+          username 3–30 a-z0-9_.- · password 8+ with a letter and a digit
         </Text>
       </Stack>
     </AuthLayout>
