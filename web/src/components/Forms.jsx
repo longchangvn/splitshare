@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert, Box, Button, Checkbox, Group, Select, Stack, Text, TextInput,
 } from '@mantine/core';
@@ -13,6 +13,16 @@ const splitVal = (s, type) => {
   if (type === 'PERCENT' && s.percent != null) return s.percent.toString();
   if (type === 'SHARES' && s.shares != null) return s.shares.toString();
   return '';
+};
+
+// Shorten long filenames for the staged list (keep start + extension).
+const shortName = (name) => {
+  if (!name || name.length <= 28) return name || '';
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot) : '';
+  const base = dot > 0 ? name.slice(0, dot) : name;
+  const keep = Math.max(0, 26 - ext.length);
+  return `${base.slice(0, Math.min(18, keep))}…${base.slice(-Math.max(0, keep - 18))}${ext}`;
 };
 
 // Equal-percent distribution that sums to exactly 100.00 (mirrors server largest-remainder).
@@ -40,11 +50,15 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   };
   const initValues = (type, sel) => {
     const out = {};
+    if (type === 'SHARES') {
+      for (const id of sel) out[id] = '1';
+    }
     if (!source || !source.splits) return out;
     for (const s of source.splits) {
       if (!sel.includes(s.user_id)) continue;
       const v = splitVal(s, type);
       if (v !== '') out[s.user_id] = v;
+      else if (type === 'SHARES' && !(s.user_id in out)) out[s.user_id] = '1';
     }
     return out;
   };
@@ -116,7 +130,12 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
       setValues((prev) => { const n = { ...prev }; delete n[id]; return n; });
     } else {
       setSel([...sel, id]);
-      if (id in stashed) setValues((prev) => ({ ...prev, [id]: stashed[id] }));
+      if (id in stashed) {
+        setValues((prev) => ({ ...prev, [id]: stashed[id] }));
+      } else if (type === 'SHARES') {
+        // New participant in SHARES mode defaults to 1 share (not empty/0).
+        setValues((prev) => ({ ...prev, [id]: prev[id] ?? '1' }));
+      }
     }
   };
   const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: v }));
@@ -147,7 +166,11 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
       body.percent = sel.map((id) => ({ user_id: id, percent: Number(values[id] || 0) }));
     }
     if (type === 'SHARES') {
-      body.shares = sel.map((id) => ({ user_id: id, shares: Math.round(Number(values[id] || 0)) }));
+      // Empty box means 1 share (avoids 0 -> 422 dead-end).
+      body.shares = sel.map((id) => ({
+        user_id: id,
+        shares: values[id] === '' || values[id] == null ? 1 : Math.max(1, Math.round(Number(values[id] || 1))),
+      }));
     }
     return body;
   };
@@ -185,6 +208,39 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   }, [amount, type, payer, category, spentAt, tax, tip, fee, origCur, origAmt, fxRate,
     JSON.stringify(guests), onlyPresent, sel.join(','), Object.values(values).join('|')]);
 
+  // Staged receipts for create: picked now, uploaded only on Save.
+  const [staged, setStaged] = useState([]);
+  const fileRef = useRef(null);
+  const RECEIPT_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif';
+  const maxStaged = 5 - copyImages.length;
+  const onPickFiles = (ev) => {
+    const picked = Array.from(ev.target.files || []);
+    ev.target.value = '';
+    if (picked.length === 0) return;
+    const ok = [];
+    for (const f of picked) {
+      if (f.size > 10 * 1024 * 1024) {
+        setE({ message: `${f.name}: over 10MB.` });
+        continue;
+      }
+      ok.push(f);
+    }
+    setStaged((prev) => [...prev, ...ok].slice(0, Math.max(0, maxStaged)));
+  };
+  const uploadStaged = async (newExpenseId) => {
+    const failures = [];
+    for (const file of staged) {
+      try {
+        const form = new FormData();
+        form.append('file', file, file.name);
+        await api.postForm(`/api/v1/expenses/${newExpenseId}/images`, form);
+      } catch (err) {
+        failures.push(`${file.name}: ${err.message}`);
+      }
+    }
+    return failures;
+  };
+
   // Task 4.2: carry source receipts onto the copy by download + re-upload.
   const carryImages = async (newExpenseId) => {
     const failures = [];
@@ -194,8 +250,9 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
         if (!r.ok) throw new Error(`download ${r.status}`);
         const blob = await r.blob();
+        const ext = (img.mime || blob.type || '').split('/')[1]?.split('+')[0] || 'jpg';
         const form = new FormData();
-        form.append('file', new File([blob], 'receipt', { type: img.mime || blob.type }));
+        form.append('file', new File([blob], `receipt.${ext}`, { type: img.mime || blob.type }));
         await api.postForm(`/api/v1/expenses/${newExpenseId}/images`, form);
       } catch (err) {
         failures.push(`${img.image_id.slice(0, 8)}: ${err.message}`);
@@ -214,13 +271,21 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
       if (!existing) {
         const r = await api.post(`/api/v1/groups/${groupId}/expenses`, build());
         const newId = r.expense?.expense_id;
-        if (isCopy && newId && copyImages.length > 0) {
-          const failures = await carryImages(newId);
+        if (newId && (isCopy || staged.length > 0)) {
+          const failures = [];
+          if (isCopy && copyImages.length > 0) {
+            failures.push(...await carryImages(newId));
+          }
+          if (staged.length > 0) {
+            failures.push(...await uploadStaged(newId));
+          }
           if (failures.length > 0) {
             setImgErrs(failures);
-            notifications.show({ title: 'Expense copied; some receipts failed', message: failures.join('; '), color: 'orange' });
-          } else {
+            notifications.show({ title: 'Expense saved; some receipts failed', message: failures.join('; '), color: 'orange' });
+          } else if (isCopy && copyImages.length > 0) {
             notifications.show({ title: 'Expense copied with receipts', color: 'teal' });
+          } else if (staged.length > 0) {
+            notifications.show({ title: 'Expense saved with receipts', color: 'teal' });
           }
         }
         onDone(r);
@@ -257,8 +322,10 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
 
   const boxLabel = type === 'EXACT' ? 'Exact $' : type === 'PERCENT' ? 'Percent %' : 'Shares';
 
-  // Receipt strip: carried/thumbnail count + where to attach.
-  const receiptCount = isCopy ? copyImages.length : (source?.images?.length || 0);
+  // Receipt strip: staged (create) or existing images (edit).
+  const receiptCount = existing
+    ? (source?.images?.length || 0)
+    : copyImages.length + staged.length;
 
   // EQUAL explainer: floor + remainder 1¢, who gets +1¢.
   const equalNote = (() => {
@@ -289,8 +356,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
 
       <section className="wizard-section">
         <h3 className="wizard-section-title">Basics</h3>
-        <div className="wizard-person" style={{ alignItems: 'center' }}>
-          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+        <div className="wizard-person" style={{ alignItems: 'stretch', flexDirection: 'column', gap: 8 }}>
+          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             {receiptCount > 0 ? (
               Array.from({ length: Math.min(receiptCount, 3) }).map((_, i) => (
                 <Box key={i} w={40} h={40} style={{ background: '#fff4e5', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flex: 'none' }} aria-hidden>🧾</Box>
@@ -298,17 +365,42 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
             ) : (
               <Box w={40} h={40} style={{ border: '1.5px dashed #d7e2dc', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#8a938f', flex: 'none' }} aria-hidden>＋</Box>
             )}
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <Text size="sm" fw={600}>{receiptCount}/5 receipts</Text>
               <Text size="xs" c="dimmed">
-                {isCopy
-                  ? 'Carried over on save.'
-                  : existing
-                    ? 'Manage on the expense page.'
-                    : 'Attach after save · jpg/png/webp/heic ≤10MB'}
+                {existing
+                  ? 'Manage on the expense page.'
+                  : 'Added now, uploaded on Save · jpg/png/webp/heic ≤10MB'}
               </Text>
             </div>
+            {!existing && (
+              <>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept={RECEIPT_ACCEPT}
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={onPickFiles}
+                />
+                <Button size="xs" variant="light" style={{ flex: 'none' }} disabled={maxStaged <= 0 || staged.length >= maxStaged} onClick={() => fileRef.current?.click()}>
+                  Add receipt{maxStaged <= 0 || staged.length >= maxStaged ? ' (full)' : ''}
+                </Button>
+              </>
+            )}
           </Group>
+          {!existing && staged.length > 0 && (
+            <Stack gap={4}>
+              {staged.map((f, i) => (
+                <Group key={`${f.name}-${f.size}-${i}`} gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+                  <Text size="xs" style={{ flex: 1, minWidth: 0 }} truncate title={f.name}>🧾 {shortName(f.name)}</Text>
+                  <Text size="xs" c="dimmed" style={{ flex: 'none' }}>{(f.size / 1024).toFixed(0)}KB</Text>
+                  <Button size="xs" variant="subtle" color="red" style={{ flex: 'none' }} onClick={() => setStaged(staged.filter((_, j) => j !== i))}>X</Button>
+                </Group>
+              ))}
+              <Text size="xs" c="dimmed">Uploads when you click {isCopy ? 'Save copy' : 'Add expense'}.</Text>
+            </Stack>
+          )}
         </div>
         <TextInput label="Title" required placeholder="Dinner" value={title} onChange={(x) => setTitle(x.target.value)} />
         <TextInput label="Amount" required inputMode="decimal" placeholder="0.00" value={amount} onChange={(x) => setAmount(x.target.value)} />
@@ -331,8 +423,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
         />
       </section>
 
-      <section className="wizard-section">
-        <h3 className="wizard-section-title">Bill details</h3>
+      <details className="wizard-section">
+        <summary className="wizard-section-title" style={{ cursor: 'pointer' }}>Bill details (optional)</summary>
         <Group gap="xs" grow>
           <TextInput label="Tax (opt)" inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
           <TextInput label="Tip (opt)" inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
@@ -385,7 +477,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
           label="Only members present (joined before spent date)"
         />
-      </section>
+      </details>
 
       <section className="wizard-section">
         <h3 className="wizard-section-title">Split</h3>
@@ -423,9 +515,10 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
                   <TextInput
                     className="split-value"
                     aria-label={`${boxLabel} for ${m.display_name}`}
-                    placeholder={boxLabel}
-                    inputMode="decimal"
-                    value={values[m.user_id] ?? ''}
+                    placeholder={type === 'SHARES' ? '1' : boxLabel}
+                    inputMode={type === 'SHARES' ? 'numeric' : 'decimal'}
+                    min={type === 'SHARES' ? 1 : undefined}
+                    value={values[m.user_id] ?? (type === 'SHARES' ? '1' : '')}
                     onChange={(x) => setVal(m.user_id, x.target.value)}
                     style={{ width: 110 }}
                   />

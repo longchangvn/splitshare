@@ -169,7 +169,9 @@ public static class ExpenseEndpoints
             if (found is null) return ApiResults.Error("NOT_FOUND", "Image not found.", 404);
             var data = await store.OpenAsync(found.Value.Key);
             if (data is null) return ApiResults.Error("NOT_FOUND", "File missing.", 404);
-            return Results.File(data.Value.Stream, data.Value.Mime);
+            // Serve the stored mime (DB truth), not the filename extension, so
+            // extensionless copy-flow files ('receipt') still render.
+            return Results.File(data.Value.Stream, found.Value.Mime);
         });
     }
 

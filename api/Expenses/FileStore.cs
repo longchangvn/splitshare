@@ -15,6 +15,18 @@ public sealed class LocalFileStore(IConfiguration config, ILogger<LocalFileStore
     {
         var safe = string.Concat(fileName.Where(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_'));
         if (string.IsNullOrWhiteSpace(safe)) safe = "receipt";
+        // Ensure an extension so files are identifiable on disk (serving uses DB mime).
+        if (!Path.HasExtension(safe))
+        {
+            safe += mime.ToLowerInvariant() switch
+            {
+                "image/png" => ".png",
+                "image/webp" => ".webp",
+                "image/heic" or "image/heic-sequence" => ".heic",
+                "image/heif" or "image/heif-sequence" => ".heif",
+                _ => ".jpg"
+            };
+        }
         var key = Path.Combine(expenseId.ToString("N"), $"{Guid.NewGuid():N}_{safe}");
         var full = Path.Combine(Root, key);
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);

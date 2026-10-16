@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Badge, Button, Card, Code, FileButton, Group, Image, List, Stack,
+  Anchor, Badge, Button, Card, Code, Group, Image, List, Stack,
   Text, TextInput, Title,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
@@ -51,13 +51,21 @@ export function ExpenseDetail() {
     });
   };
   const [uploading, setUploading] = useState(false);
-  const [uploadKey, setUploadKey] = useState(0);
-  const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
+  const fileRef = useRef(null);
+  const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif';
+  const pickFile = () => {
+    setE(null);
+    fileRef.current?.click();
+  };
+  const onFilePicked = async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = ''; // reset so the same file can be picked again
+    await upload(file);
+  };
   const upload = async (file) => {
     if (!file || uploading) return;
     if (file.size > 10 * 1024 * 1024) {
       setE({ message: `${file.name}: over 10MB.` });
-      setUploadKey((k) => k + 1); // reset picker so the same file can be retried
       return;
     }
     const form = new FormData();
@@ -67,7 +75,7 @@ export function ExpenseDetail() {
       await api.postForm(`/api/v1/expenses/${eid}/images`, form);
       notifications.show({ title: 'Receipt uploaded', color: 'teal' });
       load();
-    } catch (err) { setE(err); } finally { setUploading(false); setUploadKey((k) => k + 1); }
+    } catch (err) { setE(err); } finally { setUploading(false); }
   };
   const [deletingImg, setDeletingImg] = useState(null);
   const delImg = async (iid) => {
@@ -94,29 +102,20 @@ export function ExpenseDetail() {
           <Badge color={statusColor(x.status)} variant="light">{x.status}</Badge>
         </Group>
         {x.description && <Text mb="sm">{x.description}</Text>}
-        <Text size="sm" mb="sm">Paid by <b>{displayNameOf(members, x.payer_id)}</b></Text>
+        <Text size="sm" mb="sm">Paid by <b>{displayNameOf(members, x.payer_id)}</b> · <b>{fmt(x.amount_cents, '')}</b></Text>
         <Group gap="xs" mb="sm">
-          <Badge variant="outline">Total {fmt(x.amount_cents, '')}</Badge>
-          <Badge variant="outline">v{x.version}</Badge>
-          <Badge variant="outline">settlement v{d.settlement_version}</Badge>
           {x.category && <Badge variant="light">{x.category}</Badge>}
           {x.spent_at && <Badge variant="light">{String(x.spent_at).slice(0, 10)}</Badge>}
         </Group>
-        {(x.tax_cents > 0 || x.tip_cents > 0 || x.fee_cents > 0) && (
+        {((x.tax_cents > 0 || x.tip_cents > 0 || x.fee_cents > 0) || x.orig_currency || (x.guests || []).length > 0) && (
           <Text size="sm" mb="sm" c="dimmed">
-            incl. {x.tax_cents > 0 && <>tax {fmt(x.tax_cents, '')} </>}
+            {x.tax_cents > 0 && <>tax {fmt(x.tax_cents, '')} </>}
             {x.tip_cents > 0 && <>tip {fmt(x.tip_cents, '')} </>}
-            {x.fee_cents > 0 && <>fee {fmt(x.fee_cents, '')}</>}
-          </Text>
-        )}
-        {x.orig_currency && (
-          <Text size="sm" mb="sm" c="dimmed">
-            Paid {(x.orig_amount_cents / 100).toFixed(2)} {x.orig_currency} @ {x.fx_rate}
-          </Text>
-        )}
-        {(x.guests || []).length > 0 && (
-          <Text size="sm" mb="sm">
-            Guests: {(x.guests || []).map((g) => `${g.label} (${fmt(g.share_cents, '')} via ${displayNameOf(members, g.covered_by)})`).join(' · ')}
+            {x.fee_cents > 0 && <>fee {fmt(x.fee_cents, '')} </>}
+            {x.orig_currency && <>· paid {(x.orig_amount_cents / 100).toFixed(2)} {x.orig_currency} @ {x.fx_rate} </>}
+            {(x.guests || []).length > 0 && (
+              <>· guests: {(x.guests || []).map((g) => `${g.label} (${fmt(g.share_cents, '')} via ${displayNameOf(members, g.covered_by)})`).join(', ')}</>
+            )}
           </Text>
         )}
         <Err e={e} />
@@ -161,9 +160,14 @@ export function ExpenseDetail() {
       <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
         <Group justify="space-between" mb="sm">
           <Title order={4}>Receipts</Title>
-          <FileButton key={uploadKey} onChange={upload} accept={ACCEPT} disabled={uploading}>
-            {(props) => <Button size="xs" {...props} loading={uploading}>Upload receipt</Button>}
-          </FileButton>
+          <input
+            ref={fileRef}
+            type="file"
+            accept={ACCEPT}
+            style={{ display: 'none' }}
+            onChange={onFilePicked}
+          />
+          <Button size="xs" loading={uploading} onClick={pickFile}>Upload receipt</Button>
         </Group>
         {x.images.length === 0 && <Text size="sm" c="dimmed">No receipts attached. jpg/png/webp/heic ≤10MB, GPS stripped.</Text>}
         <Group gap="sm">
@@ -179,10 +183,10 @@ export function ExpenseDetail() {
         </Group>
       </Card>
 
-      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
-        <Title order={4} mb="sm">History</Title>
+      <details style={{ marginTop: 12 }}>
+        <summary><Title order={4} style={{ display: 'inline' }}>History ({d.audit.length})</Title></summary>
         {d.audit.length === 0 && <Text size="sm" c="dimmed">No changes recorded.</Text>}
-        <List size="sm" spacing="xs">
+        <List size="sm" spacing="xs" mt="sm">
           {d.audit.map((a, i) => (
             <List.Item key={i}>
               <Text size="xs" c="dimmed">{a.at}</Text>
@@ -190,7 +194,7 @@ export function ExpenseDetail() {
             </List.Item>
           ))}
         </List>
-      </Card>
+      </details>
 
       <Comments eid={eid} members={members} />
     </Shell>
@@ -243,18 +247,22 @@ function Comments({ eid, members }) {
 // Images are auth-gated: fetch as blob with the Bearer token.
 function ImgView({ id, mime, size }) {
   const [url, setUrl] = useState(null);
+  const [err, setErr] = useState(null);
   useEffect(() => {
     let live = true;
     (async () => {
-      const r = await fetch(`/api/v1/images/${id}`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
-      if (!r.ok) return;
-      const blob = await r.blob();
-      if (live) setUrl(URL.createObjectURL(blob));
+      try {
+        const r = await fetch(`/api/v1/images/${id}`,
+          { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
+        if (!r.ok) { if (live) setErr(`load failed (${r.status})`); return; }
+        const blob = await r.blob();
+        if (live) setUrl(URL.createObjectURL(blob));
+      } catch (e) { if (live) setErr(String(e?.message || e)); }
     })();
     return () => { live = false; if (url) URL.revokeObjectURL(url); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  if (err) return <Text size="xs" c="red">{mime} {(size / 1024).toFixed(1)}KB · {err}</Text>;
   if (!url) return <Text size="xs" c="dimmed">{mime} {(size / 1024).toFixed(1)}KB…</Text>;
   return (
     <a href={url} target="_blank" rel="noreferrer">

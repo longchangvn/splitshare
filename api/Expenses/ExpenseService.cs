@@ -570,16 +570,32 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         if (e is null) return new(false, "NOT_FOUND", "Expense not found.");
         var guard = await GuardAsync(e.GroupId, actorId, expenseId, needWriter: true);
         if (!guard.Ok) return guard;
-        if (!AllowedMimes.Contains(mime)) return new(false, "VALIDATION", "Allowed: jpg png webp heic.");
+        // Browsers sometimes send empty or non-standard content types (e.g. HEIC
+        // from iOS, or image/jpg). Infer from filename when missing.
+        var norm = (mime ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(norm) || norm == "application/octet-stream")
+        {
+            norm = Path.GetExtension(fileName ?? "").ToLowerInvariant() switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                ".heic" => "image/heic",
+                ".heif" => "image/heif",
+                _ => norm
+            };
+        }
+        if (norm == "image/jpg") norm = "image/jpeg";
+        if (!AllowedMimes.Contains(norm)) return new(false, "VALIDATION", $"Allowed: jpg png webp heic (got '{mime}').");
         if (bytes.Length == 0 || bytes.Length > MaxImageBytes)
             return new(false, "VALIDATION", $"Image must be 1B-10MB (got {bytes.Length}B).");
         var count = await db.ExpenseImages.CountAsync(i => i.ExpenseId == expenseId);
         if (count >= MaxImages) return new(false, "VALIDATION", $"Max {MaxImages} images per expense.");
-        var clean = ImageSanitizer.Sanitize(bytes, mime);
-        var key = await files.SaveAsync(expenseId, fileName, mime, new MemoryStream(clean));
+        var clean = ImageSanitizer.Sanitize(bytes, norm);
+        var key = await files.SaveAsync(expenseId, fileName, norm, new MemoryStream(clean));
         var img = new ExpenseImage
         {
-            ExpenseId = expenseId, StorageKey = key, Mime = mime,
+            ExpenseId = expenseId, StorageKey = key, Mime = norm,
             SizeBytes = clean.Length, UploadedBy = actorId
         };
         db.ExpenseImages.Add(img);
