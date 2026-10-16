@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  ActionIcon, Anchor, Avatar, Badge, Box, Button, Card, Collapse, CopyButton, Grid, Group, Indicator, Loader,
-  Menu, Modal, Progress, ScrollArea, SegmentedControl, Select, Skeleton, Stack, Table, Tabs, Text, TextInput, Title,
+  ActionIcon, Anchor, Avatar, Badge, Box, Button, Card, Collapse, CopyButton, Group, Indicator, Loader,
+  Menu, Modal, Progress, ScrollArea, SegmentedControl, Select, Skeleton, Stack, Table, Tabs, Text, Textarea, TextInput, Title,
+  Tooltip,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
-import { Net, displayNameOf, initialsOf } from '../components/Net.jsx';
-import { NameValueList, RowMenu } from '../components/Mobile.jsx';
+import { ActivityKindThumb, Net, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
+import { RowMenu } from '../components/Mobile.jsx';
 import { SettlementBox } from '../components/SettlementBox.jsx';
 import { ExpenseForm, PaymentForm } from '../components/Forms.jsx';
+import { StatementPanel } from './Statement.jsx';
+import { ReportPanel } from './Report.jsx';
 
 // Mockup receipt thumbnails (docs/mobile-design.html screen 3): category →
 // emoji tile so ledger cards scan like receipts. Pure presentation.
@@ -57,22 +59,34 @@ export function GroupDetail() {
   const activeFilters = [payer, fStatus, fCat, fMin, fMax, fFrom, fTo]
     .filter((v) => v !== '').length + (fSort === 'newest' ? 0 : 1);
   const [activity, setActivity] = useState([]);
+  const [payHist, setPayHist] = useState([]);
+  const [activityPage, setActivityPage] = useState(1);
+  const ACTIVITY_PAGE_SIZE = 10;
   const [rules, setRules] = useState([]);
-  const [setOpen, setSetOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
   const [renName, setRenName] = useState('');
-  const [sBudget, setSBudget] = useState('');
-  const [sAlert, setSAlert] = useState('80');
-  const [sMode, setSMode] = useState('shared');
-  const [sFee, setSFee] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [shareLink, setShareLink] = useState('');
+  const [renaming, setRenaming] = useState(false);
   const [showExp, setShowExp] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payPreset, setPayPreset] = useState(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [leaveBusy, setLeaveBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState(null);
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteLink, setInviteLink] = useState('');
+  const [inviteTab, setInviteTab] = useState('email');
+  const [inviteEmails, setInviteEmails] = useState('');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteLinkLive, setInviteLinkLive] = useState('');
+  const [rotateBusy, setRotateBusy] = useState(false);
+  const [contactQ, setContactQ] = useState('');
+  const [contacts, setContacts] = useState([]);
+  const [contactBusy, setContactBusy] = useState(false);
   const [newSheetOpen, setNewSheetOpen] = useState(false);
-  const [insightsOpen, setInsightsOpen] = useState(false);
   const [activityLoading, setActivityLoading] = useState(false);
   const ledgerReq = useRef(0);
   const [e, setE] = useState(null);
@@ -81,16 +95,18 @@ export function GroupDetail() {
   const location = useLocation();
   const [copyFrom, setCopyFrom] = useState(() => location.state?.copyFrom ?? null);
   // Deep-link handoff from the mobile Activity tab: open on a given tab.
-  const ALL_TABS = ['ledger', 'balances', 'paid', 'share', 'payments', 'activity', 'recurring'];
-  const [tab, setTab] = useState('ledger');
+  const ALL_TABS = ['report', 'statement', 'ledger', 'balances', 'activity', 'recurring', 'people'];
+  const [tab, setTab] = useState('report');
   useEffect(() => {
-    const t = location.state?.tab;
+    let t = location.state?.tab;
+    if (t === 'payments') t = 'activity';
     if (t && ALL_TABS.includes(t)) {
       setTab(t);
-      if (t === 'activity') { loadActivity(); loadRules(); }
+      if (t === 'activity') { loadActivityFeed(); }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state]);  useEffect(() => {
+  }, [location.state]);
+  useEffect(() => {
     if (location.state?.copyFrom) {
       setCopyFrom(location.state.copyFrom);
       setShowExp(true);
@@ -138,6 +154,16 @@ export function GroupDetail() {
     try { setActivity(await api.get(`/api/v1/groups/${id}/activity?limit=50`)); }
     catch (err) { setE(err); } finally { setActivityLoading(false); }
   };
+  const loadPayHist = async () => {
+    try {
+      const r = await api.get(`/api/v1/groups/${id}/ledger?type=payment&limit=100`);
+      setPayHist(r.items || []);
+    } catch { /* keep prior */ }
+  };
+  const loadActivityFeed = async () => {
+    setActivityPage(1);
+    await Promise.all([loadActivity(), loadPayHist(), loadRules()]);
+  };
   const loadRules = async () => {
     try { setRules(await api.get(`/api/v1/groups/${id}/recurring`)); }
     catch (err) { setE(err); }
@@ -169,52 +195,53 @@ export function GroupDetail() {
   const members = detail?.members || [];
 
   const remove = (uid, name) => {
-    const mid = modals.openConfirmModal({
-      title: 'Remove member',
-      centered: true,
-      children: <Text size="sm">Remove {name}? Blocked while they hold a balance. History is kept.</Text>,
-      labels: { confirm: 'Remove', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: async () => {
-        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
-        try {
-          await api.del(`/api/v1/groups/${id}/members/${uid}`);
-          modals.closeModal(mid);
-          load();
-        } catch (err) {
-          modals.closeModal(mid);
-          setE(err);
-        }
-      },
-    });
+    setRemoveTarget({ uid, name });
+    setE(null);
+    setRemoveOpen(true);
   };
-  const leave = () => {
-    const mid = modals.openConfirmModal({
-      title: 'Leave group',
-      centered: true,
-      children: <Text size="sm">Leave this group? Blocked while you hold a balance.</Text>,
-      labels: { confirm: 'Leave', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: async () => {
-        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
-        try { await api.post(`/api/v1/groups/${id}/leave`, {}); modals.closeModal(mid); nav('/'); }
-        catch (err) { modals.closeModal(mid); setE(err); }
-      },
-    });
+  const confirmRemove = async () => {
+    if (!removeTarget) return;
+    setRemoveBusy(true);
+    try {
+      await api.del(`/api/v1/groups/${id}/members/${removeTarget.uid}`);
+      setRemoveOpen(false);
+      setRemoveTarget(null);
+      load();
+    } catch (err) {
+      setRemoveOpen(false);
+      setRemoveTarget(null);
+      setE(err);
+    } finally {
+      setRemoveBusy(false);
+    }
   };
-  const delGroup = () => {
-    const mid = modals.openConfirmModal({
-      title: 'Delete group',
-      centered: true,
-      children: <Text size="sm">Delete “{detail?.name}”? Only possible when there are no expenses or everything is fully settled.</Text>,
-      labels: { confirm: 'Delete', cancel: 'Cancel' },
-      confirmProps: { color: 'red' },
-      onConfirm: async () => {
-        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
-        try { await api.del(`/api/v1/groups/${id}`); modals.closeModal(mid); nav('/'); }
-        catch (err) { modals.closeModal(mid); setE(err); }
-      },
-    });
+  const leave = () => setLeaveOpen(true);
+  const delGroup = () => setDeleteOpen(true);
+  const confirmLeave = async () => {
+    setLeaveBusy(true);
+    try {
+      await api.post(`/api/v1/groups/${id}/leave`, {});
+      setLeaveOpen(false);
+      nav('/');
+    } catch (err) {
+      setLeaveOpen(false);
+      setE(err);
+    } finally {
+      setLeaveBusy(false);
+    }
+  };
+  const confirmDelete = async () => {
+    setDeleteBusy(true);
+    try {
+      await api.del(`/api/v1/groups/${id}`);
+      setDeleteOpen(false);
+      nav('/');
+    } catch (err) {
+      setDeleteOpen(false);
+      setE(err);
+    } finally {
+      setDeleteBusy(false);
+    }
   };
 
   // Per-row copy / edit for expenses.
@@ -239,7 +266,7 @@ export function GroupDetail() {
     try {
       await api.post(`/api/v1/payments/${pid}/reverse`, {});
       notifications.show({ title: 'Payment reversed', color: 'teal' });
-      load(); loadLedger(); loadSummary();
+      load(); loadLedger(); loadSummary(); loadActivityFeed();
     } catch (err) { setE(err); }
   };
   const setRole = async (uid, role) => {
@@ -255,15 +282,6 @@ export function GroupDetail() {
       load();
     } catch (err) { setE(err); }
   };
-  const billFlatFee = async () => {
-    try {
-      const first = members[0]?.user_id;
-      if (!first) return;
-      await api.post(`/api/v1/groups/${id}/flat-fee`, { payer_id: first });
-      notifications.show({ title: 'Flat fee billed', color: 'teal' });
-      load(); loadLedger(); loadSummary();
-    } catch (err) { setE(err); }
-  };
   const exportCsv = async () => {
     try {
       const r = await fetch(`/api/v1/groups/${id}/export.csv`,
@@ -272,60 +290,80 @@ export function GroupDetail() {
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `${detail?.name || 'group'}-export.csv`;
-      // iOS Safari ignores clicks on detached anchors — must be in the DOM.
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      a.href = url; a.download = `${detail?.name || 'group'}-export.csv`; a.click();
+      URL.revokeObjectURL(url);
     } catch (err) { setE(err); }
   };
-  // Jump to a tab/section from the mobile ⋯ menu (desktop tabs that have no
-  // mobile tab get here instead: paid/share via Insights, the rest by anchor).
-  const jumpTo = (t, anchor, extra) => {
-    setTab(t);
-    if (t === 'activity') {
-      if (activity.length === 0) loadActivity();
-      if (rules.length === 0) loadRules();
-    }
-    if (extra) extra();
-    setTimeout(() => {
-      document.getElementById(anchor || 'group-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 60);
-  };
-  const makeShareLink = async () => {
-    try {
-      const r = await api.post(`/api/v1/groups/${id}/share-link`, {});
-      setShareLink(r.invite_link);
-    } catch (err) { setE(err); }
-  };
-  const openSettings = () => {
-    setRenName(detail?.name || '');
-    setSBudget(detail?.budget ? (detail.budget.budget_cents / 100).toFixed(2) : '');
-    setSAlert(String(detail?.budget?.alert_pct || 80));
-    setSMode(detail?.mode || 'shared');
-    setSFee(detail?.flat_fee_cents ? (detail.flat_fee_cents / 100).toFixed(2) : '');
-    setSetOpen(true);
-  };
-  const saveSettings = async (ev) => {
+  const inviteByEmail = async (ev) => {
     ev.preventDefault();
-    setSaving(true);
+    const list = inviteEmails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+    if (list.length === 0) { setE({ message: 'Enter at least one email.' }); return; }
+    setInviteBusy(true);
     try {
-      if (renName.trim() !== detail?.name) await api.patch(`/api/v1/groups/${id}`, { name: renName.trim() });
-      const body = {};
-      const initBudget = detail?.budget ? (detail.budget.budget_cents / 100).toFixed(2) : '';
-      if (sBudget !== initBudget) body.budget = sBudget === '' ? 0 : Number(sBudget);
-      if (sAlert !== String(detail?.budget?.alert_pct || 80)) body.budget_alert_pct = Number(sAlert) || 80;
-      if (sMode !== (detail?.mode || 'shared')) body.mode = sMode;
-      const initFee = detail?.flat_fee_cents ? (detail.flat_fee_cents / 100).toFixed(2) : '';
-      if (sFee !== initFee) body.flat_fee = sFee === '' ? 0 : Number(sFee);
-      if (Object.keys(body).length > 0) await api.patch(`/api/v1/groups/${id}/settings`, body);
-      setSetOpen(false);
+      const r = await api.post(`/api/v1/groups/${id}/invites`, { emails: list });
+      notifications.show({
+        title: 'Invites sent',
+        message: `added: ${(r.added || []).join(', ') || '—'} · pending: ${(r.pending || []).join(', ') || '—'}`,
+        color: 'teal',
+      });
+      setInviteEmails('');
+      setE(null);
       load();
-      notifications.show({ title: 'Group updated', color: 'teal' });
-    } catch (err) { setE(err); } finally { setSaving(false); }
+    } catch (err) { setE(err); } finally { setInviteBusy(false); }
   };
-
+  const searchContacts = async (ev) => {
+    ev?.preventDefault?.();
+    setContactBusy(true);
+    try {
+      setContacts(await api.get(`/api/v1/contacts?q=${encodeURIComponent(contactQ)}`));
+      setE(null);
+    } catch (err) { setE(err); } finally { setContactBusy(false); }
+  };
+  const addFromContact = async (uid, name) => {
+    try {
+      await api.post(`/api/v1/groups/${id}/members`, { user_ids: [uid] });
+      notifications.show({ title: `${name} added`, color: 'teal' });
+      setContacts((prev) => prev.filter((c) => c.user_id !== uid));
+      load();
+    } catch (err) { setE(err); }
+  };
+  const rotateInviteLink = async () => {
+    setRotateBusy(true);
+    try {
+      const r = await api.post(`/api/v1/groups/${id}/rotate-invite`, {});
+      const next = r.invite_link || '';
+      setInviteLinkLive(next);
+      await load();
+      notifications.show({
+        title: 'Invite link rotated',
+        message: 'The old link no longer works.',
+        color: 'teal',
+      });
+      setE(null);
+    } catch (err) { setE(err); } finally { setRotateBusy(false); }
+  };
+  const openInvite = (tab = 'email') => {
+    setInviteTab(tab);
+    setInviteLinkLive(detail?.invite_link || '');
+    setInviteOpen(true);
+  };
+  const openRename = () => {
+    setRenName(detail?.name || '');
+    setRenameOpen(true);
+  };
+  const saveRename = async (ev) => {
+    ev.preventDefault();
+    const next = renName.trim();
+    if (!next || next === detail?.name) { setRenameOpen(false); return; }
+    setRenaming(true);
+    try {
+      await api.patch(`/api/v1/groups/${id}`, { name: next });
+      setRenameOpen(false);
+      await load();
+      notifications.show({ title: 'Group renamed', color: 'teal' });
+      setE(null);
+    } catch (err) { setE(err); } finally { setRenaming(false); }
+  };
   // Ledger totals over the loaded page.
   const totals = useMemo(() => {
     const items = ledger?.items || [];
@@ -339,6 +377,36 @@ export function GroupDetail() {
     () => (ledger?.items || []).filter((t) => t.kind === 'payment'),
     [ledger],
   );
+
+  // Activity tab: transfers (actionable) + other updates, newest first.
+  // Skip activity kind=payment to avoid duplicating payHist rows.
+  const activityFeed = useMemo(() => {
+    const payRows = (payHist.length > 0 ? payHist : payments).map((p) => ({
+      key: `pay-${p.id}`,
+      sortAt: p.created_at,
+      kind: 'payment',
+      payment: p,
+    }));
+    const actRows = (activity || [])
+      .filter((a) => a.kind !== 'payment')
+      .map((a, i) => ({
+        key: `act-${a.kind}-${a.at}-${i}`,
+        sortAt: a.at,
+        kind: a.kind,
+        activity: a,
+      }));
+    return [...payRows, ...actRows].sort((a, b) => new Date(b.sortAt) - new Date(a.sortAt));
+  }, [payHist, payments, activity]);
+
+  const activityPageCount = Math.max(1, Math.ceil(activityFeed.length / ACTIVITY_PAGE_SIZE));
+  const activityPageSafe = Math.min(activityPage, activityPageCount);
+  const activitySlice = useMemo(() => {
+    const start = (activityPageSafe - 1) * ACTIVITY_PAGE_SIZE;
+    return activityFeed.slice(start, start + ACTIVITY_PAGE_SIZE);
+  }, [activityFeed, activityPageSafe]);
+  useEffect(() => {
+    if (activityPage > activityPageCount) setActivityPage(activityPageCount);
+  }, [activityPage, activityPageCount]);
 
   // Elegant balances: only debtors + who they transfer to (from settlement plan).
   const transfers = plan?.transfers || [];
@@ -369,134 +437,91 @@ export function GroupDetail() {
     );
   }
 
+  const heroPastel = pastelFor(detail.name);
+
   return (
     <Shell>
-      <Anchor component={Link} to="/" size="sm">← All groups</Anchor>
-      <Group gap="sm" mt="xs" mb="xs" justify="space-between" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-          <Title order={2} truncate>{detail.name}</Title>
-          <Badge variant="light" style={{ flex: 'none' }}>{detail.currency}</Badge>
-          {!isMobile && (
-            <>
-              {detail.my_role && <Badge variant="outline">{detail.my_role}</Badge>}
-              {detail.mode && detail.mode !== 'shared' && <Badge variant="outline">{detail.mode}</Badge>}
-            </>
-          )}
-        </Group>
-        {isMobile && (
-          <Menu position="bottom-end" withinPortal={false}>
-            <Menu.Target>
-              <ActionIcon variant="subtle" size="lg" title="More actions" aria-label="More actions">⋯</ActionIcon>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item onClick={() => nav(`/groups/${id}/statement`)}>Statement</Menu.Item>
-              <Menu.Item onClick={() => nav(`/groups/${id}/report`)}>Report</Menu.Item>
-              <Menu.Item onClick={exportCsv}>Export CSV</Menu.Item>
-              <Menu.Divider />
-              <Menu.Item onClick={() => jumpTo('ledger')}>Expenses</Menu.Item>
-              <Menu.Item onClick={() => jumpTo('balances')}>Balances</Menu.Item>
-              <Menu.Item onClick={() => jumpTo('balances', undefined, () => setInsightsOpen(true))}>
-                Total paid & share
-              </Menu.Item>
-              <Menu.Item onClick={() => jumpTo('activity', 'm-transfers')}>Payments</Menu.Item>
-              <Menu.Item onClick={() => jumpTo('activity', 'm-recurring')}>Recurring</Menu.Item>
-              <Menu.Item onClick={() => nav(`/groups/${id}/invite`)}>Invite members</Menu.Item>
-              <Menu.Item onClick={() => { loadLedger(); loadActivity(); loadRules(); loadSummary(); }}>
-                Refresh
-              </Menu.Item>
-              <Menu.Divider />
+      <div className="gd-chrome">
+        <Anchor component={Link} to="/groups" size="sm" className="gd-back">← Groups</Anchor>
+        <div
+          className="gd-hero"
+          style={{
+            '--gt-from': heroPastel.from,
+            '--gt-to': heroPastel.to,
+          }}
+        >
+          <span className="gd-hero-bg" aria-hidden />
+          <span className="gd-hero-scrim" aria-hidden />
+          <div className="gd-hero-bar">
+            <div className="gd-tags">
+              {detail.my_role === 'owner' && <span className="gd-tag is-owner">Owner</span>}
+              {detail.my_role === 'treasurer' && <span className="gd-tag">Treasurer</span>}
+              <span className="gd-tag">
+                {members.length} {members.length === 1 ? 'person' : 'people'}
+              </span>
+              <span className="gd-tag">{detail.currency}</span>
+              {detail.mode && detail.mode !== 'shared' && (
+                <span className="gd-tag">{detail.mode}</span>
+              )}
+            </div>
+          </div>
+          <div className="gd-hero-main">
+            <div className="gd-title-row">
+              <Title order={2} className="gd-title" truncate>{detail.name}</Title>
               {detail.my_role === 'owner' && (
-                <>
-                  <Menu.Item onClick={openSettings}>Settings{detail.my_role ? ` · ${detail.my_role}` : ''}{detail.mode && detail.mode !== 'shared' ? ` · ${detail.mode}` : ''}</Menu.Item>
-                  <Menu.Item onClick={makeShareLink}>Share link</Menu.Item>
-                </>
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  title="Rename group"
+                  aria-label="Rename group"
+                  onClick={openRename}
+                  className="gd-rename"
+                >
+                  ✎
+                </ActionIcon>
               )}
-              {detail.mode === 'event' && detail.flat_fee_cents > 0
-                && (detail.my_role === 'owner' || detail.my_role === 'treasurer') && (
-                <Menu.Item onClick={billFlatFee}>
-                  Bill flat fee ({fmt(detail.flat_fee_cents, detail.currency)})
-                </Menu.Item>
-              )}
-            </Menu.Dropdown>
-          </Menu>
-        )}
-      </Group>
-      {me && <Net v={me.net_cents} c={detail.currency} />}
-      {detail.budget && (
-        isMobile ? (
-          <Box mt="sm">
-            <Group justify="space-between" gap="xs">
-              <Text size="xs" c="dimmed">
-                {fmt(detail.budget.spent_cents, detail.currency)} of {fmt(detail.budget.budget_cents, detail.currency)} ·{' '}
-                {detail.budget.over ? 'over budget' : detail.budget.alert ? 'near limit' : 'on track'}
-              </Text>
-              <Text size="xs" c="dimmed">{detail.budget.pct}%</Text>
-            </Group>
-            <Progress
-              value={Math.min(100, detail.budget.pct)}
-              color={detail.budget.over ? 'red' : detail.budget.alert ? 'orange' : 'teal'}
-              size="sm"
-              radius="xl"
-              mt={4}
-              aria-label={`Budget ${detail.budget.pct} percent`}
-            />
-          </Box>
-        ) : (
-          <Card withBorder padding="sm" radius="md" mt="sm">
-            <Group justify="space-between">
-              <Text size="sm" fw={600}>
-                Budget {fmt(detail.budget.spent_cents, detail.currency)} / {fmt(detail.budget.budget_cents, detail.currency)}
-                {' '}({detail.budget.pct}%)
-              </Text>
-              {detail.budget.over
-                ? <Badge color="red">over budget</Badge>
-                : detail.budget.alert ? <Badge color="orange">alert threshold</Badge> : <Badge color="teal">on track</Badge>}
-            </Group>
-          </Card>
-        )
-      )}
-      {!isMobile && (
-        <Group gap="xs" mt="sm">
-          <Button size="xs" variant="default" onClick={() => nav(`/groups/${id}/statement`)}>Statement</Button>
-          <Button size="xs" variant="default" onClick={() => nav(`/groups/${id}/report`)}>Report</Button>
-          <Button size="xs" variant="default" onClick={exportCsv}>Export CSV</Button>
-          {detail.my_role === 'owner' && (
-            <>
-              <Button size="xs" variant="default" onClick={openSettings}>Settings</Button>
-              <Button size="xs" variant="default" onClick={makeShareLink}>Share link</Button>
-            </>
-          )}
-          {detail.mode === 'event' && detail.flat_fee_cents > 0
-            && (detail.my_role === 'owner' || detail.my_role === 'treasurer') && (
-            <Button size="xs" variant="light" onClick={billFlatFee}>
-              Bill flat fee ({fmt(detail.flat_fee_cents, detail.currency)})
-            </Button>
-          )}
-        </Group>
-      )}
-      {shareLink && (
-        <Card shadow="sm" padding="sm" radius="md" mt="sm" style={{ background: '#0f172a', borderColor: '#0f172a' }}>
-          <Text size="sm" fw={600} c="white">🔗 Invite link</Text>
-          <Text size="xs" c="dimmed" mt={2} style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
-            {shareLink}
-          </Text>
-          <CopyButton value={shareLink}>
-            {({ copied, copy }) => (
-              <Group gap="xs" mt="xs">
-                <Button size="xs" color={copied ? 'teal' : 'blue'} onClick={copy}>
-                  {copied ? 'Copied' : 'Copy link'}
-                </Button>
-                {navigator.share && (
-                  <Button size="xs" variant="light" color="teal" onClick={() => navigator.share({ url: shareLink }).catch(() => {})}>
-                    Share…
-                  </Button>
-                )}
-              </Group>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="sm"
+                title="Invite link"
+                aria-label="Invite link"
+                onClick={() => setShareOpen(true)}
+                className="gd-rename"
+              >
+                <GdActionIcon name="share" />
+              </ActionIcon>
+            </div>
+            {me && (
+              <div className="gd-net">
+                <Net v={me.net_cents} c={detail.currency} />
+              </div>
             )}
-          </CopyButton>
-        </Card>
-      )}
-      <Err e={e} />
+          </div>
+          {detail.budget && (
+            <div className="gd-budget">
+              <Group justify="space-between" gap="xs">
+                <Text size="xs" c="dimmed">
+                  Budget {fmt(detail.budget.spent_cents, detail.currency)} / {fmt(detail.budget.budget_cents, detail.currency)}
+                  {' · '}
+                  {detail.budget.over ? 'over' : detail.budget.alert ? 'near limit' : 'on track'}
+                </Text>
+                <Text size="xs" c="dimmed">{detail.budget.pct}%</Text>
+              </Group>
+              <Progress
+                value={Math.min(100, detail.budget.pct)}
+                color={detail.budget.over ? 'red' : detail.budget.alert ? 'orange' : 'teal'}
+                size="sm"
+                radius="xl"
+                mt={4}
+                aria-label={`Budget ${detail.budget.pct} percent`}
+              />
+            </div>
+          )}
+        </div>
+        <Err e={e} />
+      </div>
 
       <Stack gap="md" mt="md">
         <SettlementBox
@@ -507,55 +532,107 @@ export function GroupDetail() {
         />
 
         {isMobile ? (
-          <Group gap="sm" className="sticky-bar">
-            <Button fullWidth size="md" onClick={() => setNewSheetOpen(true)}>+ New</Button>
-          </Group>
+          <div className="sticky-bar gd-actions">
+            <button type="button" className="gd-action-btn" onClick={() => setNewSheetOpen(true)}>
+              <GdActionIcon name="plus" />
+              <span>New</span>
+            </button>
+            <button type="button" className="gd-action-btn" onClick={exportCsv}>
+              <GdActionIcon name="export" />
+              <span>Export CSV</span>
+            </button>
+            <button type="button" className="gd-action-btn" onClick={() => openInvite('email')}>
+              <GdActionIcon name="invite" />
+              <span>Invite</span>
+            </button>
+            <button type="button" className="gd-action-btn is-danger" onClick={leave}>
+              <GdActionIcon name="leave" />
+              <span>Leave</span>
+            </button>
+            {detail.my_role === 'owner' && (
+              <button type="button" className="gd-action-btn is-danger" onClick={delGroup}>
+                <GdActionIcon name="trash" />
+                <span>Delete</span>
+              </button>
+            )}
+          </div>
         ) : (
-          <Group gap="sm" className="sticky-bar">
-            <Button onClick={() => { setPayPreset(null); setPayOpen(true); }}>Record payment</Button>
-            <Button variant="light" onClick={() => setShowExp(!showExp)}>
-              {showExp ? 'Close expense form' : '+ Expense'}
-            </Button>
-          </Group>
+          <div className="sticky-bar gd-actions">
+            <button type="button" className="gd-action-btn" onClick={() => { setPayPreset(null); setPayOpen(true); }}>
+              <GdActionIcon name="pay" />
+              <span>Record payment</span>
+            </button>
+            <button
+              type="button"
+              className="gd-action-btn"
+              onClick={() => setShowExp(true)}
+            >
+              <GdActionIcon name="expense" />
+              <span>Expense</span>
+            </button>
+            <button type="button" className="gd-action-btn" onClick={exportCsv}>
+              <GdActionIcon name="export" />
+              <span>Export CSV</span>
+            </button>
+            <button type="button" className="gd-action-btn" onClick={() => openInvite('email')}>
+              <GdActionIcon name="invite" />
+              <span>Invite</span>
+            </button>
+            <button type="button" className="gd-action-btn is-danger" onClick={leave}>
+              <GdActionIcon name="leave" />
+              <span>Leave</span>
+            </button>
+            {detail.my_role === 'owner' && (
+              <button type="button" className="gd-action-btn is-danger" onClick={delGroup}>
+                <GdActionIcon name="trash" />
+                <span>Delete</span>
+              </button>
+            )}
+          </div>
         )}
         <div className="sticky-spacer" />
 
-        {showExp && (
-          <Card withBorder shadow="sm" padding="md" radius="md">
-            <ExpenseForm
-              groupId={id}
-              members={members}
-              copyFrom={copyFrom}
-              currency={detail.currency}
-              onDone={() => { setShowExp(false); setCopyFrom(null); load(); loadLedger(); loadSummary(); }}
-            />
-          </Card>
-        )}
-
-        <Card withBorder shadow="sm" padding="md" radius="md" id="group-tabs" style={{ scrollMarginTop: 72 }}>
+        <Card withBorder shadow="sm" padding="md" radius="md" className="gd-tabs">
           <Tabs value={tab} onChange={(v) => {
-            const nv = v ?? 'ledger';
+            let nv = v ?? 'report';
+            if (nv === 'payments') nv = 'activity';
             setTab(nv);
-            if (nv === 'activity') {
-              if (activity.length === 0) loadActivity();
-              if (rules.length === 0) loadRules();
-            }
+            if (nv === 'activity') loadActivityFeed();
+            if (nv === 'recurring' && rules.length === 0) loadRules();
           }}>
           <div className="tab-rail">
           <Tabs.List mb="sm">
-              <Tabs.Tab value="ledger">{isMobile ? 'Expenses' : 'Ledger'}</Tabs.Tab>
+              <Tabs.Tab value="report">Report</Tabs.Tab>
+              <Tabs.Tab value="statement">Statement</Tabs.Tab>
+              <Tabs.Tab value="ledger">Expenses</Tabs.Tab>
               <Tabs.Tab value="balances">Balances</Tabs.Tab>
-              {!isMobile && <Tabs.Tab value="paid">Total paid</Tabs.Tab>}
-              {!isMobile && <Tabs.Tab value="share">Total share</Tabs.Tab>}
-              {!isMobile && <Tabs.Tab value="payments">Payments</Tabs.Tab>}
               <Tabs.Tab value="activity">Activity</Tabs.Tab>
-              {!isMobile && <Tabs.Tab value="recurring">Recurring</Tabs.Tab>}
+              <Tabs.Tab value="recurring">Recurring</Tabs.Tab>
+              <Tabs.Tab value="people">People({members.length})</Tabs.Tab>
           </Tabs.List>
           </div>
 
+            <Tabs.Panel value="report">
+              <ReportPanel
+                groupId={id}
+                detail={detail}
+                summary={summary}
+                embedded
+              />
+            </Tabs.Panel>
+
+            <Tabs.Panel value="statement">
+              <StatementPanel
+                groupId={id}
+                members={members}
+                currency={detail.currency}
+                embedded
+              />
+            </Tabs.Panel>
+
             <Tabs.Panel value="ledger">
           <Group justify="space-between" mb="sm">
-            <Title order={4}>Ledger</Title>
+            <Text size="sm" fw={600}>Expenses</Text>
             <Group gap="xs">
               {ledgerLoading && <Loader size="sm" />}
               {ledger && <Text size="sm" c="dimmed">{ledger.total} total</Text>}
@@ -779,23 +856,19 @@ export function GroupDetail() {
             </Tabs.Panel>
 
             <Tabs.Panel value="balances">
-              <Title order={4} mb="sm">Who owes</Title>
+              <Text size="sm" fw={600} mb="sm">Who owes</Text>
               {debtors.length === 0 && transfers.length === 0 && (
-                <Text c="dimmed" size="sm">All settled — nobody owes anything. 🎉</Text>
+                <Text c="dimmed" size="sm">All settled — nobody owes anything.</Text>
               )}
               <Stack gap="sm">
                 {byDebtor.map(([from, list]) => (
                   <Card key={from} withBorder radius="md" padding="sm">
                     <Group gap="sm" wrap="nowrap">
-                      <Avatar color="red" radius="xl" size="sm">{initialsOf(displayNameOf(members, from))}</Avatar>
+                      <Avatar color="gray" radius="xl" size="sm">{initialsOf(displayNameOf(members, from))}</Avatar>
                       <div style={{ flex: 1 }}>
                         <Group gap="xs">
                           <Text size="sm" fw={600}>{displayNameOf(members, from)} owes</Text>
-                          {isMobile ? (
-                            <Anchor size="xs" c="dimmed" onClick={() => nudge(from, displayNameOf(members, from))}>Nudge</Anchor>
-                          ) : (
-                            <Button size="xs" variant="subtle" onClick={() => nudge(from, displayNameOf(members, from))}>Nudge</Button>
-                          )}
+                          <Anchor size="xs" c="dimmed" onClick={() => nudge(from, displayNameOf(members, from))}>Nudge</Anchor>
                         </Group>
                         {list.map((t, i) => (
                           <Group key={i} gap="xs" mt={2}>
@@ -813,86 +886,7 @@ export function GroupDetail() {
                   <Card key={m.user_id} withBorder radius="md" padding="sm">
                     <Group gap="xs">
                       <Text size="sm"><b>{m.display_name}</b> owes <b>{fmt(m.owe_cents, detail.currency)}</b></Text>
-                      {isMobile ? (
-                        <Anchor size="xs" c="dimmed" onClick={() => nudge(m.user_id, m.display_name)}>Nudge</Anchor>
-                      ) : (
-                        <Button size="xs" variant="subtle" onClick={() => nudge(m.user_id, m.display_name)}>Nudge</Button>
-                      )}
-                    </Group>
-                  </Card>
-                ))}
-              </Stack>
-              {isMobile && (
-                <Box mt="md">
-                  <Button size="xs" variant="light" fullWidth mb="xs" onClick={() => setInsightsOpen(!insightsOpen)} aria-expanded={insightsOpen}>
-                    Insights · paid & share
-                  </Button>
-                  <Collapse in={insightsOpen}>
-                    <Title order={5} mb="xs">Total paid</Title>
-                    <NameValueList
-                      currency={detail.currency}
-                      rows={[...(summary || [])].sort((a, b) => b.total_paid_cents - a.total_paid_cents)
-                        .map((m) => ({ key: m.user_id, label: m.display_name, value: m.total_paid_cents }))}
-                      total={(summary || []).reduce((a, m) => a + m.total_paid_cents, 0)}
-                    />
-                    <Title order={5} mt="sm" mb="xs">Total share</Title>
-                    <NameValueList
-                      currency={detail.currency}
-                      rows={[...(summary || [])].sort((a, b) => b.total_share_cents - a.total_share_cents)
-                        .map((m) => ({ key: m.user_id, label: m.display_name, value: m.total_share_cents }))}
-                      total={(summary || []).reduce((a, m) => a + m.total_share_cents, 0)}
-                    />
-                  </Collapse>
-                </Box>
-              )}
-            </Tabs.Panel>
-
-            <Tabs.Panel value="paid">
-              <Title order={4} mb="sm">Total paid</Title>
-              <NameValueList
-                currency={detail.currency}
-                rows={[...(summary || [])].sort((a, b) => b.total_paid_cents - a.total_paid_cents)
-                  .map((m) => ({ key: m.user_id, label: m.display_name, value: m.total_paid_cents }))}
-                total={(summary || []).reduce((a, m) => a + m.total_paid_cents, 0)}
-              />
-            </Tabs.Panel>
-
-            <Tabs.Panel value="share">
-              <Title order={4} mb="sm">Total share</Title>
-              <NameValueList
-                currency={detail.currency}
-                rows={[...(summary || [])].sort((a, b) => b.total_share_cents - a.total_share_cents)
-                  .map((m) => ({ key: m.user_id, label: m.display_name, value: m.total_share_cents }))}
-                total={(summary || []).reduce((a, m) => a + m.total_share_cents, 0)}
-              />
-            </Tabs.Panel>
-
-            <Tabs.Panel value="payments">
-              <Group justify="space-between" mb="sm">
-                <Title order={4}>Transfer history</Title>
-                <Text size="sm" c="dimmed">Kept forever — stays visible after settle-up</Text>
-              </Group>
-              {payments.length === 0 && <Text size="sm" c="dimmed">No transfers yet.</Text>}
-              <Stack gap="xs">
-                {payments.map((p) => (
-                  <Card key={p.id} withBorder radius="md" padding="sm">
-                    <Group justify="space-between" wrap="nowrap">
-                      <Text size="sm">
-                        {p.from_name || p.from_user_id?.slice(0, 8)} → {p.to_name || p.to_user_id?.slice(0, 8)}:{' '}
-                        <b>{fmt(p.amount_cents, detail.currency)}</b>{' '}
-                        <Text span size="xs" c="dimmed">
-                          {new Date(p.created_at).toLocaleString()}{p.reversed ? ' · reversed' : ''} · {p.status}
-                        </Text>
-                      </Text>
-                      {!p.reversed && p.status === 'OPEN' && (
-                        isMobile ? (
-                          <RowMenu label={`Actions for transfer ${fmt(p.amount_cents, detail.currency)}`}>
-                            <Menu.Item onClick={() => reversePay(p.id)}>Reverse</Menu.Item>
-                          </RowMenu>
-                        ) : (
-                          <Button size="xs" variant="subtle" onClick={() => reversePay(p.id)}>Reverse</Button>
-                        )
-                      )}
+                      <Anchor size="xs" c="dimmed" onClick={() => nudge(m.user_id, m.display_name)}>Nudge</Anchor>
                     </Group>
                   </Card>
                 ))}
@@ -900,111 +894,120 @@ export function GroupDetail() {
             </Tabs.Panel>
 
             <Tabs.Panel value="activity">
-              {!isMobile && (
-                <>
-                  <Group justify="space-between" mb="sm">
-                    <Title order={4}>Activity</Title>
-                    <Button size="xs" variant="default" onClick={loadActivity}>Refresh</Button>
-                  </Group>
-                  {activity.length === 0 && <Text size="sm" c="dimmed">Nothing yet — load to catch up.</Text>}
-                  <Stack gap="xs">
-                    {activity.map((a, i) => (
-                      <Group key={i} gap="xs" wrap="nowrap">
-                        <Badge size="xs" variant="light">{a.kind}</Badge>
-                        <Text size="sm">{a.text} <Text span size="xs" c="dimmed">{new Date(a.at).toLocaleString()}</Text></Text>
-                      </Group>
-                    ))}
-                  </Stack>
-                </>
+              <Group justify="space-between" mb="sm" wrap="wrap">
+                <div>
+                  <Text size="sm" fw={600}>Activity</Text>
+                  <Text size="xs" c="dimmed">Transfers & updates · newest first</Text>
+                </div>
+                <Button size="xs" variant="subtle" onClick={loadActivityFeed} loading={activityLoading}>Refresh</Button>
+              </Group>
+              {activityLoading && activityFeed.length === 0 && (
+                <Stack gap="xs"><Skeleton height={52} radius="md" /><Skeleton height={52} radius="md" /></Stack>
               )}
-              {isMobile && (
-                <Stack gap="md">
-                  <Box id="m-transfers" style={{ scrollMarginTop: 72 }}>
-                    <Group justify="space-between" wrap="nowrap" mb="xs">
-                      <Title order={5}>Transfers</Title>
-                      <Anchor size="xs" c="dimmed" onClick={() => loadLedger()}>Refresh</Anchor>
-                    </Group>
-                    {payments.length === 0 && !ledgerLoading && <Text size="sm" c="dimmed">No transfers yet.</Text>}
-                    {ledgerLoading && payments.length === 0 && <Skeleton height={52} radius="md" />}
-                    <Stack gap="xs">
-                      {payments.map((p) => (
-                        <Card key={p.id} withBorder radius="md" padding="sm">
-                          <Group justify="space-between" wrap="nowrap">
-                            <Text size="sm">
-                              {p.from_name || p.from_user_id?.slice(0, 8)} → {p.to_name || p.to_user_id?.slice(0, 8)}:{' '}
-                              <b>{fmt(p.amount_cents, detail.currency)}</b>{' '}
-                              <Text span size="xs" c="dimmed">
-                                {new Date(p.created_at).toLocaleString()}{p.reversed ? ' · reversed' : ''} · {p.status}
-                              </Text>
-                            </Text>
-                            {!p.reversed && p.status === 'OPEN' && (
+              {!activityLoading && activityFeed.length === 0 && (
+                <Text size="sm" c="dimmed">Nothing yet — record a payment or expense to see it here.</Text>
+              )}
+              {activityFeed.length > 0 && (
+                <div className="activity-list">
+                  {activityFeed.length > ACTIVITY_PAGE_SIZE && (
+                    <div className="activity-pager">
+                      <span className="activity-pager-range">
+                        {(activityPageSafe - 1) * ACTIVITY_PAGE_SIZE + 1}–
+                        {Math.min(activityPageSafe * ACTIVITY_PAGE_SIZE, activityFeed.length)} of {activityFeed.length}
+                      </span>
+                      <div className="activity-pager-controls">
+                        <button
+                          type="button"
+                          className="activity-pager-btn"
+                          disabled={activityPageSafe <= 1}
+                          onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
+                        >
+                          Prev
+                        </button>
+                        <div className="activity-pager-pages">
+                          {Array.from({ length: activityPageCount }, (_, i) => i + 1)
+                            .filter((n) => n === 1 || n === activityPageCount || Math.abs(n - activityPageSafe) <= 1)
+                            .reduce((acc, n, idx, arr) => {
+                              if (idx > 0 && n - arr[idx - 1] > 1) acc.push('…');
+                              acc.push(n);
+                              return acc;
+                            }, [])
+                            .map((n, i) => (
+                              n === '…' ? (
+                                <span key={`e${i}`} className="activity-pager-ellipsis">…</span>
+                              ) : (
+                                <button
+                                  key={n}
+                                  type="button"
+                                  className={`activity-pager-page${n === activityPageSafe ? ' is-active' : ''}`}
+                                  onClick={() => setActivityPage(n)}
+                                >
+                                  {n}
+                                </button>
+                              )
+                            ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="activity-pager-btn"
+                          disabled={activityPageSafe >= activityPageCount}
+                          onClick={() => setActivityPage((p) => Math.min(activityPageCount, p + 1))}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {activitySlice.map((row) => {
+                    if (row.payment) {
+                      const p = row.payment;
+                      const from = p.from_name || (p.from_user_id ? displayNameOf(members, p.from_user_id) : 'Someone');
+                      const to = p.to_name || (p.to_user_id ? displayNameOf(members, p.to_user_id) : 'Someone');
+                      const title = `${from} → ${to}`;
+                      const meta = [
+                        fmt(p.amount_cents, detail.currency),
+                        new Date(p.created_at).toLocaleString(),
+                        p.reversed ? 'reversed' : null,
+                        p.status && p.status !== 'OPEN' ? p.status.toLowerCase() : null,
+                      ].filter(Boolean).join(' · ');
+                      return (
+                        <div key={row.key} className={`activity-row is-static${p.reversed ? ' is-reversed' : ''}`}>
+                          <ActivityKindThumb kind="payment" />
+                          <span className="activity-copy">
+                            <span className="activity-text">{title}</span>
+                            <span className="activity-meta">{meta}</span>
+                          </span>
+                          {!p.reversed && String(p.status).toUpperCase() === 'OPEN' && (
+                            isMobile ? (
                               <RowMenu label={`Actions for transfer ${fmt(p.amount_cents, detail.currency)}`}>
                                 <Menu.Item onClick={() => reversePay(p.id)}>Reverse</Menu.Item>
                               </RowMenu>
-                            )}
-                          </Group>
-                        </Card>
-                      ))}
-                    </Stack>
-                  </Box>
-                  <Box id="m-updates" style={{ scrollMarginTop: 72 }}>
-                    <Group justify="space-between" wrap="nowrap" mb="xs">
-                      <Title order={5}>Updates</Title>
-                      <Anchor size="xs" c="dimmed" onClick={() => loadActivity()}>Refresh</Anchor>
-                    </Group>
-                    {activityLoading && activity.length === 0 && (
-                      <Stack gap="xs"><Skeleton height={20} radius="sm" /><Skeleton height={20} radius="sm" /></Stack>
-                    )}
-                    {!activityLoading && activity.length === 0 && (
-                      <Text size="sm" c="dimmed" onClick={loadActivity} style={{ cursor: 'pointer' }}>
-                        Nothing yet — tap to retry.
-                      </Text>
-                    )}
-                    <Stack gap="xs">
-                      {activity.map((a, i) => (
-                        <Group key={i} gap="xs" wrap="nowrap">
-                          <Badge size="xs" variant="light">{a.kind}</Badge>
-                          <Text size="sm">{a.text} <Text span size="xs" c="dimmed">{new Date(a.at).toLocaleString()}</Text></Text>
-                        </Group>
-                      ))}
-                    </Stack>
-                  </Box>
-                  <Box id="m-recurring" style={{ scrollMarginTop: 72 }}>
-                    <Group justify="space-between" wrap="nowrap" mb="xs">
-                      <Title order={5}>Recurring</Title>
-                      <Anchor size="xs" c="dimmed" onClick={() => loadRules()}>Refresh</Anchor>
-                    </Group>
-                    <RecurringForm groupId={id} members={members} onDone={loadRules} />
-                    <Stack gap="xs" mt="sm">
-                      {rules.map((r) => (
-                        <Card key={r.rule_id} withBorder radius="md" padding="sm">
-                          <Group justify="space-between" wrap="nowrap">
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <Text size="sm" fw={600} truncate>{r.title} <Text span c="dimmed">· {r.frequency}</Text></Text>
-                              <Text size="xs" c="dimmed">{fmt(r.amount_cents, detail.currency)} · next {new Date(r.next_run_at).toLocaleDateString()} · {r.active ? 'active' : 'paused'}</Text>
-                            </div>
-                            <Group gap={2} wrap="nowrap" style={{ flex: 'none' }}>
-                              <Button size="xs" variant="subtle" mih={44} onClick={async () => { await api.patch(`/api/v1/groups/${id}/recurring/${r.rule_id}`, { active: !r.active }); loadRules(); }}>
-                                {r.active ? 'Pause' : 'Resume'}
-                              </Button>
-                              <RowMenu label={`Actions for ${r.title}`}>
-                                <Menu.Item color="red" onClick={async () => { await api.del(`/api/v1/groups/${id}/recurring/${r.rule_id}`); loadRules(); }}>Delete</Menu.Item>
-                              </RowMenu>
-                            </Group>
-                          </Group>
-                        </Card>
-                      ))}
-                      {rules.length === 0 && <Text size="sm" c="dimmed">No rules — add rent, wifi, subscriptions.</Text>}
-                    </Stack>
-                  </Box>
-                </Stack>
+                            ) : (
+                              <Button size="xs" variant="subtle" onClick={() => reversePay(p.id)}>Reverse</Button>
+                            )
+                          )}
+                        </div>
+                      );
+                    }
+                    const a = row.activity;
+                    return (
+                      <div key={row.key} className="activity-row is-static">
+                        <ActivityKindThumb kind={a.kind} />
+                        <span className="activity-copy">
+                          <span className="activity-text">{a.text}</span>
+                          <span className="activity-meta">{new Date(a.at).toLocaleString()}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </Tabs.Panel>
 
             <Tabs.Panel value="recurring">
               <Group justify="space-between" mb="sm">
-                <Title order={4}>Recurring bills</Title>
-                <Button size="xs" variant="default" onClick={loadRules}>Refresh</Button>
+                <Text size="sm" fw={600}>Recurring bills</Text>
+                <Button size="xs" variant="subtle" onClick={loadRules}>Refresh</Button>
               </Group>
               <RecurringForm groupId={id} members={members} onDone={loadRules} />
               <Stack gap="xs" mt="sm">
@@ -1027,135 +1030,90 @@ export function GroupDetail() {
                 {rules.length === 0 && <Text size="sm" c="dimmed">No rules — add rent, wifi, subscriptions.</Text>}
               </Stack>
             </Tabs.Panel>
+
+            <Tabs.Panel value="people">
+              <div className="gd-people">
+                {members.map((m) => {
+                  const pastel = pastelFor(m.display_name || m.username);
+                  const roleLabel = m.role === 'owner' ? 'Owner' : m.role === 'treasurer' ? 'Treasurer' : 'Member';
+                  const roleClass = m.role === 'owner' ? 'is-owner' : m.role === 'treasurer' ? 'is-treasurer' : 'is-member';
+                  const canAct = detail.mode === 'event' || detail.my_role === 'owner';
+                  return (
+                    <div key={m.user_id} className="gd-person">
+                      <span
+                        className="gd-person-avatar"
+                        style={{ '--gt-from': pastel.from, '--gt-to': pastel.to }}
+                        aria-hidden
+                      >
+                        {initialsOf(m.display_name)}
+                      </span>
+                      <div className="gd-person-body">
+                        <div className="gd-person-top">
+                          <Text className="gd-person-name" truncate>{m.display_name}</Text>
+                          <span className={`gd-person-tag ${roleClass}`}>{roleLabel}</span>
+                          {detail.mode === 'event' && (
+                            <span className={`gd-person-tag ${m.deposit_paid ? 'is-deposit' : 'is-deposit-due'}`}>
+                              {m.deposit_paid ? 'Deposit paid' : 'Deposit due'}
+                            </span>
+                          )}
+                        </div>
+                        <Text className="gd-person-handle" truncate>@{m.username}</Text>
+                      </div>
+                      {canAct && (
+                        <div className="gd-person-actions">
+                          {detail.mode === 'event' && (
+                            <Tooltip
+                              label={m.deposit_paid ? 'Unmark deposit' : 'Mark deposit paid'}
+                              withArrow
+                              openDelay={200}
+                            >
+                              <button
+                                type="button"
+                                className={`gd-person-action${m.deposit_paid ? ' is-on' : ''}`}
+                                aria-label={m.deposit_paid ? 'Unmark deposit' : 'Mark deposit paid'}
+                                onClick={() => setDeposit(m.user_id, !m.deposit_paid)}
+                              >
+                                <GdActionIcon name={m.deposit_paid ? 'deposit-on' : 'deposit'} />
+                              </button>
+                            </Tooltip>
+                          )}
+                          {detail.my_role === 'owner' && m.role !== 'owner' && (
+                            <Tooltip
+                              label={m.role === 'treasurer' ? 'Remove treasurer' : 'Make treasurer'}
+                              withArrow
+                              openDelay={200}
+                            >
+                              <button
+                                type="button"
+                                className={`gd-person-action${m.role === 'treasurer' ? ' is-on' : ''}`}
+                                aria-label={m.role === 'treasurer' ? 'Remove treasurer' : 'Make treasurer'}
+                                onClick={() => setRole(m.user_id, m.role === 'treasurer' ? 'member' : 'treasurer')}
+                              >
+                                <GdActionIcon name="treasurer" />
+                              </button>
+                            </Tooltip>
+                          )}
+                          {detail.my_role === 'owner' && m.role !== 'owner' && (
+                            <Tooltip label="Remove" withArrow openDelay={200}>
+                              <button
+                                type="button"
+                                className="gd-person-action is-danger"
+                                aria-label={`Remove ${m.display_name}`}
+                                onClick={() => remove(m.user_id, m.display_name)}
+                              >
+                                <GdActionIcon name="trash" />
+                              </button>
+                            </Tooltip>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Tabs.Panel>
           </Tabs>
         </Card>
-
-        {isMobile ? (
-          <Card withBorder shadow="sm" padding="md" radius="md">
-            <Group justify="space-between" wrap="nowrap" mb="sm">
-              <Title order={4}>People ({members.length})</Title>
-              <Group gap="xs" wrap="nowrap">
-                <Button size="xs" onClick={() => nav(`/groups/${id}/invite`)}>Invite</Button>
-                <Menu position="bottom-end" withinPortal={false}>
-                  <Menu.Target>
-                    <ActionIcon variant="subtle" title="Group actions" aria-label="Group actions">⋯</ActionIcon>
-                  </Menu.Target>
-                  <Menu.Dropdown>
-                    <Menu.Item onClick={leave} color="red">Leave group</Menu.Item>
-                    {detail.my_role === 'owner' && (
-                      <Menu.Item onClick={delGroup} color="red">Delete group</Menu.Item>
-                    )}
-                  </Menu.Dropdown>
-                </Menu>
-              </Group>
-            </Group>
-            <Stack gap="xs">
-              {members.map((m) => (
-                <Group key={m.user_id} justify="space-between" wrap="nowrap">
-                  <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                    <Avatar color="teal" radius="xl" size="sm">{initialsOf(m.display_name)}</Avatar>
-                    <div style={{ minWidth: 0 }}>
-                      <Text size="sm" fw={500} truncate>
-                        {m.display_name}{' '}
-                        <Text span size="xs" c="dimmed">{m.role !== 'member' ? `· ${m.role}` : ''}</Text>
-                        {detail.mode === 'event' && (
-                          <Text span size="xs" c={m.deposit_paid ? 'teal' : 'dimmed'}>
-                            {m.deposit_paid ? ' · deposit ✓' : ' · deposit due'}
-                          </Text>
-                        )}
-                      </Text>
-                      <Text size="xs" c="dimmed" truncate>@{m.username}</Text>
-                    </div>
-                  </Group>
-                  <Menu position="bottom-end" withinPortal={false}>
-                    <Menu.Target>
-                      <ActionIcon variant="subtle" title={`Actions for ${m.display_name}`} aria-label={`Actions for ${m.display_name}`}>⋯</ActionIcon>
-                    </Menu.Target>
-                    <Menu.Dropdown>
-                      {detail.mode === 'event' && (
-                        <Menu.Item onClick={() => setDeposit(m.user_id, !m.deposit_paid)}>
-                          {m.deposit_paid ? 'Unmark deposit' : 'Mark deposit paid'}
-                        </Menu.Item>
-                      )}
-                      {detail.my_role === 'owner' && m.role !== 'owner' && (
-                        <Menu.Item onClick={() => setRole(m.user_id, m.role === 'treasurer' ? 'member' : 'treasurer')}>
-                          {m.role === 'treasurer' ? 'Remove treasurer' : 'Make treasurer'}
-                        </Menu.Item>
-                      )}
-                      {detail.my_role === 'owner' && (
-                        <Menu.Item color="red" onClick={() => remove(m.user_id, m.display_name)}>
-                          Remove
-                        </Menu.Item>
-                      )}
-                    </Menu.Dropdown>
-                  </Menu>
-                </Group>
-              ))}
-            </Stack>
-          </Card>
-        ) : (
-          <Grid>
-            <Grid.Col span={{ base: 12, sm: 6 }}>
-              <Card withBorder shadow="sm" padding="md" radius="md" h="100%">
-                <Title order={4} mb="sm">Members</Title>
-                <Stack gap="xs">
-                  {members.map((m) => (
-                    <Group key={m.user_id} justify="space-between" wrap="nowrap">
-                      <Group gap="sm" wrap="nowrap">
-                        <Avatar color="teal" radius="xl" size="sm">{initialsOf(m.display_name)}</Avatar>
-                        <div>
-                          <Text size="sm" fw={500}>
-                            {m.display_name}
-                            {detail.mode === 'event' && (
-                              <Text span size="xs" c={m.deposit_paid ? 'teal' : 'dimmed'}>
-                                {' '}· {m.deposit_paid ? 'deposit ✓' : 'deposit due'}
-                              </Text>
-                            )}
-                          </Text>
-                          <Text size="xs" c="dimmed">@{m.username} · {m.role}</Text>
-                        </div>
-                      </Group>
-                      <Group gap={2} wrap="nowrap" visibleFrom="sm">
-                        {detail.mode === 'event' && (
-                          <Button size="xs" variant="subtle" title="Toggle deposit" onClick={() => setDeposit(m.user_id, !m.deposit_paid)}>
-                            {m.deposit_paid ? 'Unmark' : 'Paid'}
-                          </Button>
-                        )}
-                        {detail.my_role === 'owner' && m.role !== 'owner' && (
-                          <Button size="xs" variant="subtle" title="Toggle treasurer" onClick={() => setRole(m.user_id, m.role === 'treasurer' ? 'member' : 'treasurer')}>
-                            {m.role === 'treasurer' ? 'Untreasurer' : 'Treasurer'}
-                          </Button>
-                        )}
-                        {detail.my_role === 'owner' && (
-                          <Button size="xs" variant="subtle" color="red" mih={44} onClick={() => remove(m.user_id, m.display_name)}>
-                            Remove
-                          </Button>
-                        )}
-                      </Group>
-                    </Group>
-                  ))}
-                </Stack>
-                <Button fullWidth variant="light" color="red" mt="md" onClick={leave}>
-                  Leave group
-                </Button>
-                {detail.my_role === 'owner' && (
-                  <Button fullWidth variant="outline" color="red" mt="sm" onClick={delGroup}>
-                    Delete group
-                  </Button>
-                )}
-              </Card>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 6 }}>
-              <Card withBorder shadow="sm" padding="md" radius="md" h="100%">
-                <Title order={4} mb="sm">Invite</Title>
-                <Text size="sm" c="dimmed" mb="sm">Invite several people at once, or share a link.</Text>
-                <Button fullWidth onClick={() => nav(`/groups/${id}/invite`)}>
-                  Invite members
-                </Button>
-              </Card>
-            </Grid.Col>
-          </Grid>
-        )}
       </Stack>
 
       <Modal
@@ -1186,7 +1144,55 @@ export function GroupDetail() {
         </Stack>
       </Modal>
 
-      <Modal opened={payOpen} onClose={() => setPayOpen(false)} title="Record payment" centered fullScreen={isMobile}>
+      <Modal
+        opened={showExp}
+        onClose={() => { setShowExp(false); setCopyFrom(null); }}
+        closeOnClickOutside={false}
+        title={(
+          <span className="wizard-title-name">
+            {copyFrom ? 'Copy expense' : 'New expense'}
+          </span>
+        )}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={560}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+        fullScreen={isMobile}
+      >
+        <ExpenseForm
+          groupId={id}
+          members={members}
+          copyFrom={copyFrom}
+          currency={detail.currency}
+          onDone={() => { setShowExp(false); setCopyFrom(null); load(); loadLedger(); loadSummary(); }}
+        />
+      </Modal>
+
+      <Modal
+        opened={payOpen}
+        onClose={() => setPayOpen(false)}
+        closeOnClickOutside={false}
+        title={<span className="wizard-title-name">Record payment</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={520}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+        fullScreen={isMobile}
+      >
         <PaymentForm
           groupId={id}
           members={members}
@@ -1197,6 +1203,7 @@ export function GroupDetail() {
             load();
             loadLedger();
             loadSummary();
+            loadActivityFeed();
             notifications.show({
               title: r.fully_settled ? 'Fully settled' : 'Payment recorded',
               color: 'teal',
@@ -1205,37 +1212,433 @@ export function GroupDetail() {
         />
       </Modal>
 
-      <Modal opened={inviteOpen} onClose={() => setInviteOpen(false)} title="New invite link" centered fullScreen={isMobile}>
-        <Text size="sm" c="dimmed" mb="xs">The old link is dead. Share this one:</Text>
-        <TextInput readOnly value={inviteLink} />
-        <CopyButton value={inviteLink}>
-          {({ copied, copy }) => (
-            <Button fullWidth mt="sm" color={copied ? 'teal' : 'blue'} onClick={copy}>
-              {copied ? 'Copied' : 'Copy link'}
-            </Button>
+      <Modal
+        opened={shareOpen}
+        onClose={() => setShareOpen(false)}
+        closeOnClickOutside={false}
+        title={<span className="wizard-title-name">Invite link</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={480}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+        fullScreen={isMobile}
+      >
+        <div className="wizard-form confirm-dialog">
+          {detail.invite_link ? (
+            <>
+              <Text className="confirm-dialog-text">
+                Anyone with this link can join the group.
+              </Text>
+              <TextInput readOnly value={detail.invite_link} />
+              <CopyButton value={detail.invite_link}>
+                {({ copied, copy }) => (
+                  <Button className="wizard-primary" fullWidth onClick={copy}>
+                    {copied ? 'Link copied' : 'Copy invite link'}
+                  </Button>
+                )}
+              </CopyButton>
+            </>
+          ) : (
+            <Text className="confirm-dialog-text">
+              Only the owner or treasurer can share an invite link.
+            </Text>
           )}
-        </CopyButton>
+        </div>
       </Modal>
 
-      <Modal opened={setOpen} onClose={() => setSetOpen(false)} title="Group settings" centered fullScreen={isMobile}>
-        <form onSubmit={saveSettings}>
+      <Modal
+        opened={removeOpen}
+        onClose={() => !removeBusy && setRemoveOpen(false)}
+        closeOnClickOutside={!removeBusy}
+        title={<span className="wizard-title-name">Remove member</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={420}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+      >
+        <div className="wizard-form confirm-dialog">
+          <Text className="confirm-dialog-text">
+            Remove <b>{removeTarget?.name}</b>? Blocked while they hold a balance. History is kept.
+          </Text>
+          <Group gap="sm" grow>
+            <Button className="wizard-back" onClick={() => setRemoveOpen(false)} disabled={removeBusy}>
+              Cancel
+            </Button>
+            <Button className="wizard-primary is-danger" loading={removeBusy} onClick={confirmRemove}>
+              Remove
+            </Button>
+          </Group>
+          <Err e={e} />
+        </div>
+      </Modal>
+
+      <Modal
+        opened={leaveOpen}
+        onClose={() => !leaveBusy && setLeaveOpen(false)}
+        closeOnClickOutside={!leaveBusy}
+        title={<span className="wizard-title-name">Leave group</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={420}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+      >
+        <div className="wizard-form confirm-dialog">
+          <Text className="confirm-dialog-text">
+            Leave <b>{detail?.name}</b>? You’ll lose access until someone invites you again.
+            Blocked while you hold a balance.
+          </Text>
+          <Group gap="sm" grow>
+            <Button className="wizard-back" onClick={() => setLeaveOpen(false)} disabled={leaveBusy}>
+              Cancel
+            </Button>
+            <Button className="wizard-primary is-danger" loading={leaveBusy} onClick={confirmLeave}>
+              Leave
+            </Button>
+          </Group>
+          <Err e={e} />
+        </div>
+      </Modal>
+
+      <Modal
+        opened={deleteOpen}
+        onClose={() => !deleteBusy && setDeleteOpen(false)}
+        closeOnClickOutside={!deleteBusy}
+        title={<span className="wizard-title-name">Delete group</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={420}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+      >
+        <div className="wizard-form confirm-dialog">
+          <Text className="confirm-dialog-text">
+            Delete <b>{detail?.name}</b>? This can’t be undone. Only possible when there are no
+            expenses or everything is fully settled.
+          </Text>
+          <Group gap="sm" grow>
+            <Button className="wizard-back" onClick={() => setDeleteOpen(false)} disabled={deleteBusy}>
+              Cancel
+            </Button>
+            <Button className="wizard-primary is-danger" loading={deleteBusy} onClick={confirmDelete}>
+              Delete
+            </Button>
+          </Group>
+          <Err e={e} />
+        </div>
+      </Modal>
+
+      <Modal
+        opened={inviteOpen}
+        onClose={() => {
+          setInviteOpen(false);
+          setInviteEmails('');
+          setContactQ('');
+          setContacts([]);
+          setE(null);
+        }}
+        closeOnClickOutside={false}
+        title={<span className="wizard-title-name">Invite</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={520}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+        fullScreen={isMobile}
+      >
+        <div className="wizard-form">
+          <Tabs
+            value={inviteTab}
+            onChange={(v) => setInviteTab(v || 'email')}
+            className="invite-tabs"
+          >
+            <Tabs.List grow>
+              <Tabs.Tab value="email">By email</Tabs.Tab>
+              <Tabs.Tab value="contacts">From contacts</Tabs.Tab>
+              <Tabs.Tab value="link">Invite link</Tabs.Tab>
+            </Tabs.List>
+
+            <Tabs.Panel value="email">
+              <form className="wizard-form" onSubmit={inviteByEmail}>
+                <div>
+                  <Textarea
+                    placeholder="a@example.com, b@example.com"
+                    minRows={4}
+                    value={inviteEmails}
+                    onChange={(x) => setInviteEmails(x.target.value)}
+                    aria-label="Emails"
+                  />
+                  <Text size="xs" c="dimmed" mt={6}>
+                    Separate with commas, spaces or new lines
+                  </Text>
+                </div>
+                <Button className="wizard-primary" fullWidth type="submit" loading={inviteBusy}>
+                  Send invites
+                </Button>
+              </form>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="contacts">
+              <form className="wizard-form" onSubmit={searchContacts}>
+                <Group gap="xs" align="flex-end" wrap="nowrap">
+                  <TextInput
+                    label="Search contacts"
+                    placeholder="Name, username or email"
+                    value={contactQ}
+                    onChange={(x) => setContactQ(x.target.value)}
+                    style={{ flex: 1 }}
+                  />
+                  <Button className="wizard-search" type="submit" variant="default" loading={contactBusy}>
+                    Search
+                  </Button>
+                </Group>
+                <Stack gap={8}>
+                  {contacts.map((c) => (
+                    <div className="wizard-person" key={c.user_id}>
+                      <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
+                        <span
+                          className="gd-person-avatar"
+                          style={{
+                            '--gt-from': pastelFor(c.display_name).from,
+                            '--gt-to': pastelFor(c.display_name).to,
+                            width: 36,
+                            height: 36,
+                            fontSize: 11,
+                          }}
+                          aria-hidden
+                        >
+                          {initialsOf(c.display_name)}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <Text size="sm" fw={600} truncate>{c.display_name}</Text>
+                          <Text size="xs" c="dimmed" truncate>@{c.username}</Text>
+                        </div>
+                      </Group>
+                      <button
+                        type="button"
+                        className="wizard-chip"
+                        onClick={() => addFromContact(c.user_id, c.display_name)}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ))}
+                  {!contactBusy && contacts.length === 0 && contactQ.trim() !== '' && (
+                    <Text size="sm" c="dimmed">No contacts matched.</Text>
+                  )}
+                  {!contactBusy && contacts.length === 0 && contactQ.trim() === '' && (
+                    <Text size="sm" c="dimmed">Search your contacts to add them.</Text>
+                  )}
+                </Stack>
+              </form>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="link">
+              <div className="wizard-form">
+                {inviteLinkLive || detail.invite_link ? (
+                  <>
+                    <Text className="confirm-dialog-text" style={{ padding: 0 }}>
+                      Anyone with this link can join the group. Rotating creates a new link and the old one stops working.
+                    </Text>
+                    <Group gap="xs" align="flex-end" wrap="nowrap">
+                      <TextInput
+                        readOnly
+                        value={inviteLinkLive || detail.invite_link}
+                        style={{ flex: 1 }}
+                        aria-label="Invite link"
+                      />
+                      {detail.my_role === 'owner' && (
+                        <Button
+                          className="wizard-search"
+                          variant="default"
+                          loading={rotateBusy}
+                          onClick={rotateInviteLink}
+                        >
+                          Rotate
+                        </Button>
+                      )}
+                    </Group>
+                    <CopyButton value={inviteLinkLive || detail.invite_link}>
+                      {({ copied, copy }) => (
+                        <Button className="wizard-primary" fullWidth onClick={copy}>
+                          {copied ? 'Link copied' : 'Copy invite link'}
+                        </Button>
+                      )}
+                    </CopyButton>
+                  </>
+                ) : (
+                  <Text className="confirm-dialog-text" style={{ padding: 0 }}>
+                    Only the owner or treasurer can share an invite link.
+                  </Text>
+                )}
+              </div>
+            </Tabs.Panel>
+          </Tabs>
+          <Err e={e} />
+        </div>
+      </Modal>
+
+      <Modal opened={renameOpen} onClose={() => setRenameOpen(false)} title="Rename group" centered size="sm">
+        <form onSubmit={saveRename}>
           <Stack gap="sm">
-            <TextInput label="Group name" required value={renName} onChange={(x) => setRenName(x.target.value)} />
-            <TextInput label="Budget (0 clears)" inputMode="decimal" value={sBudget} onChange={(x) => setSBudget(x.target.value)} />
-            <TextInput label="Alert at %" inputMode="numeric" value={sAlert} onChange={(x) => setSAlert(x.target.value)} />
-            <Select label="Mode" value={sMode} onChange={setSMode} data={['shared', 'trip', 'event']} />
-            <TextInput label="Flat fee per head, event mode (0 clears)" inputMode="decimal" value={sFee} onChange={(x) => setSFee(x.target.value)} />
-            <Button type="submit" loading={saving}>Save</Button>
+            <TextInput
+              label="Group name"
+              required
+              autoFocus
+              value={renName}
+              onChange={(x) => setRenName(x.target.value)}
+              data-autofocus
+            />
+            <Group justify="flex-end" gap="xs">
+              <Button variant="default" onClick={() => setRenameOpen(false)}>Cancel</Button>
+              <Button type="submit" loading={renaming}>Save</Button>
+            </Group>
             <Err e={e} />
           </Stack>
         </form>
       </Modal>
+
     </Shell>
   );
 }
 
+function GdActionIcon({ name }) {
+  const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true };
+  if (name === 'pay') {
+    return (
+      <svg {...common}>
+        <path d="M4 9h16M4 15h16M7 9V7.8A1.8 1.8 0 0 1 8.8 6h6.4A1.8 1.8 0 0 1 17 7.8V9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <rect x="3" y="9" width="18" height="10" rx="2.2" stroke="currentColor" strokeWidth="1.8" />
+      </svg>
+    );
+  }
+  if (name === 'expense') {
+    return (
+      <svg {...common}>
+        <path d="M8 7h8M8 11h8M8 15h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M6 3.5h12A2.5 2.5 0 0 1 20.5 6v14.2l-2.8-1.6-2.7 1.6-2.8-1.6-2.7 1.6-2.8-1.6-2.7 1.6V6A2.5 2.5 0 0 1 6 3.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (name === 'export') {
+    return (
+      <svg {...common}>
+        <path d="M12 4v10M8.5 8.5 12 5l3.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M5 16.5V18a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (name === 'invite') {
+    return (
+      <svg {...common}>
+        <path d="M16 11a4 4 0 1 0-4-4 4 4 0 0 0 4 4Z" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M14 14.5c3.2.2 5.5 1.6 5.5 4v1H14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M8.5 12.5v6M5.5 15.5h6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (name === 'leave') {
+    return (
+      <svg {...common}>
+        <path d="M10 5H7a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M14 8l4 4-4 4M9.5 12H18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (name === 'trash') {
+    return (
+      <svg {...common} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 7h16" stroke="currentColor" strokeWidth="1.75" />
+        <path d="M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7" stroke="currentColor" strokeWidth="1.75" />
+        <path d="M6.5 7v11.2A1.8 1.8 0 0 0 8.3 20h7.4a1.8 1.8 0 0 0 1.8-1.8V7" stroke="currentColor" strokeWidth="1.75" />
+        <path d="M10 11v5.5M14 11v5.5" stroke="currentColor" strokeWidth="1.75" />
+      </svg>
+    );
+  }
+  if (name === 'deposit' || name === 'deposit-on') {
+    return (
+      <svg {...common}>
+        <rect x="3.25" y="6.25" width="17.5" height="11.5" rx="2.75" stroke="currentColor" strokeWidth="1.75" />
+        <path d="M3.25 10h17.5" stroke="currentColor" strokeWidth="1.75" />
+        <circle cx="16.25" cy="14" r="1.15" fill="currentColor" />
+        {name === 'deposit-on' && (
+          <path d="M7.75 14.1 9.35 15.6 12.5 12.2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+      </svg>
+    );
+  }
+  if (name === 'treasurer') {
+    return (
+      <svg {...common}>
+        <path d="M12 4.2 13.85 9l5.15.4-3.95 3.25 1.25 5.05L12 15.1 7.7 17.7l1.25-5.05L5 9.4 10.15 9 12 4.2Z" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (name === 'share') {
+    return (
+      <svg {...common} width={14} height={14}>
+        <circle cx="18" cy="5" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+        <circle cx="18" cy="19" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+        <circle cx="6" cy="12" r="2.4" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M8.2 10.9 15.8 6.2M8.2 13.1 15.8 17.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (name === 'copy') {
+    return (
+      <svg {...common} width={14} height={14}>
+        <rect x="8" y="8" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (name === 'close') {
+    return (
+      <svg {...common}>
+        <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function RecurringForm({ groupId, members, onDone }) {
-  const isMobile = useMediaQuery('(max-width: 36em)');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [payer, setPayer] = useState(members[0]?.user_id || '');
@@ -1254,24 +1657,6 @@ function RecurringForm({ groupId, members, onDone }) {
       onDone();
     } catch (err) { setE(err); } finally { setBusy(false); }
   };
-  // Mobile: one field per row with full-width inputs + big Add (no squished
-  // 5-across row on 360px screens).
-  if (isMobile) {
-    return (
-      <form onSubmit={go}>
-        <Stack gap="xs">
-          <TextInput label="Title" required placeholder="Rent" size="sm" value={title} onChange={(x) => setTitle(x.target.value)} />
-          <Group gap="xs" grow>
-            <TextInput label="Amount" required inputMode="decimal" size="sm" value={amount} onChange={(x) => setAmount(x.target.value)} />
-            <Select label="Every" size="sm" value={freq} onChange={setFreq} data={['weekly', 'monthly']} />
-          </Group>
-          <Select label="Payer" size="sm" searchable value={payer} onChange={setPayer} data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
-          <Button type="submit" size="md" fullWidth loading={busy}>Add rule</Button>
-        </Stack>
-        <Err e={e} />
-      </form>
-    );
-  }
   return (
     <form onSubmit={go}>
       <Group gap="xs" align="flex-end">

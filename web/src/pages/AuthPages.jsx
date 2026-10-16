@@ -1,82 +1,86 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Box, Button, Center, Container, Divider, Grid, List, Paper,
-  PasswordInput, Stack, Text, TextInput, Title,
+  Anchor, Button, PasswordInput, Stack, Text, TextInput, Title,
 } from '@mantine/core';
 import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
+import { BrandMark } from '../components/Shell.jsx';
 
-function AuthBrand({ compact }) {
+function AuthBrand() {
   return (
-    <>
-      <Box
-        w={compact ? 40 : 48}
-        h={compact ? 40 : 48}
-        mb={compact ? 'xs' : 'sm'}
-        mt={compact ? undefined : 0}
-        mx={compact ? 'auto' : undefined}
-        style={{
-          background: 'rgba(255,255,255,0.18)',
-          border: '1px solid rgba(255,255,255,0.35)',
-          borderRadius: 14,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontWeight: 800,
-          fontSize: compact ? 20 : 24,
-        }}
-        aria-hidden
-      >
-        S
-      </Box>
-      <Text fw={800} size={compact ? 20 : 26} className="brand-splitshare">SplitShare</Text>
-      <Text size="sm" mt={4} style={{ opacity: 0.9 }}>
-        {compact ? 'Split less. Settle smart.' : 'Split expenses with friends, settle up in seconds'}
-      </Text>
-    </>
+    <Link to="/login" className="brand-logo is-light auth-brand" aria-label="SplitShare">
+      <BrandMark size={28} />
+      <span className="brand-word">SplitShare</span>
+    </Link>
   );
 }
 
 function AuthLayout({ children }) {
   return (
-    <Container size={760} my={{ base: 'sm', sm: 'md' }} px={{ base: 'sm', sm: 'md' }} className="auth-container">
-      <Center mih={{ base: 'auto', sm: 'calc(100vh - 140px)' }} className="auth-center">
-        <Paper withBorder shadow="md" radius="lg" style={{ overflow: 'hidden', width: '100%' }} className="auth-paper">
-          {/* Mobile brand banner: compact, matches mockup screen 1 */}
-          <Box
-            hiddenFrom="sm"
-            p="sm"
-            ta="center"
-            c="white"
-            className="auth-banner"
-            style={{ background: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)' }}
-          >
-            <AuthBrand compact />
-          </Box>
-          <Grid gutter={0}>
-            <Grid.Col span={{ base: 12, sm: 5 }} visibleFrom="sm">
-              <Box
-                p="xl"
-                h="100%"
-                c="white"
-                style={{ background: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)' }}
-              >
-                <AuthBrand />
-                <List size="sm" mt="lg" spacing="sm">
-                  <List.Item>Snap a receipt, split it any way you like</List.Item>
-                  <List.Item>Fewest transfers, fully explained</List.Item>
-                  <List.Item>Settle up and lock it in</List.Item>
-                </List>
-              </Box>
-            </Grid.Col>
-            <Grid.Col span={{ base: 12, sm: 7 }}>
-              <Box p={{ base: 'md', sm: 'xl' }} className="auth-form">{children}</Box>
-            </Grid.Col>
-          </Grid>
-        </Paper>
-      </Center>
-    </Container>
+    <div className="auth-page">
+      <div className="auth-bg" aria-hidden>
+        <span className="auth-orb auth-orb-a" />
+        <span className="auth-orb auth-orb-b" />
+        <span className="auth-orb auth-orb-c" />
+        <span className="auth-grid" />
+        <span className="auth-beam" />
+      </div>
+      <div className="auth-shell">
+        <div className="auth-card">
+          <AuthBrand />
+          <div className="auth-body">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AuthSubmit({ children, loading, icon = 'enter', ...props }) {
+  return (
+    <Button
+      className="wizard-primary auth-submit"
+      fullWidth
+      type="submit"
+      loading={loading}
+      leftSection={!loading ? <AuthActionIcon name={icon} /> : undefined}
+      {...props}
+    >
+      {children}
+    </Button>
+  );
+}
+
+function AuthActionIcon({ name }) {
+  const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true };
+  if (name === 'plus') {
+    return (
+      <svg {...common}>
+        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (name === 'mail') {
+    return (
+      <svg {...common} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3.5" y="5.5" width="17" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.75" />
+        <path d="m5.5 8 6.5 5 6.5-5" stroke="currentColor" strokeWidth="1.75" />
+      </svg>
+    );
+  }
+  if (name === 'lock') {
+    return (
+      <svg {...common} strokeLinecap="round" strokeLinejoin="round">
+        <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.75" />
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.75" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M14 5h3a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M10 16l4-4-4-4M4.5 12H14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -95,27 +99,40 @@ export function Login() {
   };
   return (
     <AuthLayout>
-      <Stack gap="sm">
-        <div>
-          <Title order={3}>Welcome back 👋</Title>
-          <Text size="sm" c="dimmed">Log in to sync your groups</Text>
+      <Stack gap="md">
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">Welcome back</Title>
+          <Text size="sm" c="dimmed" className="auth-desc">Log in to continue</Text>
         </div>
         <form onSubmit={go}>
           <Stack gap="sm">
-            <TextInput label="Username or email" required autoFocus autoComplete="username" name="username" value={id} onChange={(x) => setId(x.target.value)} />
-            <PasswordInput label="Password" required autoComplete="current-password" name="password" value={pw} onChange={(x) => setPw(x.target.value)} onKeyDown={(ev) => { if (ev.key === 'Enter' && !busy) ev.currentTarget.form?.requestSubmit(); }} />
-            <Button fullWidth type="submit" loading={busy}>Log in</Button>
+            <TextInput
+              label="Username or email"
+              required
+              autoFocus
+              autoComplete="username"
+              name="username"
+              value={id}
+              onChange={(x) => setId(x.target.value)}
+            />
+            <PasswordInput
+              label="Password"
+              required
+              autoComplete="current-password"
+              name="password"
+              value={pw}
+              onChange={(x) => setPw(x.target.value)}
+              onKeyDown={(ev) => { if (ev.key === 'Enter' && !busy) ev.currentTarget.form?.requestSubmit(); }}
+            />
+            <AuthSubmit loading={busy}>Log in</AuthSubmit>
           </Stack>
         </form>
         <Err e={e} />
-        <Divider label="or" labelPosition="center" />
         <GoogleBtn />
-        <Text ta="center" size="sm">
-          No account? <Anchor component={Link} to="/register">Register</Anchor>
-          {' · '}<Anchor component={Link} to="/forgot">Forgot password?</Anchor>
-        </Text>
-        <Text ta="center" size="xs" c="dimmed">
-          username 3–30 a-z0-9_.- · password 8+ with a letter and a digit
+        <Text ta="center" size="sm" className="auth-links">
+          <Anchor component={Link} to="/register">Register</Anchor>
+          <span aria-hidden>·</span>
+          <Anchor component={Link} to="/forgot">Forgot password?</Anchor>
         </Text>
       </Stack>
     </AuthLayout>
@@ -142,28 +159,25 @@ export function Register() {
   const set = (k) => (x) => setF({ ...f, [k]: x.target.value });
   return (
     <AuthLayout>
-      <Stack gap="sm">
-        <Title order={3}>Create your account</Title>
+      <Stack gap="md">
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">Create account</Title>
+          <Text size="sm" c="dimmed" className="auth-desc">Start splitting with friends</Text>
+        </div>
         <form onSubmit={go}>
           <Stack gap="sm">
             <TextInput label="Username" required value={f.username} onChange={set('username')} />
             <TextInput label="Email" required value={f.email} onChange={set('email')} />
             <TextInput label="Display name" required value={f.display_name} onChange={set('display_name')} />
-            <PasswordInput
-              label="Password"
-              required
-              description="8+ characters with a letter and a digit"
-              value={f.password}
-              onChange={set('password')}
-            />
-            <Button fullWidth type="submit" loading={busy}>Register</Button>
+            <PasswordInput label="Password" required value={f.password} onChange={set('password')} />
+            <AuthSubmit loading={busy} icon="plus">Register</AuthSubmit>
           </Stack>
         </form>
         <Err e={e} />
         {done && done.auto_joined_groups?.length > 0 && (
           <Text size="sm">Auto-joined {done.auto_joined_groups.length} group(s) from email invites.</Text>
         )}
-        <Text ta="center" size="sm">
+        <Text ta="center" size="sm" className="auth-links">
           <Anchor component={Link} to="/login">Back to login</Anchor>
         </Text>
       </Stack>
@@ -176,7 +190,7 @@ function GoogleBtn() {
   const nav = useNavigate();
   const [e, setE] = useState(null);
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-  if (!clientId) return <Text size="sm" c="dimmed" ta="center">Google login needs VITE_GOOGLE_CLIENT_ID</Text>;
+  if (!clientId) return null;
   const start = () => {
     // eslint-disable-next-line no-undef
     google.accounts.id.initialize({
@@ -195,7 +209,9 @@ function GoogleBtn() {
   };
   return (
     <>
-      <Button fullWidth variant="light" onClick={start}>Continue with Google</Button>
+      <Button className="wizard-back auth-google" fullWidth onClick={start}>
+        Continue with Google
+      </Button>
       <Err e={e} />
     </>
   );
@@ -214,20 +230,25 @@ export function Forgot() {
   };
   return (
     <AuthLayout>
-      <Stack gap="sm">
-        <Title order={3}>Reset password</Title>
+      <Stack gap="md">
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">Reset password</Title>
+          <Text size="sm" c="dimmed" className="auth-desc">We’ll email you a reset link</Text>
+        </div>
         {done
-          ? <Text size="sm">If that email exists, a reset link is on its way (15 min, single use).</Text>
+          ? <Text size="sm">If that email exists, a reset link is on its way.</Text>
           : (
             <form onSubmit={go}>
               <Stack gap="sm">
                 <TextInput label="Email" required value={email} onChange={(x) => setEmail(x.target.value)} />
-                <Button fullWidth type="submit" loading={busy}>Send reset link</Button>
+                <AuthSubmit loading={busy} icon="mail">Send reset link</AuthSubmit>
               </Stack>
             </form>
           )}
         <Err e={e} />
-        <Text ta="center" size="sm"><Anchor component={Link} to="/login">Back to login</Anchor></Text>
+        <Text ta="center" size="sm" className="auth-links">
+          <Anchor component={Link} to="/login">Back to login</Anchor>
+        </Text>
       </Stack>
     </AuthLayout>
   );
@@ -252,12 +273,15 @@ export function Reset() {
   };
   return (
     <AuthLayout>
-      <Stack gap="sm">
-        <Title order={3}>New password</Title>
+      <Stack gap="md">
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">New password</Title>
+          <Text size="sm" c="dimmed" className="auth-desc">Choose a new password to sign in</Text>
+        </div>
         <form onSubmit={go}>
           <Stack gap="sm">
-            <PasswordInput label="New password" required description="8+ characters with a letter and a digit" value={pw} onChange={(x) => setPw(x.target.value)} />
-            <Button fullWidth type="submit" loading={busy}>Set password</Button>
+            <PasswordInput label="New password" required value={pw} onChange={(x) => setPw(x.target.value)} />
+            <AuthSubmit loading={busy} icon="lock">Set password</AuthSubmit>
           </Stack>
         </form>
         <Err e={e} />
@@ -276,10 +300,14 @@ export function Verify() {
   }, [token]);
   return (
     <AuthLayout>
-      <Stack gap="sm">
-        <Title order={3}>Email verification</Title>
+      <Stack gap="md">
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">Email verification</Title>
+        </div>
         <Text size="sm">{msg}</Text>
-        <Text ta="center" size="sm"><Anchor component={Link} to="/">Home</Anchor></Text>
+        <Text ta="center" size="sm" className="auth-links">
+          <Anchor component={Link} to="/">Home</Anchor>
+        </Text>
       </Stack>
     </AuthLayout>
   );
