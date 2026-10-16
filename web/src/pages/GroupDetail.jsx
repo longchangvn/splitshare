@@ -95,8 +95,8 @@ export function GroupDetail() {
   const location = useLocation();
   const [copyFrom, setCopyFrom] = useState(() => location.state?.copyFrom ?? null);
   // Deep-link handoff from the mobile Activity tab: open on a given tab.
-  const ALL_TABS = ['report', 'statement', 'ledger', 'balances', 'activity', 'recurring', 'people'];
-  const [tab, setTab] = useState('report');
+  const ALL_TABS = ['ledger', 'balances', 'statement', 'people', 'report', 'activity', 'recurring'];
+  const [tab, setTab] = useState('ledger');
   useEffect(() => {
     let t = location.state?.tab;
     if (t === 'payments') t = 'activity';
@@ -532,29 +532,37 @@ export function GroupDetail() {
         />
 
         {isMobile ? (
-          <div className="sticky-bar gd-actions">
-            <button type="button" className="gd-action-btn" onClick={() => setNewSheetOpen(true)}>
+          <div className="sticky-bar gd-actions is-calm">
+            <button type="button" className="gd-action-cta" onClick={() => setNewSheetOpen(true)}>
               <GdActionIcon name="plus" />
-              <span>New</span>
+              <span>New expense / payment</span>
             </button>
-            <button type="button" className="gd-action-btn" onClick={exportCsv}>
-              <GdActionIcon name="export" />
-              <span>Export CSV</span>
-            </button>
-            <button type="button" className="gd-action-btn" onClick={() => openInvite('email')}>
-              <GdActionIcon name="invite" />
-              <span>Invite</span>
-            </button>
-            <button type="button" className="gd-action-btn is-danger" onClick={leave}>
-              <GdActionIcon name="leave" />
-              <span>Leave</span>
-            </button>
-            {detail.my_role === 'owner' && (
-              <button type="button" className="gd-action-btn is-danger" onClick={delGroup}>
-                <GdActionIcon name="trash" />
-                <span>Delete</span>
+            <div className="gd-action-quiet">
+              <button type="button" className="gd-action-ghost" onClick={() => openInvite('email')}>
+                <GdActionIcon name="invite" />
+                <span>Invite</span>
               </button>
-            )}
+              <button type="button" className="gd-action-ghost" onClick={exportCsv}>
+                <GdActionIcon name="export" />
+                <span>Export CSV</span>
+              </button>
+            </div>
+            <details className="gd-action-danger">
+              <summary>Group settings ···</summary>
+              <div className="gd-action-danger-opts">
+                <button type="button" onClick={leave}>
+                  <GdActionIcon name="leave" />
+                  <span>Leave group</span>
+                </button>
+                {detail.my_role === 'owner' && (
+                  <button type="button" onClick={delGroup}>
+                    <GdActionIcon name="trash" />
+                    <span>Delete group</span>
+                    <span className="gd-action-owner">owner</span>
+                  </button>
+                )}
+              </div>
+            </details>
           </div>
         ) : (
           <div className="sticky-bar gd-actions">
@@ -594,7 +602,7 @@ export function GroupDetail() {
 
         <Card withBorder shadow="sm" padding="md" radius="md" className="gd-tabs">
           <Tabs value={tab} onChange={(v) => {
-            let nv = v ?? 'report';
+            let nv = v ?? 'ledger';
             if (nv === 'payments') nv = 'activity';
             setTab(nv);
             if (nv === 'activity') loadActivityFeed();
@@ -602,13 +610,13 @@ export function GroupDetail() {
           }}>
           <div className="tab-rail">
           <Tabs.List mb="sm">
-              <Tabs.Tab value="report">Report</Tabs.Tab>
-              <Tabs.Tab value="statement">Statement</Tabs.Tab>
               <Tabs.Tab value="ledger">Expenses</Tabs.Tab>
               <Tabs.Tab value="balances">Balances</Tabs.Tab>
+              <Tabs.Tab value="statement">Statement</Tabs.Tab>
+              <Tabs.Tab value="people">People({members.length})</Tabs.Tab>
+              <Tabs.Tab value="report">Report</Tabs.Tab>
               <Tabs.Tab value="activity">Activity</Tabs.Tab>
               <Tabs.Tab value="recurring">Recurring</Tabs.Tab>
-              <Tabs.Tab value="people">People({members.length})</Tabs.Tab>
           </Tabs.List>
           </div>
 

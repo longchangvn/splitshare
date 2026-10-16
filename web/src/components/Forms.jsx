@@ -102,7 +102,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const dropped = copyFrom
     ? copyFrom.splits.map((s) => s.user_id).filter((id) => !activeIds.has(id))
     : [];
-  const copyImages = isCopy ? (copyFrom.images || []) : [];
+  // Copy expense never carries receipts: the upload section starts empty.
 
   const changeType = (t) => {
     setType(t);
@@ -212,7 +212,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const [staged, setStaged] = useState([]);
   const fileRef = useRef(null);
   const RECEIPT_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif';
-  const maxStaged = 5 - copyImages.length;
+  const maxStaged = 5;
   const onPickFiles = (ev) => {
     const picked = Array.from(ev.target.files || []);
     ev.target.value = '';
@@ -241,26 +241,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     return failures;
   };
 
-  // Task 4.2: carry source receipts onto the copy by download + re-upload.
-  const carryImages = async (newExpenseId) => {
-    const failures = [];
-    for (const img of copyImages) {
-      try {
-        const r = await fetch(`/api/v1/images/${img.image_id}`,
-          { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
-        if (!r.ok) throw new Error(`download ${r.status}`);
-        const blob = await r.blob();
-        const ext = (img.mime || blob.type || '').split('/')[1]?.split('+')[0] || 'jpg';
-        const form = new FormData();
-        form.append('file', new File([blob], `receipt.${ext}`, { type: img.mime || blob.type }));
-        await api.postForm(`/api/v1/expenses/${newExpenseId}/images`, form);
-      } catch (err) {
-        failures.push(`${img.image_id.slice(0, 8)}: ${err.message}`);
-      }
-    }
-    return failures;
-  };
-
   const submit = async (ev) => {
     ev.preventDefault();
     if (saving) return; // double-submit guard
@@ -271,20 +251,12 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
       if (!existing) {
         const r = await api.post(`/api/v1/groups/${groupId}/expenses`, build());
         const newId = r.expense?.expense_id;
-        if (newId && (isCopy || staged.length > 0)) {
-          const failures = [];
-          if (isCopy && copyImages.length > 0) {
-            failures.push(...await carryImages(newId));
-          }
-          if (staged.length > 0) {
-            failures.push(...await uploadStaged(newId));
-          }
+        if (newId && staged.length > 0) {
+          const failures = await uploadStaged(newId);
           if (failures.length > 0) {
             setImgErrs(failures);
             notifications.show({ title: 'Expense saved; some receipts failed', message: failures.join('; '), color: 'orange' });
-          } else if (isCopy && copyImages.length > 0) {
-            notifications.show({ title: 'Expense copied with receipts', color: 'teal' });
-          } else if (staged.length > 0) {
+          } else {
             notifications.show({ title: 'Expense saved with receipts', color: 'teal' });
           }
         }
@@ -325,7 +297,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   // Receipt strip: staged (create) or existing images (edit).
   const receiptCount = existing
     ? (source?.images?.length || 0)
-    : copyImages.length + staged.length;
+    : staged.length;
 
   // EQUAL explainer: floor + remainder 1¢, who gets +1¢.
   const equalNote = (() => {
@@ -349,9 +321,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
         <Alert color="yellow" variant="light" title="Former members excluded from the copy">
           <Text size="sm">{dropped.map((id) => id.slice(0, 8)).join(', ')}</Text>
         </Alert>
-      )}
-      {isCopy && copyImages.length > 0 && (
-        <Text size="sm" c="dimmed">{copyImages.length} receipt(s) will be carried over on save.</Text>
       )}
 
       <section className="wizard-section">

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SplitShare — Mobile Actions Redesign Mockup</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:#0f172a;color:#0f172a;padding:32px 20px}
+  .page{max-width:1000px;margin:0 auto}
+  h1{color:#fff;font-size:22px} h1 span{color:#2dd4bf}
+  .sub{color:#94a3b8;font-size:13px;margin:6px 0 24px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:28px;justify-items:center}
+  .cap{color:#fff;font-size:14px;font-weight:700;margin-bottom:4px}
+  .cap small{display:block;font-weight:400;color:#94a3b8;font-size:12px;margin-top:2px}
+  .phone{width:340px;height:720px;background:#f1f5f9;border-radius:44px;padding:12px;border:1px solid #334155;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .screen{background:#f8fafc;width:100%;height:100%;border-radius:34px;overflow:hidden;display:flex;flex-direction:column}
+  .notch{height:28px;display:flex;justify-content:center;align-items:center;background:#fff}
+  .notch i{display:block;width:100px;height:22px;background:#0f172a;border-radius:999px}
+  .content{flex:1;padding:14px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:12px}
+  .why{border:1px solid #5eead4;border-radius:14px;padding:11px 12px;font-size:13px;font-weight:600;background:#fff;display:flex;justify-content:space-between}
+  .pill{display:flex;align-items:center;justify-content:center;gap:8px;border-radius:999px;padding:15px;font-size:14px;font-weight:700;color:#fff;background:#121413}
+  .pill.red{background:#dc2626}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  /* proposed */
+  .cta{background:#0d9488;color:#fff;border:0;border-radius:14px;padding:15px;font-size:15px;font-weight:800;width:100%}
+  .quiet{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .quiet button{background:#fff;border:1px solid #cbd5e1;color:#334155;border-radius:12px;padding:11px;font-size:13px;font-weight:600}
+  .danger{margin-top:2px}
+  .danger summary{font-size:12px;color:#94a3b8;list-style:none;text-align:center;cursor:pointer;padding:6px}
+  .danger summary::-webkit-details-marker{display:none}
+  .danger .opts{background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;margin-top:4px}
+  .danger .opts button{display:flex;width:100%;background:none;border:0;padding:13px;font-size:13px;color:#dc2626;font-weight:600;border-top:1px solid #f1f5f9}
+  .danger .opts button:first-child{border-top:0}
+  .tag{font-size:10px;font-weight:800;padding:2px 8px;border-radius:999px;background:#fef2f2;color:#b91c1c}
+  .note{font-size:11px;color:#64748b;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="page">
+<h1>Mobile actions — <span>before vs proposed</span></h1>
+<p class="sub">Same 5 actions (New, Export CSV, Invite, Leave, Delete). Weight follows frequency; destructives leave the thumb zone.</p>
+<div class="grid">
+<div>
+<div class="cap">A · Current (heavy)<small>5 loud pills · Delete is full-width thumb bait</small></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="content">
+<div class="why"><span>Optimized: 5 debts → 1 transfer • v59</span><span>⌄</span></div>
+<div class="row2">
+<div class="pill">＋ New</div><div class="pill">⤴ Export CSV</div>
+<div class="pill">⚇ Invite</div><div class="pill red">⏻ Leave</div>
+</div>
+<div class="pill red">🗑 Delete</div>
+<p class="note">Every action shouts equally. Black + red blocks clash with the white/teal app. Delete sits one mis-tap away.</p>
+</div>
+</div></div>
+</div>
+<div>
+<div class="cap">B · Proposed (elegant) ★<small>1 CTA + quiet row + tucked-away danger</small></div>
+<div class="phone"><div class="screen">
+<div class="notch"><i></i></div>
+<div class="content">
+<div class="why"><span>Optimized: 5 debts → 1 transfer • v59</span><span>⌄</span></div>
+<button class="cta">＋&nbsp; New expense / payment</button>
+<div class="quiet"><button>⚇&nbsp; Invite</button><button>⤴&nbsp; Export CSV</button></div>
+<details class="danger">
+<summary>Group settings · · ·</summary>
+<div class="opts">
+<button>⏻&nbsp; Leave group</button>
+<button>🗑&nbsp; Delete group <span class="tag" style="margin-left:auto">owner</span></button>
+</div>
+</details>
+<div class="card"><p class="note"><b>Why it works:</b> New owns the thumb zone in brand teal. Invite/Export shrink to outline buttons. Leave/Delete become deliberate two-tap text rows — safe, calm, and the screen finally matches the app.</p></div>
+</div>
+</div></div>
+</div>
+</div>
+</div>
+</body>
+</html>

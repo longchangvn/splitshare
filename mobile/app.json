@@ -2,20 +2,39 @@
   "expo": {
     "name": "SplitShare",
     "slug": "splitshare",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "splitshare",
     "platforms": ["ios", "android"],
-    "ios": { "supportsTablet": true, "bundleIdentifier": "app.splitshare.mobile" },
-    "android": { "package": "app.splitshare.mobile" },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.splitshare.mobile",
+      "usesAppleSignIn": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Take receipt photos for expenses.",
+        "NSPhotoLibraryUsageDescription": "Attach receipt photos to expenses.",
+        "NSFaceIDUsageDescription": "Unlock SplitShare with Face ID."
+      }
+    },
+    "android": {
+      "package": "app.splitshare.mobile",
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "USE_BIOMETRIC"]
+    },
     "plugins": [
       "expo-secure-store",
       "expo-image-picker",
+      "expo-image-manipulator",
       "expo-local-authentication",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-secure-store"
     ],
     "extra": {
-      "apiUrl": "http://localhost:8081"
+      "apiUrl": "http://localhost:8081",
+      "googleClientId": ""
+    },
+    "notification": {
+      "icon": "./assets/icon.png",
+      "color": "#0d9488"
     }
   }
 }

@@ -1,17 +1,11 @@
 // API client — 1:1 with api/ (Bearer + single-flight refresh).
-// Matches web/src/api.js behavior, but tokens live in SecureStore
-// (Keychain/Keystore per mobile-design Frame 1) instead of localStorage.
 // Base: /api/v1, snake_case both directions, errors {code, message, fields?}.
 //
-// IMPORTANT backend quirks (verified against api/Endpoints/*.cs):
+// Backend quirks (verified against api/Endpoints/*.cs):
 // - Preview-split is GROUP-SCOPED: POST /groups/:id/expenses/preview-split
-//   (NOT POST /expenses/preview-split as requirements §9 prints).
 // - Un-settle preview for edits: POST /expenses/:id/preview-edit
-//   -> {shares, unsettled_user_ids[]} drives the blocking modal (Frame 6).
-// - Images: authenticated GET /images/:id binary (no signed URLs despite design
-//   Frame 4 text); upload via POST /expenses/:id/images multipart.
-// - Idempotency-Key is OPTIONAL server-side; client ALWAYS sends it on
-//   POST expenses/payments (uuid v4 per create intent) for offline retry safety.
+// - Images: authenticated GET /images/:id binary; upload POST /expenses/:id/images multipart
+// - Idempotency-Key OPTIONAL server-side; client ALWAYS sends it on expenses/payments.
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import uuid from 'react-native-uuid';
@@ -66,8 +60,7 @@ export function newIdempotencyKey() {
   return uuid.v4();
 }
 
-// Single-flight refresh: N concurrent 401s -> exactly 1 refresh
-// (mirrors token-refresh-mobile-first/token-refresh.md + web/src/api.js).
+// Single-flight refresh: N concurrent 401s -> exactly 1 refresh.
 let refreshPromise = null;
 async function refreshOnce() {
   if (!refreshPromise) {
@@ -106,7 +99,6 @@ async function request(method, path, { body, form, idempotencyKey, retry = true 
     body: form || (body !== undefined ? JSON.stringify(body) : undefined),
   });
 
-  // Auth endpoints 401 never triggers refresh (same rule as web client).
   const isAuthPath = path.includes('/auth/');
   if (r.status === 401 && retry && !isAuthPath) {
     const fresh = await refreshOnce().catch(() => null);
@@ -129,7 +121,6 @@ export const api = {
   patch: (p, body) => request('PATCH', p, { body }),
   del: (p) => request('DELETE', p),
   postForm: (p, formData, opts) => request('POST', p, { form: formData, ...opts }),
-  // Authenticated binary download (images / payment proof / CSV).
   getBlob: async (p) => {
     const { at } = await getTokens();
     const r = await fetch(`${baseUrl()}${p}`, {
@@ -138,7 +129,23 @@ export const api = {
     if (!r.ok) throw new ApiError(r.status, 'NOT_FOUND', 'Download failed');
     return r.blob();
   },
+  // Authenticated image URI for <Image source>: RN Image can't set headers,
+  // so download to blob + object URL where supported, else caller uses fetch.
+  imageUrl: (imageId) => `${baseUrl()}/api/v1/images/${imageId}`,
 };
+
+// Server returns snake_case; normalize common id aliases.
+export function groupIdOf(g) {
+  return g?.group_id || g?.group?.group_id || g?.group?.id || g?.id;
+}
+export function expenseIdOf(e) {
+  return e?.expense?.expense_id || e?.expense_id || e?.id;
+}
 
 export const fmt = (cents, currency = 'USD') =>
   `${currency} ${(cents / 100).toFixed(2)}`;
+
+export const displayNameOf = (members, id) =>
+  members?.find((m) => (m.user_id || m.id) === id)?.display_name ||
+  members?.find((m) => (m.user_id || m.id) === id)?.username ||
+  String(id || '').slice(0, 8);
