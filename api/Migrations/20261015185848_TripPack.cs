@@ -15,7 +15,6 @@ namespace SplitShare.Api.Migrations
                 name: "ProofRef",
                 schema: "splitshare",
                 table: "Payments",
-                type: "character varying(140)",
                 maxLength: 140,
                 nullable: true);
 
@@ -23,7 +22,6 @@ namespace SplitShare.Api.Migrations
                 name: "BudgetAlertPct",
                 schema: "splitshare",
                 table: "Groups",
-                type: "integer",
                 nullable: false,
                 defaultValue: 0);
 
@@ -31,21 +29,18 @@ namespace SplitShare.Api.Migrations
                 name: "BudgetCents",
                 schema: "splitshare",
                 table: "Groups",
-                type: "bigint",
                 nullable: true);
 
             migrationBuilder.AddColumn<long>(
                 name: "FlatFeeCents",
                 schema: "splitshare",
                 table: "Groups",
-                type: "bigint",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "Mode",
                 schema: "splitshare",
                 table: "Groups",
-                type: "character varying(16)",
                 maxLength: 16,
                 nullable: false,
                 defaultValue: "");
@@ -54,14 +49,12 @@ namespace SplitShare.Api.Migrations
                 name: "ShareToken",
                 schema: "splitshare",
                 table: "Groups",
-                type: "text",
                 nullable: true);
 
             migrationBuilder.AddColumn<bool>(
                 name: "DepositPaid",
                 schema: "splitshare",
                 table: "GroupMembers",
-                type: "boolean",
                 nullable: false,
                 defaultValue: false);
 
@@ -69,7 +62,6 @@ namespace SplitShare.Api.Migrations
                 name: "Category",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "character varying(32)",
                 maxLength: 32,
                 nullable: false,
                 defaultValue: "");
@@ -78,7 +70,6 @@ namespace SplitShare.Api.Migrations
                 name: "FeeCents",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "bigint",
                 nullable: false,
                 defaultValue: 0L);
 
@@ -86,7 +77,6 @@ namespace SplitShare.Api.Migrations
                 name: "FxRate",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "numeric(18,8)",
                 precision: 18,
                 scale: 8,
                 nullable: true);
@@ -95,14 +85,12 @@ namespace SplitShare.Api.Migrations
                 name: "OrigAmountCents",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "bigint",
                 nullable: true);
 
             migrationBuilder.AddColumn<string>(
                 name: "OrigCurrency",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "character varying(3)",
                 maxLength: 3,
                 nullable: true);
 
@@ -110,7 +98,6 @@ namespace SplitShare.Api.Migrations
                 name: "SpentAt",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "timestamp with time zone",
                 nullable: false,
                 defaultValue: new DateTime(1, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified));
 
@@ -118,7 +105,6 @@ namespace SplitShare.Api.Migrations
                 name: "TaxCents",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "bigint",
                 nullable: false,
                 defaultValue: 0L);
 
@@ -126,7 +112,6 @@ namespace SplitShare.Api.Migrations
                 name: "TipCents",
                 schema: "splitshare",
                 table: "Expenses",
-                type: "bigint",
                 nullable: false,
                 defaultValue: 0L);
 
@@ -135,11 +120,11 @@ namespace SplitShare.Api.Migrations
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    ExpenseId = table.Column<Guid>(type: "uuid", nullable: false),
-                    AuthorId = table.Column<Guid>(type: "uuid", nullable: false),
-                    Body = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                    Id = table.Column<Guid>( nullable: false),
+                    ExpenseId = table.Column<Guid>( nullable: false),
+                    AuthorId = table.Column<Guid>( nullable: false),
+                    Body = table.Column<string>( maxLength: 1000, nullable: false),
+                    CreatedAt = table.Column<DateTime>( nullable: false)
                 },
                 constraints: table =>
                 {
@@ -151,11 +136,11 @@ namespace SplitShare.Api.Migrations
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    ExpenseId = table.Column<Guid>(type: "uuid", nullable: false),
-                    CoveredByUserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    Label = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false),
-                    ShareCents = table.Column<long>(type: "bigint", nullable: false)
+                    Id = table.Column<Guid>( nullable: false),
+                    ExpenseId = table.Column<Guid>( nullable: false),
+                    CoveredByUserId = table.Column<Guid>( nullable: false),
+                    Label = table.Column<string>( maxLength: 50, nullable: false),
+                    ShareCents = table.Column<long>( nullable: false)
                 },
                 constraints: table =>
                 {
@@ -174,11 +159,11 @@ namespace SplitShare.Api.Migrations
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
-                    FromUserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    ToUserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                    Id = table.Column<Guid>( nullable: false),
+                    GroupId = table.Column<Guid>( nullable: false),
+                    FromUserId = table.Column<Guid>( nullable: false),
+                    ToUserId = table.Column<Guid>( nullable: false),
+                    CreatedAt = table.Column<DateTime>( nullable: false)
                 },
                 constraints: table =>
                 {
@@ -190,11 +175,11 @@ namespace SplitShare.Api.Migrations
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
-                    Label = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    Details = table.Column<string>(type: "character varying(280)", maxLength: 280, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                    Id = table.Column<Guid>( nullable: false),
+                    UserId = table.Column<Guid>( nullable: false),
+                    Label = table.Column<string>( maxLength: 64, nullable: false),
+                    Details = table.Column<string>( maxLength: 280, nullable: false),
+                    CreatedAt = table.Column<DateTime>( nullable: false)
                 },
                 constraints: table =>
                 {
@@ -206,13 +191,13 @@ namespace SplitShare.Api.Migrations
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    PaymentId = table.Column<Guid>(type: "uuid", nullable: false),
-                    StorageKey = table.Column<string>(type: "character varying(512)", maxLength: 512, nullable: false),
-                    Mime = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
-                    SizeBytes = table.Column<long>(type: "bigint", nullable: false),
-                    UploadedBy = table.Column<Guid>(type: "uuid", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
+                    Id = table.Column<Guid>( nullable: false),
+                    PaymentId = table.Column<Guid>( nullable: false),
+                    StorageKey = table.Column<string>( maxLength: 512, nullable: false),
+                    Mime = table.Column<string>( maxLength: 64, nullable: false),
+                    SizeBytes = table.Column<long>( nullable: false),
+                    UploadedBy = table.Column<Guid>( nullable: false),
+                    CreatedAt = table.Column<DateTime>( nullable: false)
                 },
                 constraints: table =>
                 {
@@ -224,19 +209,19 @@ namespace SplitShare.Api.Migrations
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
-                    Title = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
-                    AmountCents = table.Column<long>(type: "bigint", nullable: false),
-                    SplitType = table.Column<int>(type: "integer", nullable: false),
-                    PayerId = table.Column<Guid>(type: "uuid", nullable: false),
-                    ParticipantIdsJson = table.Column<string>(type: "text", nullable: false),
-                    Frequency = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
-                    NextRunAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    Active = table.Column<bool>(type: "boolean", nullable: false),
-                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
-                    LastRunAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true)
+                    Id = table.Column<Guid>( nullable: false),
+                    GroupId = table.Column<Guid>( nullable: false),
+                    Title = table.Column<string>( maxLength: 100, nullable: false),
+                    AmountCents = table.Column<long>( nullable: false),
+                    SplitType = table.Column<int>( nullable: false),
+                    PayerId = table.Column<Guid>( nullable: false),
+                    ParticipantIdsJson = table.Column<string>( nullable: false),
+                    Frequency = table.Column<string>( maxLength: 16, nullable: false),
+                    NextRunAt = table.Column<DateTime>( nullable: false),
+                    Active = table.Column<bool>( nullable: false),
+                    CreatedBy = table.Column<Guid>( nullable: false),
+                    CreatedAt = table.Column<DateTime>( nullable: false),
+                    LastRunAt = table.Column<DateTime>( nullable: true)
                 },
                 constraints: table =>
                 {

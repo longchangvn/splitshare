@@ -16,6 +16,17 @@ services:
       timeout: 3s
       retries: 10
 
+  # Optional SQL Server target (uncomment + set DB_PROVIDER=sqlServer, MSSQL_* in .env).
+  # sqlserver:
+  #   image: mcr.microsoft.com/mssql/server:2022-latest
+  #   restart: unless-stopped
+  #   environment:
+  #     ACCEPT_EULA: "Y"
+  #     MSSQL_SA_PASSWORD: ${MSSQL_PASSWORD:-ChangeMe123!}
+  #     MSSQL_PID: Express
+  #   ports:
+  #     - "1433:1433"
+
   api:
     build:
       context: .
@@ -31,6 +42,9 @@ services:
       # ConnectionStrings:module-platform > ConnectionStrings:Default.
       Database__Provider: ${DB_PROVIDER:-postgres}
       Database__Postgres: Host=${DB_HOST:-db};Port=${DB_PORT:-5432};Database=${POSTGRES_DB:-splitshare};Username=${POSTGRES_USER:-module_platform};Password=${POSTGRES_PASSWORD:-module_platform}
+      # SQL Server target (used when DB_PROVIDER=sqlServer; needs a reachable SQL Server —
+      # Azure SQL, or uncomment the sqlserver service below and set MSSQL_* in .env)
+      Database__SqlServer: Server=${MSSQL_HOST:-sqlserver},${MSSQL_PORT:-1433};Database=${MSSQL_DB:-splitshare};User Id=${MSSQL_USER:-sa};Password=${MSSQL_PASSWORD:-};TrustServerCertificate=True
       ConnectionStrings__Default: Host=${DB_HOST:-db};Port=${DB_PORT:-5432};Database=${POSTGRES_DB:-splitshare};Username=${POSTGRES_USER:-module_platform};Password=${POSTGRES_PASSWORD:-module_platform}
       Jwt__Key: ${JWT_KEY:-dev-only-insecure-key-change-in-prod-0123456789}
       Uploads__Path: /data/uploads
