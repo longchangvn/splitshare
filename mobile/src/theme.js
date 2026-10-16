@@ -1,0 +1,35 @@
+// Design tokens — 1:1 from docs/mobile-design.html (Teal #0d9488, iOS 360px).
+export const colors = {
+  primary: '#0d9488',
+  accent: '#2dd4bf',
+  accentLight: '#5eead4',
+  darkTealText: '#0f766e',
+  lightTealBg: '#ccfbf1',
+  paleTealBg: '#f0fdfa',
+  borderTeal: '#99f6e4',
+  page: '#f1f5f9',
+  screen: '#f8fafc',
+  card: '#fff',
+  cardBorder: '#e2e8f0',
+  text: '#0f172a',
+  secondary: '#64748b',
+  muted: '#94a3b8',
+  inputBorder: '#cbd5e1',
+  darkButton: '#0f172a',
+  openBg: '#fef9c3',
+  openText: '#854d0e',
+  lockedBg: '#e2e8f0',
+  lockedText: '#475569',
+  debtorBg: '#fee2e2',
+  debtorText: '#b91c1c',
+  owedBg: '#ccfbf1',
+  owedText: '#0f766e',
+  warnBg: '#ffedd5',
+  warnText: '#9a3412',
+  dangerCardBg: '#fef2f2',
+  dangerCardBorder: '#fecaca',
+  darkHero: '#0f172a',
+};
+
+export const radius = { card: 16, btn: 12, inp: 12, thumb: 10, seg: 10, sheet: 20 };
+export const touchTarget = 44; // min 44pt per design legend

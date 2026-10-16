@@ -35,7 +35,8 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
     public const long MaxImageBytes = 10 * 1024 * 1024;
     public const int MaxImages = 5;
     public static readonly HashSet<string> AllowedMimes = new(StringComparer.OrdinalIgnoreCase)
-        { "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic" };
+        { "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif",
+          "image/heic-sequence", "image/heif-sequence" };
     public static readonly HashSet<string> AllowedCategories = new(StringComparer.OrdinalIgnoreCase)
         { "food", "transport", "stay", "activity", "shopping", "health", "bills", "other" };
 

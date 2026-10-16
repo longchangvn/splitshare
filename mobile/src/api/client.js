@@ -1,0 +1,144 @@
+// API client — 1:1 with api/ (Bearer + single-flight refresh).
+// Matches web/src/api.js behavior, but tokens live in SecureStore
+// (Keychain/Keystore per mobile-design Frame 1) instead of localStorage.
+// Base: /api/v1, snake_case both directions, errors {code, message, fields?}.
+//
+// IMPORTANT backend quirks (verified against api/Endpoints/*.cs):
+// - Preview-split is GROUP-SCOPED: POST /groups/:id/expenses/preview-split
+//   (NOT POST /expenses/preview-split as requirements §9 prints).
+// - Un-settle preview for edits: POST /expenses/:id/preview-edit
+//   -> {shares, unsettled_user_ids[]} drives the blocking modal (Frame 6).
+// - Images: authenticated GET /images/:id binary (no signed URLs despite design
+//   Frame 4 text); upload via POST /expenses/:id/images multipart.
+// - Idempotency-Key is OPTIONAL server-side; client ALWAYS sends it on
+//   POST expenses/payments (uuid v4 per create intent) for offline retry safety.
+import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
+import uuid from 'react-native-uuid';
+
+const AT_KEY = 'ss_at';
+const RT_KEY = 'ss_rt';
+
+export function baseUrl() {
+  return (
+    Constants?.expoConfig?.extra?.apiUrl ||
+    process.env.EXPO_PUBLIC_API_URL ||
+    'http://localhost:8081'
+  );
+}
+
+export class ApiError extends Error {
+  constructor(status, code, message, fields) {
+    super(message || code || `HTTP ${status}`);
+    this.status = status;
+    this.code = code;
+    this.fields = fields;
+  }
+}
+
+export async function getTokens() {
+  const [at, rt] = await Promise.all([
+    SecureStore.getItemAsync(AT_KEY),
+    SecureStore.getItemAsync(RT_KEY),
+  ]);
+  return { at, rt };
+}
+
+export async function setTokens(at, rt) {
+  await Promise.all([
+    at
+      ? SecureStore.setItemAsync(AT_KEY, at)
+      : SecureStore.deleteItemAsync(AT_KEY),
+    rt
+      ? SecureStore.setItemAsync(RT_KEY, rt)
+      : SecureStore.deleteItemAsync(RT_KEY),
+  ]);
+}
+
+export async function clearTokens() {
+  await Promise.all([
+    SecureStore.deleteItemAsync(AT_KEY).catch(() => {}),
+    SecureStore.deleteItemAsync(RT_KEY).catch(() => {}),
+  ]);
+}
+
+export function newIdempotencyKey() {
+  return uuid.v4();
+}
+
+// Single-flight refresh: N concurrent 401s -> exactly 1 refresh
+// (mirrors token-refresh-mobile-first/token-refresh.md + web/src/api.js).
+let refreshPromise = null;
+async function refreshOnce() {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const { rt } = await getTokens();
+      if (!rt) throw new ApiError(401, 'UNAUTH', 'No refresh token');
+      const r = await fetch(`${baseUrl()}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        await clearTokens();
+        throw new ApiError(r.status, data.code || 'UNAUTH', data.message);
+      }
+      await setTokens(data.access_token, data.refresh_token);
+      return data.access_token;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+async function request(method, path, { body, form, idempotencyKey, retry = true } = {}) {
+  const { at } = await getTokens();
+  const headers = {};
+  if (at) headers.Authorization = `Bearer ${at}`;
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+
+  const r = await fetch(`${baseUrl()}${path}`, {
+    method,
+    headers,
+    body: form || (body !== undefined ? JSON.stringify(body) : undefined),
+  });
+
+  // Auth endpoints 401 never triggers refresh (same rule as web client).
+  const isAuthPath = path.includes('/auth/');
+  if (r.status === 401 && retry && !isAuthPath) {
+    const fresh = await refreshOnce().catch(() => null);
+    if (fresh) return request(method, path, { body, form, idempotencyKey, retry: false });
+    throw new ApiError(401, 'SESSION_EXPIRED', 'Session expired');
+  }
+
+  if (r.status === 204) return null;
+  const ct = r.headers.get('content-type') || '';
+  const data = ct.includes('json') ? await r.json().catch(() => ({})) : await r.text();
+  if (!r.ok) {
+    throw new ApiError(r.status, data?.code || 'INTERNAL', data?.message, data?.fields);
+  }
+  return data;
+}
+
+export const api = {
+  get: (p) => request('GET', p),
+  post: (p, body, opts) => request('POST', p, { body, ...opts }),
+  patch: (p, body) => request('PATCH', p, { body }),
+  del: (p) => request('DELETE', p),
+  postForm: (p, formData, opts) => request('POST', p, { form: formData, ...opts }),
+  // Authenticated binary download (images / payment proof / CSV).
+  getBlob: async (p) => {
+    const { at } = await getTokens();
+    const r = await fetch(`${baseUrl()}${p}`, {
+      headers: at ? { Authorization: `Bearer ${at}` } : {},
+    });
+    if (!r.ok) throw new ApiError(r.status, 'NOT_FOUND', 'Download failed');
+    return r.blob();
+  },
+};
+
+export const fmt = (cents, currency = 'USD') =>
+  `${currency} ${(cents / 100).toFixed(2)}`;

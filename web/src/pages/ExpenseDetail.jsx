@@ -51,16 +51,23 @@ export function ExpenseDetail() {
     });
   };
   const [uploading, setUploading] = useState(false);
+  const [uploadKey, setUploadKey] = useState(0);
+  const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
   const upload = async (file) => {
     if (!file || uploading) return;
+    if (file.size > 10 * 1024 * 1024) {
+      setE({ message: `${file.name}: over 10MB.` });
+      setUploadKey((k) => k + 1); // reset picker so the same file can be retried
+      return;
+    }
     const form = new FormData();
-    form.append('file', file);
+    form.append('file', file, file.name);
     setUploading(true);
     try {
       await api.postForm(`/api/v1/expenses/${eid}/images`, form);
       notifications.show({ title: 'Receipt uploaded', color: 'teal' });
       load();
-    } catch (err) { setE(err); } finally { setUploading(false); }
+    } catch (err) { setE(err); } finally { setUploading(false); setUploadKey((k) => k + 1); }
   };
   const [deletingImg, setDeletingImg] = useState(null);
   const delImg = async (iid) => {
@@ -154,11 +161,11 @@ export function ExpenseDetail() {
       <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
         <Group justify="space-between" mb="sm">
           <Title order={4}>Receipts</Title>
-          <FileButton onChange={upload} accept="image/*" disabled={uploading}>
+          <FileButton key={uploadKey} onChange={upload} accept={ACCEPT} disabled={uploading}>
             {(props) => <Button size="xs" {...props} loading={uploading}>Upload receipt</Button>}
           </FileButton>
         </Group>
-        {x.images.length === 0 && <Text size="sm" c="dimmed">No receipts attached.</Text>}
+        {x.images.length === 0 && <Text size="sm" c="dimmed">No receipts attached. jpg/png/webp/heic ≤10MB, GPS stripped.</Text>}
         <Group gap="sm">
           {x.images.map((i) => (
             <Stack key={i.image_id} gap={4} align="center">

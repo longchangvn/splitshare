@@ -1,0 +1,21 @@
+{
+  "expo": {
+    "name": "SplitShare",
+    "slug": "splitshare",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "splitshare",
+    "platforms": ["ios", "android"],
+    "ios": { "supportsTablet": true, "bundleIdentifier": "app.splitshare.mobile" },
+    "android": { "package": "app.splitshare.mobile" },
+    "plugins": [
+      "expo-secure-store",
+      "expo-image-picker",
+      "expo-local-authentication",
+      "expo-notifications"
+    ],
+    "extra": {
+      "apiUrl": "http://localhost:8081"
+    }
+  }
+}
