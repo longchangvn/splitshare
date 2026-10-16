@@ -22,22 +22,29 @@ public static class GroupEndpoints
 
     private static Guid Me(ClaimsPrincipal p) => AuthEndpoints.CurrentUserId(p)!.Value;
 
-    private static async Task<object> DetailAsync(AppDbContext db, Guid groupId, Guid me, Groups.GroupService svc)
+    private static async Task<object> DetailAsync(AppDbContext db, Guid groupId, Guid me, Groups.GroupService svc, IConfiguration config)
     {
         var g = (await db.Groups.FindAsync(groupId))!;
         var members = await db.GroupMembers.Where(m => m.GroupId == groupId).ToListAsync();
         var ids = members.Select(m => m.UserId).ToList();
         var users = await db.Users.Where(u => ids.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => new { u.DisplayName, u.Username });
+        var myRole = members.FirstOrDefault(m => m.UserId == me)?.Role;
+        var baseUrl = (config["App:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
+        // Stable join link for owners/treasurers — same token as email invites.
+        string? inviteLink = myRole is "owner" or "treasurer"
+            ? GroupService.InviteLink(baseUrl, g.InviteToken)
+            : null;
         return new
         {
             group_id = g.Id,
             name = g.Name,
             currency = g.Currency,
-            my_role = members.FirstOrDefault(m => m.UserId == me)?.Role,
+            my_role = myRole,
             mode = g.Mode,
             flat_fee_cents = g.FlatFeeCents,
             has_share_link = g.ShareToken != null,
+            invite_link = inviteLink,
             budget = await svc.BudgetViewAsync(groupId),
             members = members.Select(m => new
             {
@@ -64,12 +71,12 @@ public static class GroupEndpoints
             return Results.Ok(groups);
         });
 
-        api.MapGet("/groups/{id:guid}", async (Guid id, ClaimsPrincipal p, AppDbContext db, GroupService svc, Services.RecurringService recurring) =>
+        api.MapGet("/groups/{id:guid}", async (Guid id, ClaimsPrincipal p, AppDbContext db, GroupService svc, Services.RecurringService recurring, IConfiguration config) =>
         {
             var me = Me(p);
             if (await svc.RoleAsync(id, me) is null) return ApiResults.Error("FORBIDDEN", "Not a group member.", 403);
             await RecurringEndpoints.Materialize(id, recurring);
-            return Results.Ok(await DetailAsync(db, id, me, svc));
+            return Results.Ok(await DetailAsync(db, id, me, svc, config));
         });
 
         api.MapPatch("/groups/{id:guid}", async (Guid id, RenameGroupDto d, ClaimsPrincipal p, GroupService svc) =>

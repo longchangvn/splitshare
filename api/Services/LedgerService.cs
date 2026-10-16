@@ -141,7 +141,8 @@ public sealed class LedgerService(AppDbContext db)
     public sealed record MeView(Guid GroupId, string Currency, long NetCents,
         List<OweTo> Owes, List<OwedFrom> OwedToMe, int SettlementVersion);
     public sealed record GroupRow(Guid GroupId, string Name, string Currency, long NetCents,
-        bool Delinquent, DateTime? OldestUnsettledAt);
+        bool Delinquent, DateTime? OldestUnsettledAt, DateTime CreatedAt,
+        string? MyRole, int MemberCount);
     public sealed record CurrencyTotals(long OweCents, long OwedCents);
     public sealed record AllView(List<GroupRow> Groups, Dictionary<string, CurrencyTotals> Totals);
     public sealed record MemberSummary(Guid UserId, string DisplayName,
@@ -307,8 +308,14 @@ public sealed class LedgerService(AppDbContext db)
     /// <summary>All-groups dashboard grouped by currency, never summed across (task 7.2).</summary>
     public async Task<AllView> BuildAllAsync(Guid userId)
     {
-        var groupIds = await db.GroupMembers.Where(m => m.UserId == userId)
-            .Select(m => m.GroupId).ToListAsync();
+        var memberships = await db.GroupMembers.Where(m => m.UserId == userId)
+            .Select(m => new { m.GroupId, m.Role }).ToListAsync();
+        var groupIds = memberships.Select(m => m.GroupId).ToList();
+        var myRoles = memberships.ToDictionary(m => m.GroupId, m => m.Role);
+        var memberCounts = await db.GroupMembers.Where(m => groupIds.Contains(m.GroupId))
+            .GroupBy(m => m.GroupId)
+            .Select(g => new { GroupId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.GroupId, x => x.Count);
         var groups = await db.Groups.Where(g => groupIds.Contains(g.Id) && g.DeletedAt == null).ToListAsync();
         var rows = new List<GroupRow>();
         var totals = new Dictionary<string, CurrencyTotals>();
@@ -324,7 +331,10 @@ public sealed class LedgerService(AppDbContext db)
                     .Where(p => p.GroupId == g.Id && p.Status == ExpenseStatus.Open && p.ReversedAt == null)
                     .Select(p => (DateTime?)p.CreatedAt).MinAsync();
             var delinquent = net != 0 && oldest is not null && DateTime.UtcNow - oldest > TimeSpan.FromDays(30);
-            rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent, net != 0 ? oldest : null));
+            myRoles.TryGetValue(g.Id, out var myRole);
+            memberCounts.TryGetValue(g.Id, out var memberCount);
+            rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent, net != 0 ? oldest : null, g.CreatedAt,
+                myRole, memberCount));
             totals.TryGetValue(g.Currency, out var t);
             totals[g.Currency] = net < 0
                 ? new CurrencyTotals(t?.OweCents - net ?? -net, t?.OwedCents ?? 0)
