@@ -96,3 +96,44 @@ a {
   }
   .sticky-spacer { height: 8px; }
 }
+
+/* Bottom tab bar: visible on all breakpoints (no hiddenFrom). */
+.bottom-nav {
+  display: block !important;
+}
+
+/* SplitShare brand line-height: large screens only.
+   Mobile must not include the Mantine var (uses normal instead). */
+.mantine-Text-root.brand-splitshare {
+  line-height: normal;
+}
+@media (min-width: 36em) {
+  .mantine-Text-root.brand-splitshare {
+    line-height: var(--text-lh, var(--mantine-line-height-md));
+  }
+}
+
+/* Auth (login/register): inputs visible without scroll on mobile.
+   Top-align + compact rhythm so username/password/button fit first paint. */
+@media (max-width: 35.99em) {
+  .auth-container {
+    margin-block: 8px !important;
+  }
+  .auth-center {
+    min-height: auto !important;
+    align-items: flex-start !important;
+    padding-block: 8px;
+  }
+  .auth-paper {
+    border-radius: 12px;
+  }
+  .auth-banner {
+    padding: 12px 12px 10px !important;
+  }
+  .auth-form {
+    padding: 16px !important;
+  }
+  .auth-form .mantine-Stack-root {
+    gap: 10px;
+  }
+}

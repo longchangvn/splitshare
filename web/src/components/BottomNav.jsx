@@ -78,8 +78,8 @@ function Tab({ label, icon, active, onClick }) {
   );
 }
 
-// Mobile-only bottom tab bar (mockup screen 2 footer). Rendered by Shell;
-// hidden on sm+ via hiddenFrom so desktop is untouched.
+// Bottom tab bar (all screens). Rendered by Shell; always visible so the
+// primary nav never disappears across breakpoints.
 export function BottomNav() {
   const nav = useNavigate();
   const loc = useLocation();
@@ -123,7 +123,7 @@ export function BottomNav() {
     <Box
       component="nav"
       aria-label="Primary"
-      hiddenFrom="sm"
+      className="bottom-nav"
       pos="fixed"
       bottom={0}
       left={0}

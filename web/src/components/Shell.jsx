@@ -10,7 +10,7 @@ export function Shell({ children }) {
     <AppShell header={{ height: 60 }} padding="md">
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between" wrap="nowrap">
-          <Text component={Link} to="/" fw={800} size="lg" c="teal.7">
+          <Text component={Link} to="/" fw={800} size="lg" c="teal.7" className="brand-splitshare">
             SplitShare
           </Text>
           <Group gap="sm" wrap="nowrap" visibleFrom="sm">
@@ -72,8 +72,8 @@ export function Shell({ children }) {
       <AppShell.Main>
         <Container size="md" py="sm">
           {children}
-          {/* Spacer so the fixed mobile tab bar never covers page-end content. */}
-          <Box hiddenFrom="sm" h={72} aria-hidden />
+          {/* Spacer so the fixed bottom tab bar never covers page-end content. */}
+          <Box h={72} aria-hidden />
         </Container>
       </AppShell.Main>
       <BottomNav />

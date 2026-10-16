@@ -11,9 +11,9 @@ function AuthBrand({ compact }) {
   return (
     <>
       <Box
-        w={compact ? 52 : 48}
-        h={compact ? 52 : 48}
-        mb="sm"
+        w={compact ? 40 : 48}
+        h={compact ? 40 : 48}
+        mb={compact ? 'xs' : 'sm'}
         mt={compact ? undefined : 0}
         mx={compact ? 'auto' : undefined}
         style={{
@@ -24,13 +24,13 @@ function AuthBrand({ compact }) {
           alignItems: 'center',
           justifyContent: 'center',
           fontWeight: 800,
-          fontSize: 24,
+          fontSize: compact ? 20 : 24,
         }}
         aria-hidden
       >
         S
       </Box>
-      <Text fw={800} size={compact ? 22 : 26}>SplitShare</Text>
+      <Text fw={800} size={compact ? 20 : 26} className="brand-splitshare">SplitShare</Text>
       <Text size="sm" mt={4} style={{ opacity: 0.9 }}>
         {compact ? 'Split less. Settle smart.' : 'Split expenses with friends, settle up in seconds'}
       </Text>
@@ -40,15 +40,16 @@ function AuthBrand({ compact }) {
 
 function AuthLayout({ children }) {
   return (
-    <Container size={760} my="md">
-      <Center mih="calc(100vh - 140px)">
-        <Paper withBorder shadow="md" radius="lg" style={{ overflow: 'hidden', width: '100%' }}>
+    <Container size={760} my={{ base: 'sm', sm: 'md' }} px={{ base: 'sm', sm: 'md' }} className="auth-container">
+      <Center mih={{ base: 'auto', sm: 'calc(100vh - 140px)' }} className="auth-center">
+        <Paper withBorder shadow="md" radius="lg" style={{ overflow: 'hidden', width: '100%' }} className="auth-paper">
           {/* Mobile brand banner: compact, matches mockup screen 1 */}
           <Box
             hiddenFrom="sm"
-            p="lg"
+            p="sm"
             ta="center"
             c="white"
+            className="auth-banner"
             style={{ background: 'linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)' }}
           >
             <AuthBrand compact />
@@ -70,7 +71,7 @@ function AuthLayout({ children }) {
               </Box>
             </Grid.Col>
             <Grid.Col span={{ base: 12, sm: 7 }}>
-              <Box p="xl">{children}</Box>
+              <Box p={{ base: 'md', sm: 'xl' }} className="auth-form">{children}</Box>
             </Grid.Col>
           </Grid>
         </Paper>
