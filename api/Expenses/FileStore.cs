@@ -41,6 +41,7 @@ public sealed class LocalFileStore(IConfiguration config, ILogger<LocalFileStore
             ".png" => "image/png",
             ".webp" => "image/webp",
             ".heic" => "image/heic",
+            ".heif" => "image/heif",
             _ => "application/octet-stream"
         };
         return Task.FromResult<(Stream, string)?>((File.OpenRead(full), mime));

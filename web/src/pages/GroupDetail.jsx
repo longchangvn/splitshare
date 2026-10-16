@@ -272,9 +272,26 @@ export function GroupDetail() {
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `${detail?.name || 'group'}-export.csv`; a.click();
-      URL.revokeObjectURL(url);
+      a.href = url; a.download = `${detail?.name || 'group'}-export.csv`;
+      // iOS Safari ignores clicks on detached anchors — must be in the DOM.
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) { setE(err); }
+  };
+  // Jump to a tab/section from the mobile ⋯ menu (desktop tabs that have no
+  // mobile tab get here instead: paid/share via Insights, the rest by anchor).
+  const jumpTo = (t, anchor, extra) => {
+    setTab(t);
+    if (t === 'activity') {
+      if (activity.length === 0) loadActivity();
+      if (rules.length === 0) loadRules();
+    }
+    if (extra) extra();
+    setTimeout(() => {
+      document.getElementById(anchor || 'group-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
   };
   const makeShareLink = async () => {
     try {
@@ -375,6 +392,19 @@ export function GroupDetail() {
               <Menu.Item onClick={() => nav(`/groups/${id}/statement`)}>Statement</Menu.Item>
               <Menu.Item onClick={() => nav(`/groups/${id}/report`)}>Report</Menu.Item>
               <Menu.Item onClick={exportCsv}>Export CSV</Menu.Item>
+              <Menu.Divider />
+              <Menu.Item onClick={() => jumpTo('ledger')}>Expenses</Menu.Item>
+              <Menu.Item onClick={() => jumpTo('balances')}>Balances</Menu.Item>
+              <Menu.Item onClick={() => jumpTo('balances', undefined, () => setInsightsOpen(true))}>
+                Total paid & share
+              </Menu.Item>
+              <Menu.Item onClick={() => jumpTo('activity', 'm-transfers')}>Payments</Menu.Item>
+              <Menu.Item onClick={() => jumpTo('activity', 'm-recurring')}>Recurring</Menu.Item>
+              <Menu.Item onClick={() => nav(`/groups/${id}/invite`)}>Invite members</Menu.Item>
+              <Menu.Item onClick={() => { loadLedger(); loadActivity(); loadRules(); loadSummary(); }}>
+                Refresh
+              </Menu.Item>
+              <Menu.Divider />
               {detail.my_role === 'owner' && (
                 <>
                   <Menu.Item onClick={openSettings}>Settings{detail.my_role ? ` · ${detail.my_role}` : ''}{detail.mode && detail.mode !== 'shared' ? ` · ${detail.mode}` : ''}</Menu.Item>
@@ -502,7 +532,7 @@ export function GroupDetail() {
           </Card>
         )}
 
-        <Card withBorder shadow="sm" padding="md" radius="md">
+        <Card withBorder shadow="sm" padding="md" radius="md" id="group-tabs" style={{ scrollMarginTop: 72 }}>
           <Tabs value={tab} onChange={(v) => {
             const nv = v ?? 'ledger';
             setTab(nv);
@@ -889,8 +919,11 @@ export function GroupDetail() {
               )}
               {isMobile && (
                 <Stack gap="md">
-                  <Box>
-                    <Title order={5} mb="xs">Transfers</Title>
+                  <Box id="m-transfers" style={{ scrollMarginTop: 72 }}>
+                    <Group justify="space-between" wrap="nowrap" mb="xs">
+                      <Title order={5}>Transfers</Title>
+                      <Anchor size="xs" c="dimmed" onClick={() => loadLedger()}>Refresh</Anchor>
+                    </Group>
                     {payments.length === 0 && !ledgerLoading && <Text size="sm" c="dimmed">No transfers yet.</Text>}
                     {ledgerLoading && payments.length === 0 && <Skeleton height={52} radius="md" />}
                     <Stack gap="xs">
@@ -914,8 +947,11 @@ export function GroupDetail() {
                       ))}
                     </Stack>
                   </Box>
-                  <Box>
-                    <Title order={5} mb="xs">Updates</Title>
+                  <Box id="m-updates" style={{ scrollMarginTop: 72 }}>
+                    <Group justify="space-between" wrap="nowrap" mb="xs">
+                      <Title order={5}>Updates</Title>
+                      <Anchor size="xs" c="dimmed" onClick={() => loadActivity()}>Refresh</Anchor>
+                    </Group>
                     {activityLoading && activity.length === 0 && (
                       <Stack gap="xs"><Skeleton height={20} radius="sm" /><Skeleton height={20} radius="sm" /></Stack>
                     )}
@@ -933,8 +969,11 @@ export function GroupDetail() {
                       ))}
                     </Stack>
                   </Box>
-                  <Box>
-                    <Title order={5} mb="xs">Recurring</Title>
+                  <Box id="m-recurring" style={{ scrollMarginTop: 72 }}>
+                    <Group justify="space-between" wrap="nowrap" mb="xs">
+                      <Title order={5}>Recurring</Title>
+                      <Anchor size="xs" c="dimmed" onClick={() => loadRules()}>Refresh</Anchor>
+                    </Group>
                     <RecurringForm groupId={id} members={members} onDone={loadRules} />
                     <Stack gap="xs" mt="sm">
                       {rules.map((r) => (
@@ -944,8 +983,8 @@ export function GroupDetail() {
                               <Text size="sm" fw={600} truncate>{r.title} <Text span c="dimmed">· {r.frequency}</Text></Text>
                               <Text size="xs" c="dimmed">{fmt(r.amount_cents, detail.currency)} · next {new Date(r.next_run_at).toLocaleDateString()} · {r.active ? 'active' : 'paused'}</Text>
                             </div>
-                            <Group gap={2} wrap="nowrap">
-                              <Button size="xs" variant="subtle" onClick={async () => { await api.patch(`/api/v1/groups/${id}/recurring/${r.rule_id}`, { active: !r.active }); loadRules(); }}>
+                            <Group gap={2} wrap="nowrap" style={{ flex: 'none' }}>
+                              <Button size="xs" variant="subtle" mih={44} onClick={async () => { await api.patch(`/api/v1/groups/${id}/recurring/${r.rule_id}`, { active: !r.active }); loadRules(); }}>
                                 {r.active ? 'Pause' : 'Resume'}
                               </Button>
                               <RowMenu label={`Actions for ${r.title}`}>
@@ -1196,6 +1235,7 @@ export function GroupDetail() {
 }
 
 function RecurringForm({ groupId, members, onDone }) {
+  const isMobile = useMediaQuery('(max-width: 36em)');
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [payer, setPayer] = useState(members[0]?.user_id || '');
@@ -1214,6 +1254,24 @@ function RecurringForm({ groupId, members, onDone }) {
       onDone();
     } catch (err) { setE(err); } finally { setBusy(false); }
   };
+  // Mobile: one field per row with full-width inputs + big Add (no squished
+  // 5-across row on 360px screens).
+  if (isMobile) {
+    return (
+      <form onSubmit={go}>
+        <Stack gap="xs">
+          <TextInput label="Title" required placeholder="Rent" size="sm" value={title} onChange={(x) => setTitle(x.target.value)} />
+          <Group gap="xs" grow>
+            <TextInput label="Amount" required inputMode="decimal" size="sm" value={amount} onChange={(x) => setAmount(x.target.value)} />
+            <Select label="Every" size="sm" value={freq} onChange={setFreq} data={['weekly', 'monthly']} />
+          </Group>
+          <Select label="Payer" size="sm" searchable value={payer} onChange={setPayer} data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
+          <Button type="submit" size="md" fullWidth loading={busy}>Add rule</Button>
+        </Stack>
+        <Err e={e} />
+      </form>
+    );
+  }
   return (
     <form onSubmit={go}>
       <Group gap="xs" align="flex-end">

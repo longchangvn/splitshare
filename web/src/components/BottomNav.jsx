@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Box, Group, Text } from '@mantine/core';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { notifications } from '@mantine/notifications';
@@ -84,12 +85,25 @@ export function BottomNav() {
   const nav = useNavigate();
   const loc = useLocation();
   const path = loc.pathname;
-  const active = path === '/'
-    ? (loc.hash === '#groups' ? 'groups' : 'home')
+  // Instant tap feedback: the clicked tab highlights immediately, then the
+  // location-derived value takes over on navigation (cleared below).
+  const [sel, setSel] = useState(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setSel(null); }, [path, loc.hash, loc.key]);
+  // Location-derived tab. Activity deep-links to a group page carrying
+  // state.tab, so it must resolve to 'activity' — never fall back to 'groups'.
+  // Add is an action opening the dashboard wizard (state.openNew).
+  const base = path === '/'
+    ? (loc.state?.openNew ? 'add' : loc.hash === '#groups' ? 'groups' : 'home')
     : path === '/profile' ? 'you'
-      : path.startsWith('/groups') ? 'groups' : null;
+      : path.startsWith('/groups')
+        ? (loc.state?.tab === 'activity' ? 'activity' : 'groups')
+        : null;
+  const active = sel ?? base;
 
+  const goHome = () => { setSel('home'); nav('/'); };
   const goGroups = () => {
+    setSel('groups');
     if (path === '/') {
       document.getElementById('groups')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       if (loc.hash !== '#groups') nav({ pathname: '/', hash: '#groups' }, { replace: true });
@@ -100,11 +114,12 @@ export function BottomNav() {
 
   // Global Add opens the dashboard new-group wizard (Dashboard consumes
   // location.state.openNew, same pattern as GroupDetail copyFrom).
-  const goAdd = () => nav('/', { state: { openNew: true } });
+  const goAdd = () => { setSel('add'); nav('/', { state: { openNew: true } }); };
 
   // No global activity feed exists; jump to the most outstanding group's
   // Activity tab (GroupDetail consumes location.state.tab).
   const goActivity = async () => {
+    setSel('activity');
     try {
       const d = await api.get('/api/v1/me/balances');
       const list = d.groups || [];
@@ -136,11 +151,11 @@ export function BottomNav() {
       }}
     >
       <Group gap={0} grow wrap="nowrap">
-        <Tab label="Home" icon={<HomeIcon />} active={active === 'home'} onClick={() => nav('/')} />
+        <Tab label="Home" icon={<HomeIcon />} active={active === 'home'} onClick={goHome} />
         <Tab label="Groups" icon={<GroupsIcon />} active={active === 'groups'} onClick={goGroups} />
-        <Tab label="Add" icon={<AddIcon />} active={false} onClick={goAdd} />
-        <Tab label="Activity" icon={<ActivityIcon />} active={false} onClick={goActivity} />
-        <Tab label="You" icon={<YouIcon />} active={active === 'you'} onClick={() => nav('/profile')} />
+        <Tab label="Add" icon={<AddIcon />} active={active === 'add'} onClick={goAdd} />
+        <Tab label="Activity" icon={<ActivityIcon />} active={active === 'activity'} onClick={goActivity} />
+        <Tab label="You" icon={<YouIcon />} active={active === 'you'} onClick={() => { setSel('you'); nav('/profile'); }} />
       </Group>
     </Box>
   );

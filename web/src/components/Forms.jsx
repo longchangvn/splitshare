@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Accordion, Alert, Box, Button, Checkbox, Group, Paper, ScrollArea, SegmentedControl, Select, Stack, Text,
+  Accordion, Alert, Box, Button, Checkbox, FileButton, Group, Paper, ScrollArea, SegmentedControl, Select, Stack, Text,
   TextInput,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
@@ -70,7 +70,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const [saving, setSaving] = useState(false);
   const [imgErrs, setImgErrs] = useState([]);
   const [e, setE] = useState(null);
-  // Trip-pack richness.
+  // Trip-pack richness (kept for edits; hidden from the simplified new form).
+  // New expenses are amount-only: tax/tip/fee/FX/guests stay empty and are omitted.
   const CATS = ['food', 'transport', 'stay', 'activity', 'shopping', 'health', 'bills', 'other'];
   const todayStr = () => new Date().toISOString().slice(0, 10);
   const [category, setCategory] = useState(source?.category || 'other');
@@ -188,6 +189,13 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     JSON.stringify(guests), onlyPresent, sel.join(','), Object.values(values).join('|')]);
 
   // Task 4.2: carry source receipts onto the copy by download + re-upload.
+  const extFor = (mime) => (
+    mime === 'image/png' ? '.png'
+      : mime === 'image/webp' ? '.webp'
+        : mime === 'image/heic' || mime === 'image/heic-sequence' ? '.heic'
+          : mime === 'image/heif' || mime === 'image/heif-sequence' ? '.heif'
+            : '.jpg'
+  );
   const carryImages = async (newExpenseId) => {
     const failures = [];
     for (const img of copyImages) {
@@ -197,10 +205,43 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
         if (!r.ok) throw new Error(`download ${r.status}`);
         const blob = await r.blob();
         const form = new FormData();
-        form.append('file', new File([blob], 'receipt', { type: img.mime || blob.type }));
+        const mime = img.mime || blob.type || 'image/jpeg';
+        form.append('file', new File([blob], `receipt${extFor(mime)}`, { type: mime }));
         await api.postForm(`/api/v1/expenses/${newExpenseId}/images`, form);
       } catch (err) {
         failures.push(`${img.image_id.slice(0, 8)}: ${err.message}`);
+      }
+    }
+    return failures;
+  };
+
+  // Receipts attached during creation (new expenses only): held locally, then
+  // uploaded right after the expense is created (images need an expense id).
+  const [newFiles, setNewFiles] = useState([]);
+  const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif';
+  const MAX_BYTES = 10 * 1024 * 1024;
+  const pickFiles = (files) => {
+    const list = Array.from(files || []).slice(0, 5 - newFiles.length);
+    const bad = [];
+    const ok = [];
+    for (const f of list) {
+      if (f.size > MAX_BYTES) { bad.push(`${f.name}: over 10MB`); continue; }
+      ok.push(f);
+    }
+    if (bad.length > 0) {
+      setE({ message: bad.join('; ') });
+    }
+    setNewFiles([...newFiles, ...ok].slice(0, 5));
+  };
+  const uploadNewFiles = async (newExpenseId) => {
+    const failures = [];
+    for (const f of newFiles) {
+      try {
+        const form = new FormData();
+        form.append('file', f, f.name);
+        await api.postForm(`/api/v1/expenses/${newExpenseId}/images`, form);
+      } catch (err) {
+        failures.push(`${f.name}: ${err.message}`);
       }
     }
     return failures;
@@ -216,11 +257,14 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
       if (!existing) {
         const r = await api.post(`/api/v1/groups/${groupId}/expenses`, build());
         const newId = r.expense?.expense_id;
-        if (isCopy && newId && copyImages.length > 0) {
-          const failures = await carryImages(newId);
+        if (newId && (newFiles.length > 0 || (isCopy && copyImages.length > 0))) {
+          const failures = await uploadNewFiles(newId);
+          if (isCopy && copyImages.length > 0) failures.push(...await carryImages(newId));
           if (failures.length > 0) {
             setImgErrs(failures);
-            notifications.show({ title: 'Expense copied; some receipts failed', message: failures.join('; '), color: 'orange' });
+            notifications.show({ title: 'Expense saved; some receipts failed', message: failures.join('; '), color: 'orange' });
+          } else if (newFiles.length > 0) {
+            notifications.show({ title: 'Expense saved with receipts', color: 'teal' });
           } else {
             notifications.show({ title: 'Expense copied with receipts', color: 'teal' });
           }
@@ -233,7 +277,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
       }
     } catch (err) {
       setE(err);
-      setOpenSections(['basics', 'bill', 'split']); // surface the failing section on mobile
+      setOpenSections(['basics', 'split']); // surface the failing section on mobile
     } finally {
       setSaving(false);
     }
@@ -262,28 +306,42 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const isMobile = useMediaQuery('(max-width: 36em)');
   const [openSections, setOpenSections] = useState(['basics']);
 
-  // Receipt strip (mockup screen 4): carried/thumbnail count + where to attach.
-  // Uploads stay on the expense page (single-phase JSON create); this is display only.
+  // Receipt strip (mockup screen 4): carried/thumbnail count + attach.
+  // New expenses can attach up to 5 receipts here (uploaded right after
+  // create); edits manage receipts on the expense page.
   const receiptCount = isCopy ? copyImages.length : (source?.images?.length || 0);
+  const pickedCount = receiptCount + newFiles.length;
   const receiptStrip = (
     <Paper withBorder p="sm" radius="md">
       <Group gap="xs" wrap="nowrap">
-        {receiptCount > 0 ? (
-          Array.from({ length: Math.min(receiptCount, 5) }).map((_, i) => (
+        {pickedCount > 0 ? (
+          Array.from({ length: Math.min(pickedCount, 5) }).map((_, i) => (
             <Box key={i} w={52} h={52} style={{ background: 'var(--mantine-color-orange-1)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flex: 'none' }} aria-hidden>🧾</Box>
           ))
         ) : (
           <Box w={52} h={52} style={{ border: '2px dashed var(--mantine-color-gray-3)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, color: 'var(--mantine-color-dimmed)', flex: 'none' }} aria-hidden>＋</Box>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <Text size="sm" fw={600}>{receiptCount}/5 receipts</Text>
+          <Text size="sm" fw={600}>{pickedCount}/5 receipts</Text>
           <Text size="xs" c="dimmed">
             {isCopy
               ? 'Carried over on save.'
               : existing
                 ? 'Manage receipts on the expense page.'
-                : 'Attach on the expense page after save · jpg/png/webp/heic ≤10MB, GPS stripped'}
+                : newFiles.length > 0
+                  ? `${newFiles.map((f) => f.name).join(', ')} · uploaded on save`
+                  : 'Attach now · jpg/png/webp/heic ≤10MB, GPS stripped'}
           </Text>
+          {!existing && (
+            <Group gap="xs" mt={4}>
+              <FileButton onChange={pickFiles} accept={ACCEPT} multiple>
+                {(props) => <Button size="xs" variant="light" {...props}>Attach receipts</Button>}
+              </FileButton>
+              {newFiles.length > 0 && (
+                <Button size="xs" variant="subtle" color="red" onClick={() => setNewFiles([])}>Clear</Button>
+              )}
+            </Group>
+          )}
         </div>
       </Group>
     </Paper>
@@ -321,50 +379,9 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     </Stack>
   );
 
-  const bill = (
-    <Stack gap="sm">
-      <Group gap="xs" grow>
-        <TextInput label="Tax (opt)" inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
-        <TextInput label="Tip (opt)" inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
-        <TextInput label="Fee (opt)" inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
-      </Group>
-      <Paper withBorder p="sm" radius="md">
-        <Text size="sm" fw={500} mb={4}>Foreign currency (optional)</Text>
-        <Group gap="xs" grow>
-          <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
-          <TextInput placeholder="Amount" inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
-          <TextInput placeholder="Rate" inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
-        </Group>
-        {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
-          <Text size="xs" c="dimmed" mt={4}>≈ {(Number(origAmt) * Number(fxRate)).toFixed(2)} in group currency</Text>
-        )}
-      </Paper>
-      <Paper withBorder p="sm" radius="md">
-        <Group justify="space-between" mb={4}>
-          <Text size="sm" fw={500}>Guest shares (optional)</Text>
-          <Button size="xs" variant="light" onClick={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}>+ Guest</Button>
-        </Group>
-        {guests.map((g, i) => (
-          <Group key={i} gap="xs" mb={4}>
-            <TextInput placeholder="Label (Kid)" value={g.label} style={{ flex: 2 }}
-              onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: x.target.value } : gg)))} />
-            <TextInput placeholder="$" inputMode="decimal" value={g.amount} style={{ flex: 1 }}
-              onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))} />
-            <Select value={g.covered_by} style={{ flex: 2 }}
-              onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
-              data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
-            <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((gg, j) => j !== i))}>X</Button>
-          </Group>
-        ))}
-        {guests.length === 0 && <Text size="xs" c="dimmed">Extra mouths covered by a member (added on top of their share).</Text>}
-      </Paper>
-      <Checkbox
-        checked={onlyPresent}
-        onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
-        label="Only members present (joined before spent date)"
-      />
-    </Stack>
-  );
+  // NOTE: the old "Bill details" section (tax/tip/fee, foreign currency,
+  // guest shares, only-present) was removed to keep new expenses amount-only.
+  // The values above stay in the payload so edits never silently clear them.
 
   const split = (
     <Stack gap="sm">
@@ -445,7 +462,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
         <Box visibleFrom="sm">
           <Stack gap="sm">
             {basics}
-            {bill}
             {split}
           </Stack>
         </Box>
@@ -454,10 +470,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
             <Accordion.Item value="basics">
               <Accordion.Control>Basics</Accordion.Control>
               <Accordion.Panel>{basics}</Accordion.Panel>
-            </Accordion.Item>
-            <Accordion.Item value="bill">
-              <Accordion.Control>Bill details</Accordion.Control>
-              <Accordion.Panel>{bill}</Accordion.Panel>
             </Accordion.Item>
             <Accordion.Item value="split">
               <Accordion.Control>Split</Accordion.Control>
