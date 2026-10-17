@@ -224,7 +224,10 @@ jobs:
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
           if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
             echo "Container app exists — updating image, env vars, ingress and registry in place."
-            az containerapp show --name "$CA_NAME" --resource-group "$RG" -o json > /tmp/ca-before.json
+            # Fetch via REST with the SAME api-version as the PUT below: the CLI's
+            # GET uses a newer api-version whose response contains configuration
+            # fields (identitySettings, runtime) that 2024-03-01 rejects on write.
+            az rest --method get --url "$CA_URL" --output json > /tmp/ca-before.json
             jq \
               --arg image "$IMAGE" \
               --arg server "$REG_SERVER" \
@@ -238,7 +241,11 @@ jobs:
                   .properties.runningStatus,
                   .properties.latestRevisionName,
                   .properties.latestRevisionFqdn,
-                  .properties.configuration.ingress.fqdn)
+                  .properties.configuration.ingress.fqdn,
+                  # May be present even on a same-version GET; unsupported for
+                  # writes at 2024-03-01 — deleting falls back to defaults.
+                  .properties.configuration.identitySettings,
+                  .properties.configuration.runtime)
               | .properties.configuration = (.properties.configuration // {})
               | .properties.template = (.properties.template // {})
               | .properties.template.containers[0].image = $image
