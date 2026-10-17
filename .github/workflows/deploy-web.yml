@@ -67,17 +67,21 @@ jobs:
             echo "Created resource group '$RG'."
           fi
 
-          # Register providers the subscription may never have used
-          # (idempotent; --wait so we don't race a registration in progress).
-          echo "=== Registering Azure resource providers ==="
+          # Register providers the subscription may never have used — best
+          # effort (registering needs subscription-level rights; --wait so we
+          # don't race a registration in progress).
+          echo "=== Registering Azure resource providers (best effort) ==="
           for P in Microsoft.Web Microsoft.App; do
             STATE=$(az provider show --namespace "$P" --query registrationState -o tsv 2>/dev/null || echo "Unknown")
             if [ "$STATE" = "Registered" ]; then
               echo "$P: already registered."
-            else
-              echo "$P: registering (state: $STATE) — first use, can take a few minutes..."
-              az provider register --namespace "$P" --wait --output none
+              continue
+            fi
+            echo "$P: registering (state: $STATE) — first use, can take a few minutes..."
+            if az provider register --namespace "$P" --wait --output none 2>&1 | tee /tmp/reg.log; then
               echo "$P: registered."
+            else
+              echo "::warning::$P could not be registered by this principal (needs subscription Owner rights). Register it once as Owner: az provider register --namespace $P"
             fi
           done
 
