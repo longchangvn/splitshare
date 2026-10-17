@@ -145,9 +145,14 @@ jobs:
           echo "Registry: $REG_SERVER"
 
           echo "=== 3/7 Build & push API image ==="
+          # Built on the runner instead of with ACR Tasks (az acr build):
+          # this subscription rejects Tasks runs with TasksOperationsNotAllowed,
+          # while a plain image push to the registry works fine.
+          echo "Registry SKU: $(az acr show --name "$ACR_NAME" --resource-group "$RG" --query sku.name -o tsv)"
+          docker login "$REG_SERVER" --username "$ACR_USER" --password-stdin <<< "$ACR_PASS"
           # Build context is the repo root (required by api/Dockerfile).
-          az acr build --registry "$ACR_NAME" --resource-group "$RG" \
-            --file api/Dockerfile --image "splitshare:$GITHUB_SHA" .
+          docker build -f api/Dockerfile -t "$REG_SERVER/splitshare:$GITHUB_SHA" .
+          docker push "$REG_SERVER/splitshare:$GITHUB_SHA"
           IMAGE="$REG_SERVER/splitshare:$GITHUB_SHA"
 
           echo "=== 4/7 Container Apps environment ==="
