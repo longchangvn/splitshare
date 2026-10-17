@@ -74,19 +74,27 @@ jobs:
           echo "Resource group '$RG' in $LOC (subscription $SUB_ID)"
 
           # Free-credit subscriptions start unregistered for providers they
-          # have never used. Registration is idempotent; --wait matters
-          # because resource creation fails while still Registering.
-          echo "=== Registering Azure resource providers ==="
+          # have never used. Registering needs subscription-level rights the
+          # deployment principal doesn't have, so this is best effort — the
+          # ACR step below fails with an actionable message if it's missing.
+          echo "=== Registering Azure resource providers (best effort) ==="
           for P in Microsoft.ContainerRegistry Microsoft.App Microsoft.OperationalInsights; do
             STATE=$(az provider show --namespace "$P" --query registrationState -o tsv 2>/dev/null || echo "Unknown")
             if [ "$STATE" = "Registered" ]; then
               echo "$P: already registered."
-            else
-              echo "$P: registering (state: $STATE) — first use, can take a few minutes..."
-              az provider register --namespace "$P" --wait --output none
+              continue
+            fi
+            echo "$P: registering (state: $STATE) — first use, can take a few minutes..."
+            if az provider register --namespace "$P" --wait --output none 2>&1 | tee /tmp/reg.log; then
               echo "$P: registered."
+            else
+              echo "::warning::$P could not be registered by this principal (needs subscription Owner rights). Register it once as Owner: az provider register --namespace $P"
             fi
           done
+          if [ "$(az provider show --namespace Microsoft.ContainerRegistry --query registrationState -o tsv 2>/dev/null || true)" != "Registered" ]; then
+            echo "::error::Microsoft.ContainerRegistry is not registered and this principal cannot register it. As subscription Owner run once: az provider register --namespace Microsoft.ContainerRegistry  (or Azure Portal > Subscriptions > Resource providers > Microsoft.ContainerRegistry > Register), then re-run this workflow."
+            exit 1
+          fi
 
           echo "=== 2/7 Container registry ==="
           ACR_NAME=""
@@ -94,9 +102,18 @@ jobs:
             CAND=$(echo "$REG_URL_VAR" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
             if az acr show --name "$CAND" --resource-group "$RG" --output none 2>/dev/null; then
               ACR_NAME="$CAND"
-              echo "Using existing registry from vars.SPLITSHARE_REGISTRY_URL: $ACR_NAME"
+              echo "Using registry from vars.SPLITSHARE_REGISTRY_URL: $ACR_NAME"
             else
-              echo "Registry '$CAND' from vars not found in '$RG'; will use a dedicated one."
+              echo "Registry '$CAND' from vars not found in '$RG'."
+            fi
+          fi
+          if [ -z "$ACR_NAME" ]; then
+            # Prefer whatever registry already lives in the RG (e.g. one
+            # created manually in the portal) over creating a second one.
+            FIRST=$(az acr list --resource-group "$RG" --query "[0].name" -o tsv 2>/dev/null || true)
+            if [ -n "${FIRST:-}" ] && [ "$FIRST" != "None" ] && [ "$FIRST" != "null" ]; then
+              ACR_NAME="$FIRST"
+              echo "Using existing registry in '$RG': $ACR_NAME"
             fi
           fi
           if [ -z "$ACR_NAME" ]; then
@@ -146,7 +163,7 @@ jobs:
               echo "Environment '$ENV_NAME' already exists."
             else
               az containerapp env create --name "$ENV_NAME" --resource-group "$RG" \
-                --location "$LOC" --output none
+                --location "$LOC" --logs-destination none --output none
               echo "Created environment '$ENV_NAME'."
             fi
           fi
