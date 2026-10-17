@@ -1,21 +1,20 @@
-name: Deploy Web — Azure Static Web Apps
+name: CD Web — Azure Static Web Apps
 
-# Builds web/ and deploys it to the Static Web App in RG `splitshare`.
-# Creates the SWA if it's missing (no GitHub integration needed — deployment
-# uses the SWA deployment token) and points the SPA at the deployed API via
-# VITE_API_BASE (cross-origin + CORS; SWA has no /api proxy on the Free
-# plan). Requires `api-container` to already exist — run "Deploy API" first
-# on a fresh setup.
+# MANUAL ONLY (workflow_dispatch — no push/merge automation). Builds web/ and
+# deploys it to the Static Web App in RG `splitshare`. Creates the SWA if it's
+# missing (no GitHub integration needed — deployment uses the SWA deployment
+# token) and points the SPA at the deployed API via VITE_API_BASE
+# (cross-origin + CORS; SWA has no /api proxy on the Free plan). Requires
+# `api-container` to already exist — run the "CD API" workflow first on a
+# fresh setup.
+#
+# Every push/merge is gated by the build-only "CI Web" workflow instead; this
+# CD workflow is what turns a green commit into a deployment.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - '.github/workflows/deploy-web.yml'
   workflow_dispatch:
 
-# Same group as deploy-api.yml so the two never mutate Azure concurrently.
+# Same group as cd-api.yml so the two never mutate Azure concurrently.
 concurrency:
   group: deploy-azure-main
   cancel-in-progress: false
@@ -109,7 +108,7 @@ jobs:
           API_FQDN=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
             --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || true)
           if [ -z "$API_FQDN" ] || [ "$API_FQDN" = "None" ]; then
-            echo "::error::Container app '$CA_NAME' not found or has no ingress. Run the 'Deploy API' workflow first (fresh setup: run Deploy API, then Deploy Web)."
+            echo "::error::Container app '$CA_NAME' not found or has no ingress. Run the 'CD API' workflow first (fresh setup: run CD API, then CD Web)."
             exit 1
           fi
           echo "API: https://$API_FQDN"

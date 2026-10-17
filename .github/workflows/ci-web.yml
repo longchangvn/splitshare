@@ -1,0 +1,45 @@
+name: CI Web — Build
+
+# Check-in gate for the web app: installs and builds the SPA bundle on every
+# push/merge but never deploys it (deployment is the manual "CD Web"
+# workflow). Same build as CD (npm ci + vite build in web/), so a green gate
+# means the CD build will succeed too.
+
+on:
+  push:
+    branches: ['**']   # every branch push and every merge
+  workflow_dispatch:
+
+# Per-ref gate: a newer push to the same branch cancels the stale run.
+concurrency:
+  group: ci-web-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build SPA (no deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build
+        working-directory: web
+        env:
+          # Placeholder only — CD injects the real API origin at deploy time.
+          # Vite inlines it into the bundle, so build a realistic one here.
+          VITE_API_BASE: https://ci-placeholder.example.invalid
+        run: |
+          npm ci
+          npm run build

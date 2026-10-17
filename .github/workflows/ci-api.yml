@@ -1,0 +1,50 @@
+name: CI API — Build image
+
+# Check-in gate for the API: builds the image on every push/merge but never
+# pushes it to a registry (deployment is the manual "CD API" workflow).
+# Uses the same Dockerfile and build context (repo ROOT, so the api +
+# servicedefaults ProjectReference resolves) as CD, so a green gate means the
+# CD image build will succeed too.
+#
+# Dockerfile check (multi-stage optimization): api/Dockerfile is already
+# multi-stage and optimal for CI — SDK stage copies *.csproj first so
+# `dotnet restore` is layer-cached across source-only changes, publish runs
+# with --no-restore, and the final aspnet stage copies only /app/publish
+# (no SDK in the shipped image). buildx + the GitHub Actions cache keeps
+# every-push rebuilds fast after the first run.
+
+on:
+  push:
+    branches: ['**']   # every branch push and every merge
+  workflow_dispatch:
+
+# Per-ref gate: a newer push to the same branch cancels the stale run.
+concurrency:
+  group: ci-api-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build image (no push)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: api/Dockerfile
+          push: false
+          load: false
+          tags: splitshare-api:ci-${{ github.sha }}
+          cache-from: type=gha,scope=ci-api
+          cache-to: type=gha,scope=ci-api,mode=max

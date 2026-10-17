@@ -1,25 +1,22 @@
-name: Deploy API — Azure Container Apps
+name: CD API — Azure Container Apps
 
-# Builds api/ and deploys it to the container app in RG `splitshare`.
-# Creates what's missing (resource group, ACR, Container Apps environment,
-# container app) and updates an existing container app in place — image,
-# env vars, ingress and registry config — without ever deleting it.
+# MANUAL ONLY (workflow_dispatch — no push/merge automation). Builds the api/
+# image, pushes it to ACR and deploys it to the container app in RG
+# `splitshare`. Creates what's missing (resource group, ACR, Container Apps
+# environment, container app) and updates an existing container app in place —
+# image, env vars, ingress and registry config — without ever deleting it.
+#
+# Every push/merge is gated by the build-only "CI API" workflow instead; this
+# CD workflow is what turns a green commit into a deployment.
 #
 # CORS: if the Static Web App already exists, its origin is allowed on the
-# API (best effort). The "Deploy Web" workflow is the one that guarantees it
+# API (best effort). The "CD Web" workflow is the one that guarantees it
 # after the SWA is created.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'api/**'
-      - 'servicedefaults/**'
-      - '.dockerignore'
-      - '.github/workflows/deploy-api.yml'
   workflow_dispatch:
 
-# Same group as deploy-web.yml so the two never mutate Azure concurrently.
+# Same group as cd-web.yml so the two never mutate Azure concurrently.
 concurrency:
   group: deploy-azure-main
   cancel-in-progress: false
@@ -210,7 +207,7 @@ jobs:
 
           echo "=== 6/7 Container app: $CA_NAME ==="
           # CORS origin: allow the SWA origin if the SWA exists (best effort;
-          # deploy-web.yml sets it right after creating/verifying the SWA).
+          # cd-web.yml sets it right after creating/verifying the SWA).
           SWA_CORS=""
           SWA_HOST=$(az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" \
             --query "defaultHostname || properties.defaultHostname" -o tsv 2>/dev/null || true)
@@ -218,7 +215,7 @@ jobs:
             SWA_CORS="https://$SWA_HOST"
             echo "Will allow origin: $SWA_CORS"
           else
-            echo "Static Web App '$SWA_NAME' not found yet — skipping CORS origin (deploy-web.yml will set it)."
+            echo "Static Web App '$SWA_NAME' not found yet — skipping CORS origin (cd-web.yml will set it)."
           fi
 
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
