@@ -267,14 +267,19 @@ jobs:
                 )
               | .properties.configuration.ingress = ((.properties.configuration.ingress // {})
                   * {external: true, targetPort: 8080, transport: "http", allowInsecure: false})
-              | .properties.configuration.registries = (
-                  ((.properties.configuration.registries // []) | map(select(.server != $server)))
-                  + [{server: $server, username: $user, passwordSecretRef: "acr-pwd"}]
-                )
-              | .properties.configuration.secrets = (
-                  ((.properties.configuration.secrets // []) | map(select(.name != "acr-pwd")))
-                  + [{name: "acr-pwd", value: $pass}]
-                )
+              # ARM GET never returns secret values, so any secret carried over
+              # (notably the auto-generated registry secret from az containerapp
+              # create, named "<sanitized-server>-<username>") would be written
+              # back valueless -> ContainerAppSecretInvalid. This app is
+              # workflow-managed with a single registry: rebuild registries and
+              # secrets from our inputs — $server is the same REG_SERVER this
+              # run pushed the image to, so app and image always agree.
+              | .properties.configuration.registries = [
+                  {server: $server, username: $user, passwordSecretRef: "acr-pwd"}
+                ]
+              | .properties.configuration.secrets = [
+                  {name: "acr-pwd", value: $pass}
+                ]
               ' /tmp/ca-before.json > /tmp/ca-after.json
             attempt=0
             until az rest --method put --url "$CA_URL" --body @/tmp/ca-after.json --output none; do
