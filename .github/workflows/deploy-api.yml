@@ -1,18 +1,13 @@
-name: Deploy — Web (Static Web Apps) + API (Container Apps)
+name: Deploy API — Azure Container Apps
 
-# Deploys both halves of SplitShare from main:
-#   web/  -> Azure Static Web Apps  (created in RG `splitshare` if missing)
-#   api/  -> Azure Container Apps   (created in RG `splitshare` if missing)
+# Builds api/ and deploys it to the container app in RG `splitshare`.
+# Creates what's missing (resource group, ACR, Container Apps environment,
+# container app) and updates an existing container app in place — image,
+# env vars, ingress and registry config — without ever deleting it.
 #
-# Everything lives in resource group `splitshare` and is created on demand:
-# resource group, Static Web App, Container Registry, Container Apps
-# environment and the container app itself. Existing resources (e.g. the
-# `api-container` app) are updated in place — image, env vars, ingress and
-# registry config — never deleted.
-#
-# Web -> API: static hosting has no /api proxy, so the web build gets
-# VITE_API_BASE = the container app's origin and calls go cross-origin; the
-# API allows that origin via Cors__AllowedOrigins__0 (set below).
+# CORS: if the Static Web App already exists, its origin is allowed on the
+# API (best effort). The "Deploy Web" workflow is the one that guarantees it
+# after the SWA is created.
 
 on:
   push:
@@ -20,11 +15,11 @@ on:
     paths:
       - 'api/**'
       - 'servicedefaults/**'
-      - 'web/**'
       - '.dockerignore'
-      - '.github/workflows/deploy.yml'
+      - '.github/workflows/deploy-api.yml'
   workflow_dispatch:
 
+# Same group as deploy-web.yml so the two never mutate Azure concurrently.
 concurrency:
   group: deploy-azure-main
   cancel-in-progress: false
@@ -32,8 +27,6 @@ concurrency:
 permissions:
   id-token: write        # OIDC token for azure/login
   contents: read         # checkout
-  checks: write          # status reporting from the SWA deploy action
-  pull-requests: read
 
 env:
   RG: splitshare
@@ -44,8 +37,8 @@ env:
   ASPNET_ENV: Production
 
 jobs:
-  deploy:
-    name: Provision + deploy web & api
+  deploy-api:
+    name: Build & deploy API
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -59,42 +52,21 @@ jobs:
           tenant-id: ${{ secrets.SPLITSHARE_AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.SPLITSHARE_AZURE_SUBSCRIPTION_ID }}
 
-      # One step for the whole API side so secrets (JWT key, registry
-      # password, deployment token) never have to pass through step outputs
-      # until they are masked.
+      # Single step so secrets (JWT key, registry password) never pass
+      # through step outputs.
       - name: Provision Azure resources & deploy API
-        id: api
         env:
           JWT_KEY_SECRET: ${{ secrets.SPLITSHARE_JWT_KEY }}
         run: |
           set -euo pipefail
 
-          echo "=== 1/8 Resource group ==="
+          echo "=== 1/7 Resource group ==="
           az group create --name "$RG" --location "$LOCATION_DEFAULT" --output none
           LOC=$(az group show --name "$RG" --query location -o tsv)
           SUB_ID=$(az account show --query id -o tsv)
           echo "Resource group '$RG' in $LOC (subscription $SUB_ID)"
 
-          echo "=== 2/8 Static Web App ==="
-          if az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
-            echo "Static Web App '$SWA_NAME' already exists."
-          else
-            az staticwebapp create --name "$SWA_NAME" --resource-group "$RG" \
-              --location "$LOC" --sku Free --output none
-            echo "Created Static Web App '$SWA_NAME'."
-          fi
-          SWA_HOST=$(az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" \
-            --query "defaultHostname || properties.defaultHostname" -o tsv)
-          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group "$RG" \
-            --query "properties.apiKey || apiKey" -o tsv)
-          if [ -z "$SWA_HOST" ] || [ -z "$SWA_TOKEN" ] || [ "$SWA_HOST" = "None" ]; then
-            echo "::error::Could not resolve Static Web App host/token for '$SWA_NAME'."
-            exit 1
-          fi
-          echo "::add-mask::$SWA_TOKEN"
-          echo "SWA: https://$SWA_HOST"
-
-          echo "=== 3/8 Container registry ==="
+          echo "=== 2/7 Container registry ==="
           ACR_NAME=""
           if [ -n "$REG_URL_VAR" ]; then
             CAND=$(echo "$REG_URL_VAR" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
@@ -133,13 +105,13 @@ jobs:
           echo "::add-mask::$ACR_PASS"
           echo "Registry: $REG_SERVER"
 
-          echo "=== 4/8 Build & push API image ==="
+          echo "=== 3/7 Build & push API image ==="
           # Build context is the repo root (required by api/Dockerfile).
           az acr build --registry "$ACR_NAME" --resource-group "$RG" \
             --file api/Dockerfile --image "splitshare:$GITHUB_SHA" .
           IMAGE="$REG_SERVER/splitshare:$GITHUB_SHA"
 
-          echo "=== 5/8 Container Apps environment ==="
+          echo "=== 4/7 Container Apps environment ==="
           ENV_NAME=""
           CA_ENV_ID=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
             --query properties.managedEnvironmentId -o tsv 2>/dev/null || true)
@@ -157,7 +129,7 @@ jobs:
             fi
           fi
 
-          echo "=== 6/8 JWT key ==="
+          echo "=== 5/7 JWT key ==="
           # Production refuses to boot without a >=32 char key. Prefer the
           # GitHub secret; otherwise reuse what's already configured on the
           # app (so sessions survive); otherwise generate one and persist it.
@@ -181,7 +153,19 @@ jobs:
           fi
           echo "::add-mask::$JWT_KEY"
 
-          echo "=== 7/8 Container app: $CA_NAME ==="
+          echo "=== 6/7 Container app: $CA_NAME ==="
+          # CORS origin: allow the SWA origin if the SWA exists (best effort;
+          # deploy-web.yml sets it right after creating/verifying the SWA).
+          SWA_CORS=""
+          SWA_HOST=$(az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" \
+            --query "defaultHostname || properties.defaultHostname" -o tsv 2>/dev/null || true)
+          if [ -n "${SWA_HOST:-}" ] && [ "$SWA_HOST" != "None" ]; then
+            SWA_CORS="https://$SWA_HOST"
+            echo "Will allow origin: $SWA_CORS"
+          else
+            echo "Static Web App '$SWA_NAME' not found yet — skipping CORS origin (deploy-web.yml will set it)."
+          fi
+
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
           if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
             echo "Container app exists — updating image, env vars, ingress and registry in place."
@@ -193,7 +177,7 @@ jobs:
               --arg pass "$ACR_PASS" \
               --arg asp "$ASPNET_ENV" \
               --arg jwt "$JWT_KEY" \
-              --arg cors "https://$SWA_HOST" \
+              --arg cors "$SWA_CORS" \
               '
               del(.properties.provisioningState,
                   .properties.runningStatus,
@@ -209,15 +193,15 @@ jobs:
                         .name != "ASPNETCORE_ENVIRONMENT"
                         and .name != "Database__Provider"
                         and .name != "Jwt__Key"
-                        and .name != "Cors__AllowedOrigins__0"
-                        and .name != "Uploads__Path")))
+                        and .name != "Uploads__Path"
+                        and (if $cors == "" then true else .name != "Cors__AllowedOrigins__0" end))))
                   + [
                       {name: "ASPNETCORE_ENVIRONMENT", value: $asp},
                       {name: "Database__Provider", value: "sqlserver"},
                       {name: "Jwt__Key", value: $jwt},
-                      {name: "Cors__AllowedOrigins__0", value: $cors},
                       {name: "Uploads__Path", value: "/data/uploads"}
                     ]
+                  + (if $cors == "" then [] else [{name: "Cors__AllowedOrigins__0", value: $cors}] end)
                 )
               | .properties.configuration.ingress = ((.properties.configuration.ingress // {})
                   * {external: true, targetPort: 8080, transport: "http", allowInsecure: false})
@@ -242,6 +226,15 @@ jobs:
             done
           else
             echo "Container app does not exist — creating it."
+            ENV_ARGS=(
+              "ASPNETCORE_ENVIRONMENT=$ASPNET_ENV"
+              "Database__Provider=sqlserver"
+              "Jwt__Key=$JWT_KEY"
+              "Uploads__Path=/data/uploads"
+            )
+            if [ -n "$SWA_CORS" ]; then
+              ENV_ARGS+=("Cors__AllowedOrigins__0=$SWA_CORS")
+            fi
             az containerapp create \
               --name "$CA_NAME" --resource-group "$RG" \
               --environment "$ENV_NAME" \
@@ -251,12 +244,7 @@ jobs:
               --registry-password "$ACR_PASS" \
               --ingress external --target-port 8080 --transport http \
               --min-replicas 0 --max-replicas 3 \
-              --env-vars \
-                "ASPNETCORE_ENVIRONMENT=$ASPNET_ENV" \
-                "Database__Provider=sqlserver" \
-                "Jwt__Key=$JWT_KEY" \
-                "Cors__AllowedOrigins__0=https://$SWA_HOST" \
-                "Uploads__Path=/data/uploads" \
+              --env-vars "${ENV_ARGS[@]}" \
               --output none
           fi
 
@@ -268,7 +256,7 @@ jobs:
           fi
           echo "API: https://$API_FQDN"
 
-          echo "=== 8/8 Smoke test: API ==="
+          echo "=== 7/7 Smoke test: API ==="
           healthy=""
           body=""
           for i in $(seq 1 30); do
@@ -297,61 +285,4 @@ jobs:
             fi
           fi
 
-          {
-            echo "api_fqdn=$API_FQDN"
-            echo "swa_host=$SWA_HOST"
-            echo "swa_token=$SWA_TOKEN"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build web
-        working-directory: web
-        env:
-          VITE_API_BASE: https://${{ steps.api.outputs.api_fqdn }}
-          VITE_GOOGLE_CLIENT_ID: ${{ secrets.SPLITSHARE_GOOGLE_CLIENT_ID }}
-        run: |
-          npm ci
-          npm run build
-
-      - name: Deploy web to Azure Static Web Apps
-        uses: Azure/static-web-apps-deploy@v1
-        with:
-          azure_static_web_apps_api_token: ${{ steps.api.outputs.swa_token }}
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          action: upload
-          skip_app_build: true
-          app_location: web/dist
-
-      - name: Smoke test web + API
-        env:
-          SWA_URL: https://${{ steps.api.outputs.swa_host }}
-          API_URL: https://${{ steps.api.outputs.api_fqdn }}
-        run: |
-          set -euo pipefail
-          echo "Checking web: $SWA_URL"
-          web_ok=""
-          code=""
-          for i in $(seq 1 15); do
-            code=$(curl -sS -o /tmp/idx.html -w '%{http_code}' "$SWA_URL/" 2>/dev/null || true)
-            if [ "$code" = "200" ] && grep -q 'id="root"' /tmp/idx.html 2>/dev/null; then
-              web_ok=1
-              break
-            fi
-            sleep 5
-          done
-          if [ -z "$web_ok" ]; then
-            echo "::error::Static Web App did not serve the SPA shell (last HTTP code: ${code:-none})."
-            exit 1
-          fi
-          echo "Web OK: $SWA_URL"
-          echo "Checking API: $API_URL"
-          curl -fsS "$API_URL/api/v1/health" -o /tmp/api-health.json
-          grep -q 'splitshare-api' /tmp/api-health.json
-          echo "API OK"
-          echo "Deploy complete: web=https://$SWA_URL api=https://$API_URL"
+          echo "API deploy complete: https://$API_FQDN"

@@ -1,0 +1,181 @@
+name: Deploy Web — Azure Static Web Apps
+
+# Builds web/ and deploys it to the Static Web App in RG `splitshare`.
+# Creates the SWA if it's missing (no GitHub integration needed — deployment
+# uses the SWA deployment token) and points the SPA at the deployed API via
+# VITE_API_BASE (cross-origin + CORS; SWA has no /api proxy on the Free
+# plan). Requires `api-container` to already exist — run "Deploy API" first
+# on a fresh setup.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+# Same group as deploy-api.yml so the two never mutate Azure concurrently.
+concurrency:
+  group: deploy-azure-main
+  cancel-in-progress: false
+
+permissions:
+  id-token: write        # OIDC token for azure/login
+  contents: read         # checkout
+  checks: write          # status reporting from the SWA deploy action
+  pull-requests: read
+
+env:
+  RG: splitshare
+  CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
+  SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
+  LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southeastasia' }}
+
+jobs:
+  deploy-web:
+    name: Build & deploy Web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.SPLITSHARE_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.SPLITSHARE_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.SPLITSHARE_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure Static Web App & API origin
+        id: infra
+        run: |
+          set -euo pipefail
+
+          echo "=== 1/3 Resource group + Static Web App ==="
+          az group create --name "$RG" --location "$LOCATION_DEFAULT" --output none
+          if az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+            echo "Static Web App '$SWA_NAME' already exists."
+          else
+            az staticwebapp create --name "$SWA_NAME" --resource-group "$RG" \
+              --location "$(az group show --name "$RG" --query location -o tsv)" --sku Free --output none
+            echo "Created Static Web App '$SWA_NAME'."
+          fi
+          SWA_HOST=$(az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" \
+            --query "defaultHostname || properties.defaultHostname" -o tsv)
+          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group "$RG" \
+            --query "properties.apiKey || apiKey" -o tsv)
+          if [ -z "$SWA_HOST" ] || [ -z "$SWA_TOKEN" ] || [ "$SWA_HOST" = "None" ]; then
+            echo "::error::Could not resolve Static Web App host/token for '$SWA_NAME'."
+            exit 1
+          fi
+          echo "::add-mask::$SWA_TOKEN"
+          echo "SWA: https://$SWA_HOST"
+
+          echo "=== 2/3 API origin + CORS ==="
+          API_FQDN=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+            --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || true)
+          if [ -z "$API_FQDN" ] || [ "$API_FQDN" = "None" ]; then
+            echo "::error::Container app '$CA_NAME' not found or has no ingress. Run the 'Deploy API' workflow first (fresh setup: run Deploy API, then Deploy Web)."
+            exit 1
+          fi
+          echo "API: https://$API_FQDN"
+          # The SPA calls the API cross-origin — allow this SWA origin on the
+          # API. Only touches the container app when the value actually
+          # changed (an update would otherwise spawn a needless revision).
+          WANT="https://$SWA_HOST"
+          CUR=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+            --query "properties.template.containers[0].env[?name=='Cors__AllowedOrigins__0'].value | [0]" \
+            -o tsv 2>/dev/null || true)
+          if [ "$CUR" != "$WANT" ]; then
+            attempt=0
+            until az containerapp update --name "$CA_NAME" --resource-group "$RG" \
+              --set-env-vars "Cors__AllowedOrigins__0=$WANT" --output none; do
+              attempt=$((attempt + 1))
+              if [ "$attempt" -ge 3 ]; then
+                echo "::error::Failed to allow origin $WANT on '$CA_NAME'."
+                exit 1
+              fi
+              echo "CORS update attempt $attempt failed; retrying in 15 seconds..."
+              sleep 15
+            done
+            echo "Allowed origin $WANT on the API (new revision starting)."
+          else
+            echo "API already allows $WANT."
+          fi
+
+          {
+            echo "api_fqdn=$API_FQDN"
+            echo "swa_host=$SWA_HOST"
+            echo "swa_token=$SWA_TOKEN"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web
+        working-directory: web
+        env:
+          VITE_API_BASE: https://${{ steps.infra.outputs.api_fqdn }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.SPLITSHARE_GOOGLE_CLIENT_ID }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy web to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.infra.outputs.swa_token }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          skip_app_build: true
+          app_location: web/dist
+
+      - name: Smoke test web + CORS
+        env:
+          SWA_URL: https://${{ steps.infra.outputs.swa_host }}
+          API_URL: https://${{ steps.infra.outputs.api_fqdn }}
+        run: |
+          set -euo pipefail
+          echo "Checking web: $SWA_URL"
+          web_ok=""
+          code=""
+          for i in $(seq 1 15); do
+            code=$(curl -sS -o /tmp/idx.html -w '%{http_code}' "$SWA_URL/" 2>/dev/null || true)
+            if [ "$code" = "200" ] && grep -q 'id="root"' /tmp/idx.html 2>/dev/null; then
+              web_ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$web_ok" ]; then
+            echo "::error::Static Web App did not serve the SPA shell (last HTTP code: ${code:-none})."
+            exit 1
+          fi
+          echo "Web OK: $SWA_URL"
+
+          echo "Checking CORS from $SWA_URL origin against the API"
+          origin="https://${SWA_URL#https://}"
+          cors_ok=""
+          for i in $(seq 1 12); do
+            curl -sS -m 8 -H "Origin: $origin" -D /tmp/cors-hdrs -o /tmp/cors-body \
+              "$API_URL/api/v1/health" 2>/dev/null || true
+            if grep -qi "^access-control-allow-origin: *$origin *$" /tmp/cors-hdrs 2>/dev/null; then
+              cors_ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$cors_ok" ]; then
+            echo "::error::API did not return Access-Control-Allow-Origin for $origin — browser calls from the SPA would be blocked."
+            echo "--- response headers ---"
+            cat /tmp/cors-hdrs 2>/dev/null || true
+            exit 1
+          fi
+          echo "CORS OK: API allows $origin"
+          echo "Deploy complete: web=$SWA_URL api=$API_URL"
