@@ -100,31 +100,76 @@ public sealed class LedgerService(AppDbContext db)
         return new GroupNets(nets, users, rawDebts, hash, group.Currency);
     }
 
-    public async Task<(SettlementPlan Plan, SettlementResult Result)> RecomputeAsync(Guid groupId)    {
+    public async Task<(SettlementPlan Plan, SettlementResult Result)> RecomputeAsync(Guid groupId)
+    {
         var snapshot = await ComputeNetsAsync(groupId)
             ?? throw new InvalidOperationException("Group not found.");
         var result = SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts);
-        var nextSeq = await db.SettlementPlans.Where(s => s.GroupId == groupId)
-            .Select(s => (int?)s.VersionSeq).MaxAsync() ?? 0;
-        var plan = new SettlementPlan
+
+        // Inputs unchanged vs the current plan -> reuse it instead of writing
+        // another version (spec: versions track input changes, not page views;
+        // this also removes the read-then-insert race for repeated GETs).
+        var current = await LatestPlanAsync(groupId);
+        if (current is not null && current.InputsHash == snapshot.InputsHash)
+            return (current, result);
+
+        var transfersJson = JsonSerializer.Serialize(result.Transfers.Select(t =>
+            new { from_user_id = t.FromUserId, to_user_id = t.ToUserId, amount_cents = t.AmountCents }));
+        var explanationJson = JsonSerializer.Serialize(new
         {
-            GroupId = groupId,
-            VersionSeq = nextSeq + 1,
-            InputsHash = snapshot.InputsHash,
-            TransfersJson = JsonSerializer.Serialize(result.Transfers.Select(t =>
-                new { from_user_id = t.FromUserId, to_user_id = t.ToUserId, amount_cents = t.AmountCents })),
-            ExplanationJson = JsonSerializer.Serialize(new
+            steps = result.Steps,
+            before_nets = result.NetsBefore.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+            after_nets = result.NetsAfter.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+            raw_debts = result.RawDebts,
+            saved = result.Saved
+        });
+
+        // INSERT (MAX(VersionSeq)+1) races with concurrent recomputes for the
+        // same group: the loser hits unique index IX_SettlementPlans_GroupId_VersionSeq
+        // (SQL error 2601). Detach the failed entity and retry with a fresh MAX;
+        // if the winner already recorded these exact inputs, return its plan.
+        for (var attempt = 1; ; attempt++)
+        {
+            var nextSeq = await db.SettlementPlans.Where(s => s.GroupId == groupId)
+                .Select(s => (int?)s.VersionSeq).MaxAsync() ?? 0;
+            var plan = new SettlementPlan
             {
-                steps = result.Steps,
-                before_nets = result.NetsBefore.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
-                after_nets = result.NetsAfter.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
-                raw_debts = result.RawDebts,
-                saved = result.Saved
-            })
-        };
-        db.SettlementPlans.Add(plan);
-        await db.SaveChangesAsync();
-        return (plan, result);
+                GroupId = groupId,
+                VersionSeq = nextSeq + 1,
+                InputsHash = snapshot.InputsHash,
+                TransfersJson = transfersJson,
+                ExplanationJson = explanationJson
+            };
+            db.SettlementPlans.Add(plan);
+            try
+            {
+                await db.SaveChangesAsync();
+                return (plan, result);
+            }
+            catch (DbUpdateException ex) when (IsDuplicateKey(ex))
+            {
+                db.Entry(plan).State = EntityState.Detached;
+                var winner = await LatestPlanAsync(groupId);
+                if (winner is not null && winner.InputsHash == snapshot.InputsHash)
+                    return (winner, result);
+                if (attempt >= 4) throw;
+            }
+        }
+    }
+
+    private Task<SettlementPlan?> LatestPlanAsync(Guid groupId)
+        => db.SettlementPlans
+            .Where(s => s.GroupId == groupId)
+            .OrderByDescending(s => s.VersionSeq)
+            .FirstOrDefaultAsync();
+
+    private static bool IsDuplicateKey(DbUpdateException ex)
+    {
+        if (ex.InnerException is Microsoft.Data.SqlClient.SqlException sql)
+            return sql.Number is 2601 or 2627; // duplicate index key / unique constraint
+        var msg = ex.InnerException?.Message ?? string.Empty;
+        return msg.Contains("duplicate key", StringComparison.OrdinalIgnoreCase)   // Postgres
+            || msg.Contains("UNIQUE constraint", StringComparison.OrdinalIgnoreCase); // SQLite
     }
 
     public sealed record LedgerFilters(string Type, string? Q, string? Status,
