@@ -156,20 +156,31 @@ jobs:
           IMAGE="$REG_SERVER/splitshare:$GITHUB_SHA"
 
           echo "=== 4/7 Container Apps environment ==="
-          ENV_NAME=""
+          # Subscription quota: max 1 environment per region -> always reuse
+          # an existing one (RG first, then region-wide, then any) and only
+          # create when the subscription genuinely has none.
+          ENV_ID=""
           CA_ENV_ID=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
             --query properties.managedEnvironmentId -o tsv 2>/dev/null || true)
           if [ -n "$CA_ENV_ID" ]; then
-            ENV_NAME="${CA_ENV_ID##*/}"
-            echo "Existing container app uses environment '$ENV_NAME'."
+            ENV_ID="$CA_ENV_ID"
+            echo "Existing container app uses environment '${ENV_ID##*/}'."
           else
-            ENV_NAME="splitshare-env"
-            if az containerapp env show --name "$ENV_NAME" --resource-group "$RG" --output none 2>/dev/null; then
-              echo "Environment '$ENV_NAME' already exists."
-            else
+            ENV_ID=$(az containerapp env list --resource-group "$RG" --query "[?location=='$LOC'].id | [0]" -o tsv 2>/dev/null || true)
+            if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "None" ] || [ "$ENV_ID" = "null" ]; then
+              ENV_ID=$(az containerapp env list --resource-group "$RG" --query "[0].id" -o tsv 2>/dev/null || true)
+            fi
+            if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "None" ] || [ "$ENV_ID" = "null" ]; then
+              ENV_ID=$(az containerapp env list --query "[?location=='$LOC'].id | [0]" -o tsv 2>/dev/null || true)
+            fi
+            if [ -z "$ENV_ID" ] || [ "$ENV_ID" = "None" ] || [ "$ENV_ID" = "null" ]; then
+              ENV_NAME="splitshare-env"
               az containerapp env create --name "$ENV_NAME" --resource-group "$RG" \
                 --location "$LOC" --logs-destination none --output none
+              ENV_ID=$(az containerapp env show --name "$ENV_NAME" --resource-group "$RG" --query id -o tsv)
               echo "Created environment '$ENV_NAME'."
+            else
+              echo "Reusing existing environment '${ENV_ID##*/}' (subscription allows only 1 per region)."
             fi
           fi
 
@@ -281,7 +292,7 @@ jobs:
             fi
             az containerapp create \
               --name "$CA_NAME" --resource-group "$RG" \
-              --environment "$ENV_NAME" \
+              --environment "$ENV_ID" \
               --image "$IMAGE" \
               --registry-server "$REG_SERVER" \
               --registry-username "$ACR_USER" \
