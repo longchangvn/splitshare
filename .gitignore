@@ -3,6 +3,7 @@
 .env.development
 .env.local
 .env.remote
+.env.remote-azure
 !.env.example
 
 # dotnet
