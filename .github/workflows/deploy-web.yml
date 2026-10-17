@@ -197,7 +197,10 @@ jobs:
           for i in $(seq 1 12); do
             curl -sS -m 8 -H "Origin: $origin" -D /tmp/cors-hdrs -o /tmp/cors-body \
               "$API_URL/api/v1/health" 2>/dev/null || true
-            if grep -qi "^access-control-allow-origin: *$origin *$" /tmp/cors-hdrs 2>/dev/null; then
+            # curl -D writes CRLF headers; strip \r or the $-anchored grep
+            # never matches even when the header value is exactly right.
+            if tr -d '\r' < /tmp/cors-hdrs 2>/dev/null \
+                | grep -qi "^access-control-allow-origin: *$origin *$"; then
               cors_ok=1
               break
             fi
@@ -205,8 +208,8 @@ jobs:
           done
           if [ -z "$cors_ok" ]; then
             echo "::error::API did not return Access-Control-Allow-Origin for $origin — browser calls from the SPA would be blocked."
-            echo "--- response headers ---"
-            cat /tmp/cors-hdrs 2>/dev/null || true
+            echo "--- response headers (CR stripped) ---"
+            tr -d '\r' < /tmp/cors-hdrs 2>/dev/null || true
             exit 1
           fi
           echo "CORS OK: API allows $origin"
