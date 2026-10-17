@@ -30,7 +30,11 @@ env:
   RG: splitshare
   CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
   SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
-  LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southeastasia' }}
+  LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southcentralus' }}
+  # Microsoft.Web/staticSites is only available in a handful of regions
+  # (centralus, eastus2, westus2, westeurope, eastasia on this subscription)
+  # and the free credit requires a US region -> centralus.
+  SWA_LOCATION: ${{ vars.SPLITSHARE_SWA_LOCATION || 'centralus' }}
 
 jobs:
   deploy-web:
@@ -62,12 +66,29 @@ jobs:
             az group create --name "$RG" --location "$LOCATION_DEFAULT" --output none
             echo "Created resource group '$RG'."
           fi
+
+          # Register providers the subscription may never have used
+          # (idempotent; --wait so we don't race a registration in progress).
+          echo "=== Registering Azure resource providers ==="
+          for P in Microsoft.Web Microsoft.App; do
+            STATE=$(az provider show --namespace "$P" --query registrationState -o tsv 2>/dev/null || echo "Unknown")
+            if [ "$STATE" = "Registered" ]; then
+              echo "$P: already registered."
+            else
+              echo "$P: registering (state: $STATE) — first use, can take a few minutes..."
+              az provider register --namespace "$P" --wait --output none
+              echo "$P: registered."
+            fi
+          done
+
           if az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
             echo "Static Web App '$SWA_NAME' already exists."
           else
+            # staticSites is restricted to specific regions (southcentralus
+            # is NOT one of them) -> use SWA_LOCATION, not the RG location.
             az staticwebapp create --name "$SWA_NAME" --resource-group "$RG" \
-              --location "$(az group show --name "$RG" --query location -o tsv)" --sku Free --output none
-            echo "Created Static Web App '$SWA_NAME'."
+              --location "$SWA_LOCATION" --sku Free --output none
+            echo "Created Static Web App '$SWA_NAME' in $SWA_LOCATION."
           fi
           SWA_HOST=$(az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" \
             --query "defaultHostname || properties.defaultHostname" -o tsv)

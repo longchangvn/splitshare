@@ -32,7 +32,7 @@ env:
   RG: splitshare
   CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
   SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
-  LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southeastasia' }}
+  LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southcentralus' }}
   REG_URL_VAR: ${{ vars.SPLITSHARE_REGISTRY_URL }}
   ASPNET_ENV: Production
 
@@ -72,6 +72,21 @@ jobs:
           LOC=$(az group show --name "$RG" --query location -o tsv)
           SUB_ID=$(az account show --query id -o tsv)
           echo "Resource group '$RG' in $LOC (subscription $SUB_ID)"
+
+          # Free-credit subscriptions start unregistered for providers they
+          # have never used. Registration is idempotent; --wait matters
+          # because resource creation fails while still Registering.
+          echo "=== Registering Azure resource providers ==="
+          for P in Microsoft.ContainerRegistry Microsoft.App Microsoft.OperationalInsights; do
+            STATE=$(az provider show --namespace "$P" --query registrationState -o tsv 2>/dev/null || echo "Unknown")
+            if [ "$STATE" = "Registered" ]; then
+              echo "$P: already registered."
+            else
+              echo "$P: registering (state: $STATE) — first use, can take a few minutes..."
+              az provider register --namespace "$P" --wait --output none
+              echo "$P: registered."
+            fi
+          done
 
           echo "=== 2/7 Container registry ==="
           ACR_NAME=""
