@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace SplitShare.Api.Migrations
+namespace SplitShare.Api.Migrations.Postgres
 {
     /// <inheritdoc />
     public partial class TripPack : Migration

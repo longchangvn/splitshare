@@ -1,0 +1,357 @@
+name: Deploy — Web (Static Web Apps) + API (Container Apps)
+
+# Deploys both halves of SplitShare from main:
+#   web/  -> Azure Static Web Apps  (created in RG `splitshare` if missing)
+#   api/  -> Azure Container Apps   (created in RG `splitshare` if missing)
+#
+# Everything lives in resource group `splitshare` and is created on demand:
+# resource group, Static Web App, Container Registry, Container Apps
+# environment and the container app itself. Existing resources (e.g. the
+# `api-container` app) are updated in place — image, env vars, ingress and
+# registry config — never deleted.
+#
+# Web -> API: static hosting has no /api proxy, so the web build gets
+# VITE_API_BASE = the container app's origin and calls go cross-origin; the
+# API allows that origin via Cors__AllowedOrigins__0 (set below).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'api/**'
+      - 'servicedefaults/**'
+      - 'web/**'
+      - '.dockerignore'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-azure-main
+  cancel-in-progress: false
+
+permissions:
+  id-token: write        # OIDC token for azure/login
+  contents: read         # checkout
+  checks: write          # status reporting from the SWA deploy action
+  pull-requests: read
+
+env:
+  RG: splitshare
+  CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
+  SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
+  LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southeastasia' }}
+  REG_URL_VAR: ${{ vars.SPLITSHARE_REGISTRY_URL }}
+  ASPNET_ENV: Production
+
+jobs:
+  deploy:
+    name: Provision + deploy web & api
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.SPLITSHARE_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.SPLITSHARE_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.SPLITSHARE_AZURE_SUBSCRIPTION_ID }}
+
+      # One step for the whole API side so secrets (JWT key, registry
+      # password, deployment token) never have to pass through step outputs
+      # until they are masked.
+      - name: Provision Azure resources & deploy API
+        id: api
+        env:
+          JWT_KEY_SECRET: ${{ secrets.SPLITSHARE_JWT_KEY }}
+        run: |
+          set -euo pipefail
+
+          echo "=== 1/8 Resource group ==="
+          az group create --name "$RG" --location "$LOCATION_DEFAULT" --output none
+          LOC=$(az group show --name "$RG" --query location -o tsv)
+          SUB_ID=$(az account show --query id -o tsv)
+          echo "Resource group '$RG' in $LOC (subscription $SUB_ID)"
+
+          echo "=== 2/8 Static Web App ==="
+          if az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+            echo "Static Web App '$SWA_NAME' already exists."
+          else
+            az staticwebapp create --name "$SWA_NAME" --resource-group "$RG" \
+              --location "$LOC" --sku Free --output none
+            echo "Created Static Web App '$SWA_NAME'."
+          fi
+          SWA_HOST=$(az staticwebapp show --name "$SWA_NAME" --resource-group "$RG" \
+            --query "defaultHostname || properties.defaultHostname" -o tsv)
+          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group "$RG" \
+            --query "properties.apiKey || apiKey" -o tsv)
+          if [ -z "$SWA_HOST" ] || [ -z "$SWA_TOKEN" ] || [ "$SWA_HOST" = "None" ]; then
+            echo "::error::Could not resolve Static Web App host/token for '$SWA_NAME'."
+            exit 1
+          fi
+          echo "::add-mask::$SWA_TOKEN"
+          echo "SWA: https://$SWA_HOST"
+
+          echo "=== 3/8 Container registry ==="
+          ACR_NAME=""
+          if [ -n "$REG_URL_VAR" ]; then
+            CAND=$(echo "$REG_URL_VAR" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
+            if az acr show --name "$CAND" --resource-group "$RG" --output none 2>/dev/null; then
+              ACR_NAME="$CAND"
+              echo "Using existing registry from vars.SPLITSHARE_REGISTRY_URL: $ACR_NAME"
+            else
+              echo "Registry '$CAND' from vars not found in '$RG'; will use a dedicated one."
+            fi
+          fi
+          if [ -z "$ACR_NAME" ]; then
+            ACR_NAME="splitshare$(echo "$SUB_ID" | tr -d '-' | cut -c1-8)"
+          fi
+          if az acr show --name "$ACR_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+            echo "Registry '$ACR_NAME' already exists."
+          else
+            az acr create --name "$ACR_NAME" --resource-group "$RG" \
+              --sku Basic --admin-enabled true --output none
+            echo "Created registry '$ACR_NAME'."
+          fi
+          # Registry auth for the container app uses admin credentials.
+          az acr update --name "$ACR_NAME" --resource-group "$RG" --admin-enabled true --output none
+          REG_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RG" --query loginServer -o tsv)
+          ACR_USER="$ACR_NAME"
+          ACR_PASS=""
+          for i in 1 2 3 4 5; do
+            ACR_PASS=$(az acr credential show --name "$ACR_NAME" --resource-group "$RG" \
+              --query "passwords[0].value" -o tsv 2>/dev/null || true)
+            if [ -n "$ACR_PASS" ]; then break; fi
+            sleep 3
+          done
+          if [ -z "$ACR_PASS" ]; then
+            echo "::error::Could not read admin credentials for '$ACR_NAME'."
+            exit 1
+          fi
+          echo "::add-mask::$ACR_PASS"
+          echo "Registry: $REG_SERVER"
+
+          echo "=== 4/8 Build & push API image ==="
+          # Build context is the repo root (required by api/Dockerfile).
+          az acr build --registry "$ACR_NAME" --resource-group "$RG" \
+            --file api/Dockerfile --image "splitshare:$GITHUB_SHA" .
+          IMAGE="$REG_SERVER/splitshare:$GITHUB_SHA"
+
+          echo "=== 5/8 Container Apps environment ==="
+          ENV_NAME=""
+          CA_ENV_ID=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+            --query properties.managedEnvironmentId -o tsv 2>/dev/null || true)
+          if [ -n "$CA_ENV_ID" ]; then
+            ENV_NAME="${CA_ENV_ID##*/}"
+            echo "Existing container app uses environment '$ENV_NAME'."
+          else
+            ENV_NAME="splitshare-env"
+            if az containerapp env show --name "$ENV_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+              echo "Environment '$ENV_NAME' already exists."
+            else
+              az containerapp env create --name "$ENV_NAME" --resource-group "$RG" \
+                --location "$LOC" --output none
+              echo "Created environment '$ENV_NAME'."
+            fi
+          fi
+
+          echo "=== 6/8 JWT key ==="
+          # Production refuses to boot without a >=32 char key. Prefer the
+          # GitHub secret; otherwise reuse what's already configured on the
+          # app (so sessions survive); otherwise generate one and persist it.
+          JWT_KEY="$JWT_KEY_SECRET"
+          if [ -z "$JWT_KEY" ]; then
+            EXISTING=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+              --query "properties.template.containers[0].env[?name=='Jwt__Key'].value | [0]" \
+              -o tsv 2>/dev/null || true)
+            if [ -n "${EXISTING:-}" ] && [ "$EXISTING" != "null" ] && [ "${#EXISTING}" -ge 32 ] \
+              && [ "$EXISTING" != "dev-only-insecure-key-change-in-prod-0123456789" ]; then
+              JWT_KEY="$EXISTING"
+              echo "Reusing the Jwt__Key already configured on '$CA_NAME'."
+            else
+              JWT_KEY=$(openssl rand -hex 32)
+              echo "::warning::SPLITSHARE_JWT_KEY secret is not set — generated a random JWT key and stored it on '$CA_NAME'. Set the GitHub secret to pin it."
+            fi
+          fi
+          if [ "${#JWT_KEY}" -lt 32 ]; then
+            echo "::error::Jwt key must be at least 32 characters."
+            exit 1
+          fi
+          echo "::add-mask::$JWT_KEY"
+
+          echo "=== 7/8 Container app: $CA_NAME ==="
+          CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
+          if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+            echo "Container app exists — updating image, env vars, ingress and registry in place."
+            az containerapp show --name "$CA_NAME" --resource-group "$RG" -o json > /tmp/ca-before.json
+            jq \
+              --arg image "$IMAGE" \
+              --arg server "$REG_SERVER" \
+              --arg user "$ACR_USER" \
+              --arg pass "$ACR_PASS" \
+              --arg asp "$ASPNET_ENV" \
+              --arg jwt "$JWT_KEY" \
+              --arg cors "https://$SWA_HOST" \
+              '
+              del(.properties.provisioningState,
+                  .properties.runningStatus,
+                  .properties.latestRevisionName,
+                  .properties.latestRevisionFqdn,
+                  .properties.configuration.ingress.fqdn)
+              | .properties.configuration = (.properties.configuration // {})
+              | .properties.template = (.properties.template // {})
+              | .properties.template.containers[0].image = $image
+              | .properties.template.containers[0].env = (
+                  ((.properties.template.containers[0].env // [])
+                    | map(select(
+                        .name != "ASPNETCORE_ENVIRONMENT"
+                        and .name != "Database__Provider"
+                        and .name != "Jwt__Key"
+                        and .name != "Cors__AllowedOrigins__0"
+                        and .name != "Uploads__Path")))
+                  + [
+                      {name: "ASPNETCORE_ENVIRONMENT", value: $asp},
+                      {name: "Database__Provider", value: "sqlserver"},
+                      {name: "Jwt__Key", value: $jwt},
+                      {name: "Cors__AllowedOrigins__0", value: $cors},
+                      {name: "Uploads__Path", value: "/data/uploads"}
+                    ]
+                )
+              | .properties.configuration.ingress = ((.properties.configuration.ingress // {})
+                  * {external: true, targetPort: 8080, transport: "http", allowInsecure: false})
+              | .properties.configuration.registries = (
+                  ((.properties.configuration.registries // []) | map(select(.server != $server)))
+                  + [{server: $server, username: $user, passwordSecretRef: "acr-pwd"}]
+                )
+              | .properties.configuration.secrets = (
+                  ((.properties.configuration.secrets // []) | map(select(.name != "acr-pwd")))
+                  + [{name: "acr-pwd", value: $pass}]
+                )
+              ' /tmp/ca-before.json > /tmp/ca-after.json
+            attempt=0
+            until az rest --method put --url "$CA_URL" --body @/tmp/ca-after.json --output none; do
+              attempt=$((attempt + 1))
+              if [ "$attempt" -ge 3 ]; then
+                echo "::error::Failed to update container app '$CA_NAME'."
+                exit 1
+              fi
+              echo "Update attempt $attempt failed; retrying in 20 seconds..."
+              sleep 20
+            done
+          else
+            echo "Container app does not exist — creating it."
+            az containerapp create \
+              --name "$CA_NAME" --resource-group "$RG" \
+              --environment "$ENV_NAME" \
+              --image "$IMAGE" \
+              --registry-server "$REG_SERVER" \
+              --registry-username "$ACR_USER" \
+              --registry-password "$ACR_PASS" \
+              --ingress external --target-port 8080 --transport http \
+              --min-replicas 0 --max-replicas 3 \
+              --env-vars \
+                "ASPNETCORE_ENVIRONMENT=$ASPNET_ENV" \
+                "Database__Provider=sqlserver" \
+                "Jwt__Key=$JWT_KEY" \
+                "Cors__AllowedOrigins__0=https://$SWA_HOST" \
+                "Uploads__Path=/data/uploads" \
+              --output none
+          fi
+
+          API_FQDN=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          if [ -z "$API_FQDN" ] || [ "$API_FQDN" = "None" ]; then
+            echo "::error::Container app '$CA_NAME' has no ingress FQDN."
+            exit 1
+          fi
+          echo "API: https://$API_FQDN"
+
+          echo "=== 8/8 Smoke test: API ==="
+          healthy=""
+          body=""
+          for i in $(seq 1 30); do
+            body=$(curl -fsS -m 8 "https://$API_FQDN/health" 2>/dev/null || true)
+            if printf '%s' "$body" | grep -q 'splitshare-api'; then
+              healthy=1
+              break
+            fi
+            sleep 6
+          done
+          if [ -z "$healthy" ]; then
+            echo "::error::API /health did not become healthy within ~3 minutes."
+            az containerapp revision list --name "$CA_NAME" --resource-group "$RG" --output table || true
+            exit 1
+          fi
+          echo "API healthy: $body"
+
+          echo "=== Azure SQL firewall (best-effort check) ==="
+          SRG=$(az sql server list --query "[?name=='dbserver-splitshare'] | [0].resourceGroup" -o tsv 2>/dev/null || true)
+          if [ -n "${SRG:-}" ] && [ "$SRG" != "None" ] && [ "$SRG" != "null" ]; then
+            ALLOW=$(az sql server firewall-rule list --resource-group "$SRG" --server dbserver-splitshare \
+              --query "[?startIpAddress=='0.0.0.0' || endIpAddress=='255.255.255.255'] | length(@)" \
+              -o tsv 2>/dev/null || echo 0)
+            if [ "${ALLOW:-0}" = "0" ] || [ "$ALLOW" = "None" ] || [ "$ALLOW" = "null" ]; then
+              echo "::warning::No 'Allow Azure services' rule on dbserver-splitshare. If data endpoints return 503, allow Container Apps egress in the SQL firewall."
+            fi
+          fi
+
+          {
+            echo "api_fqdn=$API_FQDN"
+            echo "swa_host=$SWA_HOST"
+            echo "swa_token=$SWA_TOKEN"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web
+        working-directory: web
+        env:
+          VITE_API_BASE: https://${{ steps.api.outputs.api_fqdn }}
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.SPLITSHARE_GOOGLE_CLIENT_ID }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy web to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.api.outputs.swa_token }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: upload
+          skip_app_build: true
+          app_location: web/dist
+
+      - name: Smoke test web + API
+        env:
+          SWA_URL: https://${{ steps.api.outputs.swa_host }}
+          API_URL: https://${{ steps.api.outputs.api_fqdn }}
+        run: |
+          set -euo pipefail
+          echo "Checking web: $SWA_URL"
+          web_ok=""
+          code=""
+          for i in $(seq 1 15); do
+            code=$(curl -sS -o /tmp/idx.html -w '%{http_code}' "$SWA_URL/" 2>/dev/null || true)
+            if [ "$code" = "200" ] && grep -q 'id="root"' /tmp/idx.html 2>/dev/null; then
+              web_ok=1
+              break
+            fi
+            sleep 5
+          done
+          if [ -z "$web_ok" ]; then
+            echo "::error::Static Web App did not serve the SPA shell (last HTTP code: ${code:-none})."
+            exit 1
+          fi
+          echo "Web OK: $SWA_URL"
+          echo "Checking API: $API_URL"
+          curl -fsS "$API_URL/api/v1/health" -o /tmp/api-health.json
+          grep -q 'splitshare-api' /tmp/api-health.json
+          echo "API OK"
+          echo "Deploy complete: web=https://$SWA_URL api=https://$API_URL"

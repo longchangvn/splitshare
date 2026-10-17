@@ -1,7 +1,11 @@
 // API client. Contract is snake_case both directions (spec §9).
-// Same-origin relative URLs: in dev Vite proxies /api to the API (see
-// vite.config.js); in prod nginx does the same (see nginx.conf). No CORS.
-const BASE = '';
+// Default is same-origin relative URLs: in dev Vite proxies /api to the API
+// (see vite.config.js); in prod nginx does the same (see nginx.conf). No CORS.
+// Static hosting (Azure Static Web Apps) has no proxy, so its CI build sets
+// VITE_API_BASE to the API's absolute origin; calls then go cross-origin and
+// the API allows that origin via Cors:AllowedOrigins. Docker builds don't set
+// it, so containerized deployments keep the relative-URL behavior above.
+const BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
 
 export function getAccess() { return localStorage.getItem('ss_at'); }
 export function getRefresh() { return localStorage.getItem('ss_rt'); }

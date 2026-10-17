@@ -1,36 +1,55 @@
-# Migrations — dual-provider rule (Postgres + SQL Server)
+# Migrations — one set per provider (Postgres + SQL Server)
 
-One migration set serves both providers. That only works if migration
-operations stay **provider-neutral**:
+Each provider authors its **own migration set**, in its own folder/namespace:
 
-- Never author explicit store types (`type: "uuid"`, `"character varying(N)"`,
-  `"timestamp with time zone"`, `"boolean"`, …). Omit `type:` and let each
-  provider map the CLR type (Guid → uuid/uniqueidentifier, string+maxLength →
-  varchar/nvarchar, DateTime → timestamptz/datetime2, bool → boolean/bit).
-- Precision is the exception: keep `precision:`/`scale:` (provider-neutral and
-  honored by both — decimal(18,8) for FxRate, decimal(5,2) for Percent).
-- Keep `OnModelCreating` free of provider-specific calls. The runtime model is
-  built from it, and `MigrateAsync()` resolves column types through the active
-  provider — this is what actually runs in production.
+| Provider | Folder | Namespace | Snapshot (distinct class name!) |
+|---|---|---|---|
+| `postgres` | `api/Migrations/Postgres` | `SplitShare.Api.Migrations.Postgres` | `AppDbContextModelSnapshot` |
+| `sqlServer` | `api/Migrations/SqlServer` | `SplitShare.Api.Migrations.SqlServer` | `SqlServerAppDbContextModelSnapshot` |
 
-## Switching providers
+`Data/Providers/ProviderMigrationsAssembly` (registered by both providers via
+`ReplaceService`) filters migration discovery and the snapshot lookup to the
+active provider's namespace, so `MigrateAsync()`, `GetMigrations()` and the
+`__EFMigrationsHistory` table only ever see that provider's set. Each database
+engine gets the DDL authored for it — no cross-provider type leakage.
 
-Set `Database__Provider=sqlServer` (or `DB_PROVIDER=sqlServer` in compose)
-plus a `Database__SqlServer` connection string
-(`Server=HOST,PORT;Database=…;User Id=…;Password=…;TrustServerCertificate=True`).
-Startup runs `MigrateAsync()` and creates the `splitshare` schema + tables.
-No code or migration change needed — verified by
-`tests/SqlServerMigrationTests.cs`, which replays every migration through the
-real SqlServer pipeline with no DB connection.
+## Why not one shared set?
 
-## Tooling caveat
+Migration DDL resolves **omitted** column types from the migration's *target
+model* (its snapshot), not from the runtime model. A single snapshot stores one
+provider's store types (`uuid`, `character varying(30)`, `timestamp with time
+zone`), so applying it on the other engine emits invalid SQL (verified live:
+SQL Server Error 156 on `timestamp with time zone`). `tests/SqlServerMigrationTests.cs`
+pins the selection and the SQL Server output.
 
-`dotnet ef migrations script` renders column types from the Npgsql-authored
-model snapshot, so its SQL Server output may show Postgres type names. That is
-a design-time artifact: `MigrateAsync()` in the running app does not use the
-snapshot. Trust the test, not the script. If you need a reviewable T-SQL
-script, generate it from a SQL Server–scaffolded migration instead.
+## Adding a migration
 
-Scaffold new migrations under Postgres (the default) and keep them neutral
-per the rule above; the guard test fails the build if Postgres-only types
-creep back in.
+Scaffold **per provider you are changing** — the provider config selects the set:
+
+```bash
+# Postgres set (default)
+dotnet ef migrations add <Name> --project api -o Migrations/Postgres
+
+# SQL Server set
+Database__Provider=sqlServer dotnet ef migrations add <Name> --project api -o Migrations/SqlServer
+```
+
+Rules that keep the sets healthy (the guard tests fail the build otherwise):
+
+- Always pass `-o Migrations/<Provider>`; a migration scaffolded into the root
+  `Migrations` folder is invisible to both providers.
+- Never rename a set's snapshot class: the ef CLI reuses the existing class
+  name, and locates snapshot files **by file name across the project** (first
+  match wins) — that is why the two snapshots have distinct names.
+- Keep ops free of hand-written store types (`type:`) and provider annotations;
+  let the provider map CLR types (Guid → uuid/uniqueidentifier, DateTime →
+  timestamptz/datetime2, string+maxLength → varchar/nvarchar). Precision is the
+  exception: keep `precision:`/`scale:` (decimal(18,8) FxRate, decimal(5,2) Percent).
+- Keep `OnModelCreating` free of provider-specific calls — the runtime model is
+  built from it on both engines.
+
+## Applying
+
+Startup runs `MigrateAsync()` for the configured provider
+(`Database__Provider` + `Database:Postgres`/`Database:SqlServer`), creating the
+`splitshare` schema + history table as needed. No code change to switch engines.

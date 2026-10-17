@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace SplitShare.Api.Data.Providers;
 
@@ -33,7 +34,11 @@ public sealed class PostgresProvider : IDatabaseProvider
 
     public void Configure(DbContextOptionsBuilder options, string connectionString)
         => options.UseNpgsql(connectionString,
-            npg => npg.MigrationsHistoryTable("__EFMigrationsHistory", "splitshare"));
+            npg => npg.MigrationsHistoryTable("__EFMigrationsHistory", "splitshare"))
+        // Apply the Migrations/Postgres set (see ProviderMigrationsAssembly).
+#pragma warning disable EF1001 // ReplaceService<IMigrationsAssembly> is EF internal-support API
+        .ReplaceService<IMigrationsAssembly, ProviderMigrationsAssembly>();
+#pragma warning restore EF1001
 
     public bool IsConcurrencyConflict(DbUpdateException ex)
     {
@@ -50,7 +55,11 @@ public sealed class SqlServerProvider : IDatabaseProvider
 
     public void Configure(DbContextOptionsBuilder options, string connectionString)
         => options.UseSqlServer(connectionString,
-            sql => sql.MigrationsHistoryTable("__EFMigrationsHistory", "splitshare"));
+            sql => sql.MigrationsHistoryTable("__EFMigrationsHistory", "splitshare"))
+        // Apply the Migrations/SqlServer set (see ProviderMigrationsAssembly).
+#pragma warning disable EF1001 // ReplaceService<IMigrationsAssembly> is EF internal-support API
+        .ReplaceService<IMigrationsAssembly, ProviderMigrationsAssembly>();
+#pragma warning restore EF1001
 
     public bool IsConcurrencyConflict(DbUpdateException ex)
     {
