@@ -61,7 +61,14 @@ jobs:
           set -euo pipefail
 
           echo "=== 1/7 Resource group ==="
-          az group create --name "$RG" --location "$LOCATION_DEFAULT" --output none
+          # az group create errors when the group exists with a different
+          # location, so only pass --location when actually creating.
+          if [ "$(az group exists --name "$RG")" = "true" ]; then
+            echo "Resource group '$RG' already exists."
+          else
+            az group create --name "$RG" --location "$LOCATION_DEFAULT" --output none
+            echo "Created resource group '$RG'."
+          fi
           LOC=$(az group show --name "$RG" --query location -o tsv)
           SUB_ID=$(az account show --query id -o tsv)
           echo "Resource group '$RG' in $LOC (subscription $SUB_ID)"
