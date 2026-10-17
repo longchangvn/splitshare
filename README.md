@@ -38,8 +38,10 @@ dotnet run --project apphost/SplitShare.AppHost.csproj
 ```
 
 The AppHost starts the API (`dotnet run --project api`) and Vite dev server,
-injects `ConnectionStrings__module-platform` (default: your localhost:5433 DB)
-and `VITE_API_URL`, and wires OpenTelemetry into the dashboard.
+injects `Database__Provider=postgres` + `Database__Postgres` (default: your
+localhost:5433 DB — override via `ConnectionStrings__module-platform` in the
+AppHost environment) and `VITE_API_URL`, and wires OpenTelemetry into the
+dashboard.
 Notes: API runs as an executable resource (DCP 9.5.2 silently drops
 `AddProject` and literal-`AddConnectionString` references in this setup —
 see `apphost/Program.cs`); ServiceDefaults add OTel/resilience/discovery and
@@ -48,7 +50,14 @@ are no-ops when running the API standalone. Production stays on compose.
 ## Run (local dev, without Aspire)
 
 ```sh
-# API (needs Postgres on localhost:5433, user/password module_platform)
+# Connection strings are env/secrets-only — never appsettings*.json.
+# Local runs: set them once per machine with user-secrets (auto-loaded in
+# Development); default provider is sqlServer, so:
+dotnet user-secrets set "Database:SqlServer" "<connection-string>" --project api
+# Local Postgres instead:
+# dotnet user-secrets set "Database:Provider" "postgres" --project api
+# dotnet user-secrets set "Database:Postgres" "Host=localhost;Port=5432;Database=splitshare;Username=module_platform;Password=module_platform" --project api
+# API
 dotnet run --project api --urls http://localhost:8081
 # Web (proxies /api to VITE_API_URL or localhost:8081)
 VITE_API_URL=http://localhost:8081 npm run --prefix web dev

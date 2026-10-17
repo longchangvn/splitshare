@@ -17,7 +17,12 @@ var api = builder.AddExecutable("api", "dotnet", "../api", "run", "--project", "
     .WithHttpEndpoint(port: 8081, targetPort: 8081, name: "http") // api launch profile "http"
     .WithHttpHealthCheck("/health")
     .WithEnvironment("ASPNETCORE_ENVIRONMENT", "Development")
-    .WithEnvironment("ConnectionStrings__module-platform", cs);
+    // API reads Database:Provider/Database:Postgres (env-only since the
+    // connection strings were removed from appsettings.json); the cs value
+    // above still comes from the legacy ConnectionStrings__module-platform
+    // override for backwards compatibility.
+    .WithEnvironment("Database__Provider", "postgres")
+    .WithEnvironment("Database__Postgres", cs);
 
 // Web has no Aspire.JavaScript package on this SDK generation: run the Vite
 // dev server as a plain executable on the fixed port the API CORS allows.

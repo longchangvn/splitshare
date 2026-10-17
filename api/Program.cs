@@ -32,11 +32,19 @@ builder.Services.AddCors(o => o.AddDefaultPolicy(p =>
     p.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["http://localhost:3000"])
      .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
+// Connection string is environment-only: Database:Provider key (env var
+// Database__<Provider>) first, then the legacy ConnectionStrings keys (still
+// supported as env-only overrides, e.g. by the Aspire AppHost).
 var provider = DatabaseProviderFactory.Create(builder.Configuration);
 var conn = builder.Configuration[provider.ConnectionKey]
     ?? builder.Configuration.GetConnectionString("module-platform")
-    ?? builder.Configuration.GetConnectionString("Default")
-    ?? "Host=localhost;Port=5433;Database=module_platform;Username=module_platform;Password=module_platform";
+    ?? builder.Configuration.GetConnectionString("Default");
+if (string.IsNullOrWhiteSpace(conn))
+    throw new InvalidOperationException(
+        $"No connection string for provider '{provider.Name}'. " +
+        $"Set the {provider.ConnectionKey.Replace(":", "__")} environment variable " +
+        "(compose/Container Apps env, or `dotnet user-secrets set` for local dev). " +
+        "Connection strings are no longer read from appsettings*.json.");
 builder.Services.AddSingleton<IDatabaseProvider>(provider);
 builder.Services.AddDbContext<AppDbContext>(o => provider.Configure(o, conn));
 builder.Services.AddScoped<LedgerService>();
