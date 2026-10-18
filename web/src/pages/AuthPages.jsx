@@ -5,7 +5,7 @@ import {
 } from '@mantine/core';
 import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
-import { takePending, PING, makeNonce } from '../googleReturn.js';
+import { takePending, PING, makeNonce, REDIRECT_FLOW_KEY } from '../googleReturn.js';
 import { BrandMark } from '../components/Shell.jsx';
 
 // Sanitized in-app destination from ?next= (same-origin path only).
@@ -249,6 +249,15 @@ function GoogleBtn({ next, intent = 'signin' }) {
   const wakeRef = useRef(() => {});
 
   useEffect(() => {
+    // One line describing the environment, so a pasted console block is enough
+    // to tell a missing client ID, a blocked popup, and a lost token apart.
+    console.info('[google] ready', {
+      origin: window.location.origin,
+      mode: isMobile() ? 'redirect' : 'popup',
+      clientId: clientId ? 'set' : 'MISSING',
+      parked: !!localStorage.getItem('ss_gt'),
+      hash: window.location.hash || '(none)',
+    });
     const onMsg = (ev) => {
       if (ev.origin === window.location.origin && ev.data?.type === PING) drainRef.current();
     };
@@ -275,11 +284,17 @@ function GoogleBtn({ next, intent = 'signin' }) {
 
   const exchange = async (idToken, dest) => {
     try {
+      console.info('[google] exchanging id_token…');
       const d = await api.post('/api/v1/auth/google', { id_token: idToken });
+      console.info('[google] exchange OK', { user: d?.user?.user_id, dest: dest || next || '/' });
       setTokens(d.access_token, d.refresh_token);
       setUser(d.user);
       nav(dest || next || '/');
-    } catch (err) { setE(err); } finally { setBusy(false); }
+    } catch (err) {
+      // 422 = Google client ID missing server-side, 401 = token rejected.
+      console.error('[google] exchange FAILED', { status: err?.status, code: err?.code, message: err?.message });
+      setE(err);
+    } finally { setBusy(false); }
   };
 
   const stop = (msg) => {
@@ -304,7 +319,16 @@ function GoogleBtn({ next, intent = 'signin' }) {
     exchange(payload.id_token, payload.next);
   };
 
-  drainRef.current = () => { const p = takePending(); if (p) complete(p); };
+  // Only speaks when a sign-in is actually in flight or a result was found.
+  // A plain page load has nothing pending, and announcing that reads like a
+  // failure — "drain {found:false}" is what every idle login page logs.
+  drainRef.current = () => {
+    const p = takePending();
+    if (p || activeRef.current) {
+      console.info('[google] drain', { found: Boolean(p), active: activeRef.current });
+    }
+    if (p) complete(p);
+  };
 
   // Runs when this tab regains the foreground — e.g. the popup was closed.
   wakeRef.current = () => {
@@ -365,6 +389,10 @@ function GoogleBtn({ next, intent = 'signin' }) {
     // returns to this same document with no opener, which is googleReturn.js's
     // no-opener path: park the token, load /login, drain it there.
     if (isMobile()) {
+      // Mark the round trip so consumeReturn() knows this tab *is* the
+      // initiator: it must not act on window.opener, or it would ping a
+      // stranger and close the user's own tab.
+      try { sessionStorage.setItem(REDIRECT_FLOW_KEY, '1'); } catch { /* ignore */ }
       try { window.location.assign(url); } catch (err) { couldNotOpen(err); }
       return;
     }
