@@ -1,8 +1,6 @@
-import { Box, Group, Text } from '@mantine/core';
+import { Box, Group } from '@mantine/core';
 import { useLocation, useNavigate } from 'react-router-dom';
-const ACTIVE = '#0f6e56';
-const IDLE = '#94a3b8';
-
+import { useT } from '../prefs.jsx';
 function I({ children }) {
   return (
     <svg
@@ -53,6 +51,7 @@ export const SettingsIcon = () => (
 export function usePrimaryNav() {
   const nav = useNavigate();
   const loc = useLocation();
+  const t = useT();
   const path = loc.pathname;
   const active = path === '/activity' ? 'activity'
     : path === '/settings' || path.startsWith('/settings/') ? 'settings'
@@ -60,10 +59,10 @@ export function usePrimaryNav() {
       : path === '/' ? 'home' : null;
 
   return [
-    { id: 'home', label: 'Dashboard', short: 'Home', icon: <HomeIcon />, active: active === 'home', onClick: () => nav('/') },
-    { id: 'groups', label: 'Groups', short: 'Groups', icon: <GroupsIcon />, active: active === 'groups', onClick: () => nav('/groups') },
-    { id: 'activity', label: 'Activity', short: 'Activity', icon: <ActivityIcon />, active: active === 'activity', onClick: () => nav('/activity') },
-    { id: 'settings', label: 'Settings', short: 'Settings', icon: <SettingsIcon />, active: active === 'settings', onClick: () => nav('/settings') },
+    { id: 'home', label: t('nav.dashboard'), short: t('nav.home'), icon: <HomeIcon />, active: active === 'home', onClick: () => nav('/') },
+    { id: 'groups', label: t('nav.groups'), short: t('nav.groups'), icon: <GroupsIcon />, active: active === 'groups', onClick: () => nav('/groups') },
+    { id: 'activity', label: t('nav.activity'), short: t('nav.activity'), icon: <ActivityIcon />, active: active === 'activity', onClick: () => nav('/activity') },
+    { id: 'settings', label: t('nav.settings'), short: t('nav.settings'), icon: <SettingsIcon />, active: active === 'settings', onClick: () => nav('/settings') },
   ];
 }
 
@@ -72,52 +71,35 @@ function Tab({ label, icon, active, onClick }) {
     <Box
       component="button"
       type="button"
+      className={`bottom-nav-tab${active ? ' is-active' : ''}`}
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       aria-label={label}
-      style={{
-        flex: 1,
-        background: 'none',
-        border: 0,
-        padding: '8px 0 6px',
-        minHeight: 56,
-        minWidth: 44,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 2,
-        color: active ? ACTIVE : IDLE,
-        cursor: 'pointer',
-      }}
     >
-      {icon}
-      <Text component="span" size="xs" fw={active ? 700 : 500} style={{ color: 'inherit' }}>
-        {label}
-      </Text>
+      <span className="bottom-nav-icon">{icon}</span>
+      {active && <span className="bottom-nav-label">{label}</span>}
     </Box>
   );
 }
 
 export function BottomNav() {
   const items = usePrimaryNav();
+  const t = useT();
   return (
     <Box
       component="nav"
-      aria-label="Primary"
-      className="bottom-nav"
+      aria-label={t('shell.primaryNav')}
+      className="bottom-nav no-print"
       pos="fixed"
       bottom={0}
       left={0}
       right={0}
       style={{
         zIndex: 100,
-        background: '#fff',
-        borderTop: '1px solid #e6eeea',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
-      <Group gap={0} grow wrap="nowrap">
+      <Group className="bottom-nav-dock" gap={4} justify="center" wrap="nowrap">
         {items.map((item) => (
           <Tab
             key={item.id}

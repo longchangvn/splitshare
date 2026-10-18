@@ -40,6 +40,7 @@ public static class GroupEndpoints
             group_id = g.Id,
             name = g.Name,
             currency = g.Currency,
+            created_at = g.CreatedAt,
             my_role = myRole,
             mode = g.Mode,
             flat_fee_cents = g.FlatFeeCents,
@@ -121,21 +122,21 @@ public static class GroupEndpoints
 
         api.MapPost("/groups/{id:guid}/leave", async (Guid id, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.LeaveAsync(Me(p), id)));
+
+        api.MapGet("/groups/{id:guid}/categories", async (Guid id, ClaimsPrincipal p, CategoryService cats) =>
+            ToResult(await cats.ListAsync(Me(p), id)));
+
+        api.MapPost("/groups/{id:guid}/categories", async (Guid id, CategoryDto d, ClaimsPrincipal p, CategoryService cats) =>
+            ToResult(await cats.AddAsync(Me(p), id, d.Name)));
+
+        api.MapPatch("/groups/{id:guid}/categories/{cid:guid}", async (Guid id, Guid cid, CategoryDto d, ClaimsPrincipal p, CategoryService cats) =>
+            ToResult(await cats.RenameAsync(Me(p), id, cid, d.Name)));
+
+        api.MapDelete("/groups/{id:guid}/categories/{cid:guid}", async (Guid id, Guid cid, ClaimsPrincipal p, CategoryService cats) =>
+            ToResult(await cats.DeleteAsync(Me(p), id, cid)));
     }
 
-    /// <summary>Anonymous surface: preview of an invite token for the /g/:token
-    /// landing page (token possession authorizes; name only, no member details).</summary>
-    public static void MapPublic(RouteGroupBuilder v1)
-    {
-        v1.MapGet("/invites/{token}", async (string token, AppDbContext db) =>
-        {
-            var g = await db.Groups.FirstOrDefaultAsync(x => x.InviteToken == token && x.DeletedAt == null);
-            if (g is null)
-                return ApiResults.Error("INVITE_ROTATED", "Invite invalid or rotated.", 410);
-            var memberCount = await db.GroupMembers.CountAsync(m => m.GroupId == g.Id);
-            return Results.Ok(new { name = g.Name, currency = g.Currency, member_count = memberCount });
-        });
-    }
+    public sealed record CategoryDto(string Name);
 
     public sealed record CreateGroupDto(string Name, string? Currency, List<Guid>? MemberIds, List<string>? InviteEmails);
     public sealed record RenameGroupDto(string Name);

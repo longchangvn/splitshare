@@ -29,7 +29,8 @@ public sealed record ExpenseOptions(
     List<GuestEntry>? Guests = null,
     bool OnlyPresent = false);
 
-public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileStore files, Auth.IEmailSender? email = null, Notifications.GroupNotifier? notifier = null)
+public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileStore files,
+    Groups.CategoryService categories, Auth.IEmailSender? email = null)
 {
     public const long MaxAmountCents = 100_000_000; // 1,000,000.00
     public const long MaxImageBytes = 10 * 1024 * 1024;
@@ -37,8 +38,6 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
     public static readonly HashSet<string> AllowedMimes = new(StringComparer.OrdinalIgnoreCase)
         { "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif",
           "image/heic-sequence", "image/heif-sequence" };
-    public static readonly HashSet<string> AllowedCategories = new(StringComparer.OrdinalIgnoreCase)
-        { "food", "transport", "stay", "activity", "shopping", "health", "bills", "other" };
 
     public static (long Cents, string? Error) ParseAmount(decimal amount)
     {
@@ -112,10 +111,6 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
             return (0, $"{name} supports max 2 decimals.");
         return ((long)(amount * 100m), null);
     }
-
-    public static string? ValidateCategory(string? category)
-        => category is null || AllowedCategories.Contains(category.Trim().ToLowerInvariant())
-            ? null : $"category must be {string.Join('|', AllowedCategories.OrderBy(x => x))}.";
 
     public static (DateTime At, string? Error) ParseSpentAt(DateTime? spentAt)
     {
@@ -199,7 +194,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
             return new(false, "VALIDATION", "Title 1-100 chars required.");
         if (description is not null && description.Length > 1000)
             return new(false, "VALIDATION", "Description max 1000 chars.");
-        if (ValidateCategory(opts.Category) is { } catErr)
+        if (await categories.ValidateKeyAsync(groupId, opts.Category) is { } catErr)
             return new(false, "VALIDATION", catErr);
         var (spentAt, spentErr) = ParseSpentAt(opts.SpentAt);
         if (spentErr is not null) return new(false, "VALIDATION", spentErr);
@@ -265,8 +260,6 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         db.Expenses.Add(e);
         await db.SaveChangesAsync();
         await CheckBudgetAlertAsync(group, e.AmountCents);
-        if (notifier is not null)
-            await notifier.NotifyExpenseAsync(groupId, actorId, e.Title, e.AmountCents, group.Currency);
         var (plan, _) = await ledger.RecomputeAsync(groupId);
         var after = LedgerService.ApplyDelta(before, null, (payerId, totalCents, map));
         return new(true, null, null, new ExpenseCreated(e, Unsettled(before, after), plan.VersionSeq));
@@ -328,7 +321,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         if (newTitle.Length is 0 or > 100) return new(false, "VALIDATION", "Title 1-100 chars required.");
         if (description is not null && description.Length > 1000)
             return new(false, "VALIDATION", "Description max 1000 chars.");
-        if (ValidateCategory(opts.Category) is { } catErr)
+        if (await categories.ValidateKeyAsync(e.GroupId, opts.Category) is { } catErr)
             return new(false, "VALIDATION", catErr);
         var newCategory = opts.Category is null ? e.Category : opts.Category.Trim().ToLowerInvariant();
         var newSpentAt = e.SpentAt;

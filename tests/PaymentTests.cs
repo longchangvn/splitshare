@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SplitShare.Api.Auth;
 using SplitShare.Api.Data;
 using SplitShare.Api.Expenses;
+using SplitShare.Api.Groups;
 using SplitShare.Api.Models;
 using SplitShare.Api.Payments;
 using SplitShare.Api.Services;
@@ -21,7 +22,7 @@ public sealed class PaymentTests
         var ledger = new LedgerService(db);
         var auth = new AuthService(db, new TokenService(config),
             new StubEmailSender(NullLogger<StubEmailSender>.Instance), ledger);
-        return (db, auth, new ExpenseService(db, ledger, new FakeStore()), new PaymentService(db, ledger));
+        return (db, auth, new ExpenseService(db, ledger, new FakeStore(), new CategoryService(db)), new PaymentService(db, ledger));
     }
 
     private static async Task<(User A, User B, Group G)> SeedAsync(AuthService auth, AppDbContext db)
