@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Center, Loader } from '@mantine/core';
 import { api, setTokens, clearTokens, ApiError } from './api.js';
-import { loginOneSignal, logoutOneSignal } from './onesignal.js';
+import { useT } from './prefs.jsx';
 
 const Ctx = createContext(null);
 export const useAuth = () => useContext(Ctx);
@@ -15,12 +15,6 @@ export function AuthProvider({ children }) {
     if (!localStorage.getItem('ss_at')) { setLoading(false); return; }
     api.get('/api/v1/me').then(setUser).catch(() => clearTokens()).finally(() => setLoading(false));
   }, []);
-
-  // Link the browser's push subscriptions to this user (external_id) so the
-  // API can target them; no-op when OneSignal is not configured.
-  useEffect(() => {
-    if (user?.user_id) loginOneSignal(user.user_id);
-  }, [user?.user_id]);
 
   const login = async (username_or_email, password) => {
     const d = await api.post('/api/v1/auth/login', { username_or_email, password });
@@ -40,7 +34,6 @@ export function AuthProvider({ children }) {
     } catch { /* already out */ }
     clearTokens();
     setUser(null);
-    logoutOneSignal(); // stop targeting this browser's subscriptions
   };
   return <Ctx.Provider value={{ user, loading, login, register, logout, setUser }}>{children}</Ctx.Provider>;
 }
@@ -54,7 +47,8 @@ export function Guard({ children }) {
 }
 
 export function Err({ e }) {
+  const t = useT();
   if (!e) return null;
   const msg = e instanceof ApiError ? `${e.code || e.status}: ${e.message}` : String(e?.message || e);
-  return <Alert color="red" variant="light" title="Something went wrong" mt="sm">{msg}</Alert>;
+  return <Alert color="red" variant="light" title={t('errors.genericTitle')} mt="sm">{msg}</Alert>;
 }

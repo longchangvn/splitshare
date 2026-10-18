@@ -6,8 +6,10 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
+import { useT } from '../prefs.jsx';
 
 export function Profile() {
+  const t = useT();
   const { user, setUser, logout } = useAuth();
   const nav = useNavigate();
   const [me, setMe] = useState(user || null);
@@ -50,7 +52,7 @@ export function Profile() {
     try {
       const d = await api.patch('/api/v1/me', { display_name: name, phone: phone || null });
       setMe(d); setUser(d);
-      notifications.show({ title: 'Profile updated', color: 'teal' });
+      notifications.show({ title: t('profile.updated'), color: 'teal' });
       setE(null);
     } catch (err) { setE(err); } finally { setSaving(false); }
   };
@@ -61,17 +63,17 @@ export function Profile() {
     try {
       await api.patch('/api/v1/me/password', { current_password: cur || null, new_password: next });
       setCur(''); setNext('');
-      notifications.show({ title: 'Password changed', color: 'teal' });
+      notifications.show({ title: t('profile.passwordChanged'), color: 'teal' });
       setE(null);
     } catch (err) { setE(err); } finally { setPwBusy(false); }
   };
 
   const del = () => {
     const mid = modals.openConfirmModal({
-      title: 'Delete account',
+      title: t('profile.deleteAccount'),
       centered: true,
-      children: <Text size="sm">Delete your account? Blocked while you hold a balance in any group.</Text>,
-      labels: { confirm: 'Delete', cancel: 'Cancel' },
+      children: <Text size="sm">{t('profile.deleteAccountBody')}</Text>,
+      labels: { confirm: t('common.delete'), cancel: t('common.cancel') },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
         modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
@@ -99,32 +101,32 @@ export function Profile() {
     <Shell>
       <div className="profile-layout">
         <Group justify="space-between" align="center" mb="md" wrap="nowrap">
-          <Title order={2}>Profile</Title>
+          <Title order={2}>{t('profile.title')}</Title>
           <button type="button" className="gd-action-btn is-danger profile-logout-btn" onClick={() => setLogoutOpen(true)}>
             <LogoutIcon />
-            <span>Log out</span>
+            <span>{t('profile.logOut')}</span>
           </button>
         </Group>
         <Err e={e} />
         <Tabs value={tab} onChange={setTab} className="profile-tabs">
           <div className="tab-rail profile-tab-rail">
             <Tabs.List>
-              <Tabs.Tab value="account">Account</Tabs.Tab>
-              <Tabs.Tab value="password">Password</Tabs.Tab>
-              <Tabs.Tab value="payments">Payments</Tabs.Tab>
-              <Tabs.Tab value="danger">Danger</Tabs.Tab>
+              <Tabs.Tab value="account">{t('profile.tabAccount')}</Tabs.Tab>
+              <Tabs.Tab value="password">{t('profile.tabPassword')}</Tabs.Tab>
+              <Tabs.Tab value="payments">{t('profile.tabPayments')}</Tabs.Tab>
+              <Tabs.Tab value="danger">{t('profile.tabDanger')}</Tabs.Tab>
             </Tabs.List>
           </div>
 
           <Tabs.Panel value="account" className="profile-panel">
             <form onSubmit={save}>
               <Stack gap="sm">
-                <Text size="sm" c="dimmed">@{me?.username} · {me?.email} {me && !me.email_verified && '(unverified)'}</Text>
-                <TextInput label="Display name" required value={name} onChange={(x) => setName(x.target.value)} />
-                <TextInput label="Phone (optional)" value={phone} onChange={(x) => setPhone(x.target.value)} />
+                <Text size="sm" c="dimmed">@{me?.username} · {me?.email} {me && !me.email_verified && t('profile.unverified')}</Text>
+                <TextInput label={t('profile.displayName')} required value={name} onChange={(x) => setName(x.target.value)} />
+                <TextInput label={t('profile.phone')} value={phone} onChange={(x) => setPhone(x.target.value)} />
                 <button type="submit" className="gd-action-btn profile-primary-btn" disabled={saving}>
                   <ProfileIcon name="save" />
-                  <span>{saving ? 'Saving…' : 'Save profile'}</span>
+                  <span>{saving ? t('profile.saving') : t('profile.saveProfile')}</span>
                 </button>
               </Stack>
             </form>
@@ -133,12 +135,12 @@ export function Profile() {
           <Tabs.Panel value="password" className="profile-panel">
             <form onSubmit={changePw}>
               <Stack gap="sm">
-                <Text size="sm" c="dimmed">Update the password you use to sign in.</Text>
-                <PasswordInput label="Current password (blank for Google-only accounts)" autoComplete="current-password" value={cur} onChange={(x) => setCur(x.target.value)} />
-                <PasswordInput label="New password" description="8+ characters with a letter and a digit" autoComplete="new-password" value={next} onChange={(x) => setNext(x.target.value)} />
+                <Text size="sm" c="dimmed">{t('profile.passwordHint')}</Text>
+                <PasswordInput label={t('profile.currentPassword')} autoComplete="current-password" value={cur} onChange={(x) => setCur(x.target.value)} />
+                <PasswordInput label={t('profile.newPassword')} description={t('profile.passwordRule')} autoComplete="new-password" value={next} onChange={(x) => setNext(x.target.value)} />
                 <button type="submit" className="gd-action-btn profile-primary-btn" disabled={pwBusy}>
                   <ProfileIcon name="lock" />
-                  <span>{pwBusy ? 'Saving…' : 'Change password'}</span>
+                  <span>{pwBusy ? t('profile.saving') : t('profile.changePassword')}</span>
                 </button>
               </Stack>
             </form>
@@ -146,25 +148,25 @@ export function Profile() {
 
           <Tabs.Panel value="payments" className="profile-panel">
             <Stack gap="sm">
-              <Text size="sm" c="dimmed">Shown to group mates on the settle sheet so they pay to the right place.</Text>
+              <Text size="sm" c="dimmed">{t('profile.paymentsHint')}</Text>
               <Stack gap="xs">
                 {handles.map((h) => (
                   <Group key={h.handle_id} justify="space-between" wrap="nowrap">
                     <Text size="sm"><b>{h.label}</b>: {h.details}</Text>
                     <button type="button" className="gd-action-btn is-danger" onClick={() => delHandle(h.handle_id)}>
                       <ProfileIcon name="trash" />
-                      <span>Remove</span>
+                      <span>{t('common.remove')}</span>
                     </button>
                   </Group>
                 ))}
-                {handles.length === 0 && <Text size="sm" c="dimmed">None yet.</Text>}
+                {handles.length === 0 && <Text size="sm" c="dimmed">{t('profile.noHandles')}</Text>}
               </Stack>
               <form className="profile-handle-form" onSubmit={addHandle}>
-                <TextInput label="Label" placeholder="Vietcombank" required value={hLabel} onChange={(x) => setHLabel(x.target.value)} />
-                <TextInput label="Details" placeholder="Account no / QR text" required value={hDetails} onChange={(x) => setHDetails(x.target.value)} />
+                <TextInput label={t('profile.handleLabel')} placeholder={t('profile.handleLabelPh')} required value={hLabel} onChange={(x) => setHLabel(x.target.value)} />
+                <TextInput label={t('profile.handleDetails')} placeholder={t('profile.handleDetailsPh')} required value={hDetails} onChange={(x) => setHDetails(x.target.value)} />
                 <button type="submit" className="gd-action-btn profile-primary-btn">
                   <ProfileIcon name="plus" />
-                  <span>Add</span>
+                  <span>{t('common.add')}</span>
                 </button>
               </form>
             </Stack>
@@ -172,10 +174,10 @@ export function Profile() {
 
           <Tabs.Panel value="danger" className="profile-panel">
             <Stack gap="sm">
-              <Text size="sm" c="dimmed">Delete your account permanently. Blocked while you hold a balance in any group.</Text>
+              <Text size="sm" c="dimmed">{t('profile.deleteAccountHint')}</Text>
               <button type="button" className="gd-action-btn is-danger profile-primary-btn" onClick={del}>
                 <ProfileIcon name="trash" />
-                <span>Delete account</span>
+                <span>{t('profile.deleteAccount')}</span>
               </button>
             </Stack>
           </Tabs.Panel>
@@ -186,7 +188,7 @@ export function Profile() {
         opened={logoutOpen}
         onClose={() => !logoutBusy && setLogoutOpen(false)}
         closeOnClickOutside={!logoutBusy}
-        title={<span className="wizard-title-name">Log out</span>}
+        title={<span className="wizard-title-name">{t('profile.logoutTitle')}</span>}
         classNames={{
           content: 'wizard-modal-content',
           header: 'wizard-modal-header',
@@ -201,14 +203,14 @@ export function Profile() {
       >
         <div className="wizard-form confirm-dialog">
           <Text className="confirm-dialog-text">
-            Log out of SplitShare? You can sign back in anytime.
+            {t('profile.logoutBody')}
           </Text>
           <Group gap="sm" grow>
             <Button className="wizard-back" onClick={() => setLogoutOpen(false)} disabled={logoutBusy}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button className="wizard-primary is-danger" loading={logoutBusy} onClick={confirmLogout}>
-              Log out
+              {t('profile.logOut')}
             </Button>
           </Group>
           <Err e={e} />

@@ -9,15 +9,18 @@ import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, ChevronRight, pastelFor } from '../components/Net.jsx';
-import { getCurrencies, getTemplates, subscribeCatalogs } from '../settingsStore.js';
+import { getTemplates, subscribeCatalogs } from '../settingsStore.js';
+import { useT } from '../prefs.jsx';
+
+const DEFAULT_CURRENCY = 'USD';
 
 export function Dashboard() {
+  const t = useT();
   const nav = useNavigate();
   const [data, setData] = useState(null);
   const [e, setE] = useState(null);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [cur, setCur] = useState('USD');
   const [tpl, setTpl] = useState('');
   const [cq, setCq] = useState('');
   const [contacts, setContacts] = useState([]);
@@ -27,14 +30,12 @@ export function Dashboard() {
   const [created, setCreated] = useState(null);
   const [creating, setCreating] = useState(false);
   const [step, setStep] = useState(1);
-  const [currencies, setCurrencies] = useState(() => getCurrencies());
   const [templates, setTemplates] = useState(() => getTemplates());
   const isMobile = useMediaQuery('(max-width: 36em)');
 
   const load = () => api.get('/api/v1/me/balances').then(setData).catch(setE);
   useEffect(() => { load(); }, []);
   useEffect(() => subscribeCatalogs(() => {
-    setCurrencies(getCurrencies());
     setTemplates(getTemplates());
   }), []);
 
@@ -46,9 +47,7 @@ export function Dashboard() {
   }, [view]);
 
   const openWizard = () => {
-    const codes = getCurrencies().map((c) => c.code);
     setName('');
-    setCur(codes.includes('USD') ? 'USD' : (codes[0] || 'USD'));
     setTpl(''); setCq(''); setContacts([]);
     setPicked([]); setEmails(''); setCreated(null); setE(null);
     setStep(1); setOpen(true);
@@ -69,9 +68,11 @@ export function Dashboard() {
       let g;
       let link = null;
       if (tpl) {
-        g = await api.post('/api/v1/groups/from-template', { name, currency: cur, template: tpl });
+        g = await api.post('/api/v1/groups/from-template', {
+          name, currency: DEFAULT_CURRENCY, template: tpl,
+        });
         const gid0 = g.group_id ?? g.group?.id;
-        if (!gid0) { setE({ message: 'Server did not return a group id.' }); return; }
+        if (!gid0) { setE({ message: t('errors.noGroupId') }); return; }
         if (memberIds.length > 0) await api.post(`/api/v1/groups/${gid0}/members`, { user_ids: memberIds });
         if (emailList.length > 0) await api.post(`/api/v1/groups/${gid0}/invites`, { emails: emailList });
         try {
@@ -80,44 +81,52 @@ export function Dashboard() {
         } catch { link = null; }
       } else {
         g = await api.post('/api/v1/groups', {
-          name, currency: cur, member_ids: memberIds, invite_emails: emailList,
+          name,
+          currency: DEFAULT_CURRENCY,
+          member_ids: memberIds,
+          invite_emails: emailList,
         });
         link = g.invite_link || null;
       }
       const gid = g.group_id ?? g.group?.id; // create returns nested {group:{id}}
       if (!gid) {
-        setE({ message: 'Server did not return a group id.' });
+        setE({ message: t('errors.noGroupId') });
         return;
       }
       setCreated({
         gid,
         link,
         name: g.group?.name || name,
-        currency: cur,
-        template: templates.find((t) => t.key === tpl)?.label || '',
+        currency: DEFAULT_CURRENCY,
+        template: templates.find((x) => x.key === tpl)?.label || '',
         people: [...picked.map((p) => p.display_name), ...emailList],
       });
       load();
     } catch (err) { setE(err); } finally { setCreating(false); }
   };
 
-  const totals = data ? Object.entries(data.totals) : [];
+  const totals = data ? Object.entries(data.totals || {}) : [];
   const groups = data?.groups || [];
-  const settledCount = groups.filter((g) => g.net_cents === 0).length;
+  // Group settled = no open balances among members (not personal net).
+  const settledCount = groups.filter((g) => !groupNeedsSettlement(g)).length;
+  const openGroupCount = Math.max(0, groups.length - settledCount);
   const settledPct = groups.length ? Math.round((settledCount / groups.length) * 100) : 0;
-  const topOwe = [...totals].sort((a, b) => b[1].owe_cents - a[1].owe_cents)[0];
-  const topOwed = [...totals].sort((a, b) => b[1].owed_cents - a[1].owed_cents)[0];
-  const oweBars = groups.filter((g) => g.net_cents < 0).slice(0, 6).map((g) => -g.net_cents);
-  const owedBars = groups.filter((g) => g.net_cents > 0).slice(0, 6).map((g) => g.net_cents);
+  const topOwe = [...totals].sort((a, b) => (b[1]?.owe_cents || 0) - (a[1]?.owe_cents || 0))[0];
+  const topOwed = [...totals].sort((a, b) => (b[1]?.owed_cents || 0) - (a[1]?.owed_cents || 0))[0];
+  const oweCents = topOwe?.[1]?.owe_cents || 0;
+  const owedCents = topOwed?.[1]?.owed_cents || 0;
+  const oweCurrency = topOwe?.[0] || DEFAULT_CURRENCY;
+  const owedCurrency = topOwed?.[0] || DEFAULT_CURRENCY;
+  const oweGroups = groups.filter((g) => g.net_cents < 0).length;
+  const owedGroups = groups.filter((g) => g.net_cents > 0).length;
 
   const wizard = (
     <GroupWizard
       step={step} setStep={setStep}
-      name={name} setName={setName} cur={cur} setCur={setCur}
+      name={name} setName={setName}
       tpl={tpl} setTpl={setTpl} create={create} cq={cq} setCq={setCq} searchContacts={searchContacts}
       searching={searching} contacts={contacts} picked={picked} setPicked={setPicked}
       emails={emails} setEmails={setEmails} creating={creating} created={created}
-      currencies={currencies}
       templates={templates}
       onOpenGroup={() => { setOpen(false); nav(`/groups/${created?.gid}`); }}
     />
@@ -128,69 +137,81 @@ export function Dashboard() {
       {view === 'home' && <>
       <div className="dash-head">
         <div>
-          <Title order={2}>Dashboard</Title>
+          <Title order={2}>{t('dashboard.title')}</Title>
         </div>
-        <Button className="dash-cta" onClick={openWizard} leftSection={<NewGroupIcon />}>New group</Button>
+        <Button className="dash-cta" onClick={openWizard} leftSection={<NewGroupIcon />}>{t('dashboard.newGroup')}</Button>
       </div>
       <Err e={e} />
 
       <div className="dash-grid">
-        <section className="dash-card dash-stat dash-owe">
+        <section className={`dash-card dash-stat dash-owe is-${oweCents > 0 ? 'open' : 'settled'}`}>
           <div className="dash-card-top">
             <div>
-              <div className="dash-kicker">You owe</div>
+              <div className="dash-kicker">{t('net.youOweShort')}</div>
               {!data && !e && <Skeleton height={36} mt={8} radius="md" />}
               {data && (
-                <div className="dash-value">{topOwe && topOwe[1].owe_cents > 0 ? fmt(topOwe[1].owe_cents, topOwe[0]) : fmt(0, topOwe?.[0] || 'USD')}</div>
+                <div className="dash-value">{fmt(oweCents, oweCurrency)}</div>
               )}
-              <div className={`dash-delta ${topOwe && topOwe[1].owe_cents > 0 ? 'down' : 'up'}`}>
-                {totals.length > 1 ? `${totals.length} currencies, shown separately` : (topOwe ? topOwe[0] : 'Nothing outstanding')}
+              <div className="dash-delta">
+                {!data ? '…' : totals.length > 1
+                  ? t('dashboard.multiCurrency', { count: totals.length })
+                  : oweCents > 0
+                    ? t(oweGroups === 1 ? 'dashboard.oweInGroupsOne' : 'dashboard.oweInGroups', { count: oweGroups })
+                    : t('net.nothingOutstanding')}
               </div>
             </div>
-            <Bars values={oweBars.length ? oweBars : [8, 14, 10, 18]} color="#fb7185" />
+            <span className="dash-stat-icon" aria-hidden><StatIconOwe /></span>
           </div>
         </section>
 
-        <section className="dash-card dash-stat dash-owed">
+        <section className={`dash-card dash-stat dash-owed is-${owedCents > 0 ? 'owed' : 'settled'}`}>
           <div className="dash-card-top">
             <div>
-              <div className="dash-kicker">Owed to you</div>
+              <div className="dash-kicker">{t('net.owedToYou')}</div>
               {!data && !e && <Skeleton height={36} mt={8} radius="md" />}
               {data && (
-                <div className="dash-value">{topOwed && topOwed[1].owed_cents > 0 ? fmt(topOwed[1].owed_cents, topOwed[0]) : fmt(0, topOwed?.[0] || 'USD')}</div>
+                <div className="dash-value">{fmt(owedCents, owedCurrency)}</div>
               )}
-              <div className="dash-delta up">
-                {totals.length > 1 ? 'Never summed across currencies' : (topOwed ? topOwed[0] : 'All clear')}
+              <div className="dash-delta">
+                {!data ? '…' : totals.length > 1
+                  ? t('dashboard.neverSummed')
+                  : owedCents > 0
+                    ? t(owedGroups === 1 ? 'dashboard.owedInGroupsOne' : 'dashboard.owedInGroups', { count: owedGroups })
+                    : t('net.allClear')}
               </div>
             </div>
-            <Bars values={owedBars.length ? owedBars : [12, 18, 14, 22]} color="#34d399" />
+            <span className="dash-stat-icon" aria-hidden><StatIconOwed /></span>
           </div>
         </section>
 
-        <section className="dash-card dash-stat dash-count">
+        <section className="dash-card dash-stat dash-count is-groups">
           <div className="dash-card-top">
             <div>
-              <div className="dash-kicker">Active groups</div>
+              <div className="dash-kicker">{t('dashboard.activeGroups')}</div>
               {!data && !e && <Skeleton height={36} mt={8} radius="md" />}
               {data && <div className="dash-value">{groups.length}</div>}
-              <div className="dash-delta">{settledCount} settled · {groups.length - settledCount} open</div>
+              <div className="dash-delta">
+                {!data ? '…' : t('dashboard.settledOpen', { settled: settledCount, open: openGroupCount })}
+              </div>
             </div>
-            <Bars values={groups.slice(0, 6).map((g) => Math.abs(g.net_cents) || 4)} color="#6ee7b7" />
+            <span className="dash-stat-icon" aria-hidden><StatIconGroups /></span>
           </div>
         </section>
 
         <section className="dash-card dash-gauge">
-          <div className="dash-kicker">Settlement</div>
+          <div className="dash-kicker">{t('dashboard.settlement')}</div>
           <div className="dash-gauge-chart">
             <div
               className="ring-wrap"
-              style={{ background: `conic-gradient(#22c55e ${settledPct * 3.6}deg, #e7eeea 0deg)` }}
+              style={{
+                background: `conic-gradient(var(--ss-ring-fill, #22c55e) ${settledPct * 3.6}deg, var(--ss-ring-track, #e7eeea) 0deg)`,
+              }}
             >
               <div className="ring-hole">
-                <Text fw={800} size="xl">{data ? `${settledPct}%` : '…'}</Text>
+                <Text className="ring-pct" fw={800} size="xl">{data ? `${settledPct}%` : '…'}</Text>
               </div>
             </div>
-            <Text size="xs" c="dimmed" ta="center">Settled groups / all groups</Text>
+            <Text size="xs" c="dimmed" ta="center">{t('dashboard.settledGroupsRatio')}</Text>
           </div>
         </section>
 
@@ -198,8 +219,8 @@ export function Dashboard() {
 
         <section className="dash-card dash-groups" id="groups" style={{ scrollMarginTop: 72 }}>
           <Group justify="space-between" mb="sm" align="center">
-            <div className="dash-kicker">Groups</div>
-            <button type="button" className="splits-view-all" onClick={() => nav('/groups')}>View all</button>
+            <div className="dash-kicker">{t('dashboard.groups')}</div>
+            <button type="button" className="splits-view-all" onClick={() => nav('/groups')}>{t('common.viewAll')}</button>
           </Group>
           <div className="dash-groups-list">
             {!data && !e && (
@@ -211,8 +232,8 @@ export function Dashboard() {
             )}
             {data && groups.length === 0 && (
               <Stack align="center" gap="sm" py="md">
-                <Text c="dimmed" ta="center">No groups yet — create one to get started.</Text>
-                <Button variant="light" onClick={openWizard}>Create a group</Button>
+                <Text c="dimmed" ta="center">{t('dashboard.noGroups')}</Text>
+                <Button variant="light" onClick={openWizard}>{t('dashboard.createGroup')}</Button>
               </Stack>
             )}
             {data && [...groups]
@@ -221,16 +242,16 @@ export function Dashboard() {
               .map((g) => {
                 const tone = g.net_cents < 0 ? 'owe' : g.net_cents > 0 ? 'owed' : 'settled';
                 const detail = tone === 'owe'
-                  ? `You owe ${fmt(-g.net_cents, g.currency)}`
+                  ? t('net.youOwe', { amount: fmt(-g.net_cents, g.currency) })
                   : tone === 'owed'
-                    ? `You're owed ${fmt(g.net_cents, g.currency)}`
-                    : 'Settled up';
+                    ? t('net.youAreOwed', { amount: fmt(g.net_cents, g.currency) })
+                    : t('net.settledUp');
                 return (
                   <Link
                     key={g.group_id}
                     to={`/groups/${g.group_id}`}
                     className="history-row"
-                    aria-label={`View details for ${g.name}`}
+                    aria-label={t('common.viewDetailsFor', { name: g.name })}
                   >
                     <span className="history-copy">
                       <span className="history-group">{g.name}</span>
@@ -246,11 +267,13 @@ export function Dashboard() {
         <section className="dash-banner">
           <div className="dash-banner-index">{data ? settledPct : '—'}</div>
           <div>
-            <Text fw={800}>Settle-up index</Text>
+            <Text fw={800}>{t('dashboard.settleIndex')}</Text>
             <Text size="sm" c="teal.1" mt={4}>
               {groups.length === 0
-                ? 'Create a group and add an expense to start splitting.'
-                : `${settledCount} of ${groups.length} groups are settled. Open a group to pay the rest.`}
+                ? t('dashboard.settleHint')
+                : settledCount === groups.length
+                  ? t('dashboard.settleProgressAll', { total: groups.length })
+                  : t('dashboard.settleProgress', { settled: settledCount, total: groups.length })}
             </Text>
           </div>
         </section>
@@ -258,10 +281,10 @@ export function Dashboard() {
         <section className="dash-promo">
           <Text size="xs" fw={700} tt="uppercase" style={{ letterSpacing: '0.06em', opacity: 0.8 }}>SplitShare</Text>
           <div>
-            <Title order={3} c="white">Start a group</Title>
-            <Text size="sm" mt={4} c="teal.0">Invite people, split a receipt, and settle with the fewest transfers.</Text>
+            <Title order={3} c="white">{t('dashboard.promoTitle')}</Title>
+            <Text size="sm" mt={4} c="teal.0">{t('dashboard.promoBody')}</Text>
           </div>
-          <Button variant="white" color="dark" radius="xl" onClick={openWizard} leftSection={<NewGroupIcon />}>New group</Button>
+          <Button variant="white" color="dark" radius="xl" onClick={openWizard} leftSection={<NewGroupIcon />}>{t('dashboard.newGroup')}</Button>
         </section>
       </div>
       </>}
@@ -278,17 +301,17 @@ export function Dashboard() {
         onClose={() => setOpen(false)}
         closeOnClickOutside={false}
         title={created
-          ? <span className="wizard-sr">Group created</span>
-          : <span className="wizard-title-name">New group</span>}
+          ? <span className="wizard-sr">{t('wizard.groupCreated')}</span>
+          : <span className="wizard-title-name">{t('wizard.newGroup')}</span>}
         classNames={{
           content: 'wizard-modal-content',
           header: created ? 'wizard-modal-header is-done' : 'wizard-modal-header',
           body: 'wizard-modal-body',
           title: 'wizard-modal-title',
         }}
-        centered
+        centered={!isMobile || !!created}
         size={created ? 420 : 520}
-        radius={24}
+        radius={isMobile && !created ? 0 : 24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
         fullScreen={isMobile && !created}
@@ -309,14 +332,15 @@ function NewGroupIcon() {
 }
 
 function GroupsPage({ groups, ready, error, onCreate, nav }) {
+  const t = useT();
   return (
     <>
       <div className="dash-head">
         <div>
-          <Title order={2}>Groups</Title>
+          <Title order={2}>{t('groups.title')}</Title>
           <Text size="sm" c="dimmed">{ready ? `${groups.length} group${groups.length === 1 ? '' : 's'}` : '…'}</Text>
         </div>
-        <Button className="dash-cta" onClick={onCreate} leftSection={<NewGroupIcon />}>New group</Button>
+        <Button className="dash-cta" onClick={onCreate} leftSection={<NewGroupIcon />}>{t('dashboard.newGroup')}</Button>
       </div>
       <Err e={error} />
       {!ready && !error && (
@@ -329,8 +353,8 @@ function GroupsPage({ groups, ready, error, onCreate, nav }) {
       )}
       {ready && groups.length === 0 && (
         <div className="groups-empty">
-          <Text c="dimmed">No groups yet — create one to get started.</Text>
-          <Button variant="light" onClick={onCreate}>Create a group</Button>
+          <Text c="dimmed">{t('dashboard.noGroups')}</Text>
+          <Button variant="light" onClick={onCreate}>{t('dashboard.createGroup')}</Button>
         </div>
       )}
       {ready && groups.length > 0 && (
@@ -344,16 +368,32 @@ function GroupsPage({ groups, ready, error, onCreate, nav }) {
   );
 }
 
+/** True when the group still has open member balances (not personal net). */
+function groupNeedsSettlement(group) {
+  if (group?.needs_settlement != null) return !!group.needs_settlement;
+  // Older API builds: oldest_unsettled_at is set iff any member net ≠ 0.
+  if (group?.oldest_unsettled_at != null) return true;
+  return false;
+}
+
 function GroupTile({ group, onOpen }) {
-  const tone = group.net_cents < 0 ? 'owe' : group.net_cents > 0 ? 'owed' : 'settled';
-  const label = tone === 'owe' ? 'You owe' : tone === 'owed' ? "You're owed" : 'All settled';
-  const amount = tone === 'settled'
-    ? '0.00'
-    : (Math.abs(group.net_cents) / 100).toFixed(2);
+  const t = useT();
+  const needsSettlement = groupNeedsSettlement(group);
+  const tone = needsSettlement ? 'open' : 'settled';
+  const label = needsSettlement
+    ? t('settlement.statusOpen')
+    : t('settlement.statusSettled');
+  const personalTone = group.net_cents < 0 ? 'owe' : group.net_cents > 0 ? 'owed' : null;
+  const personalLabel = personalTone === 'owe'
+    ? t('net.youOwe', { amount: fmt(-group.net_cents, group.currency) })
+    : personalTone === 'owed'
+      ? t('net.youAreOwed', { amount: fmt(group.net_cents, group.currency) })
+      : null;
   const cover = group.cover_url || group.background_url || group.cover || null;
   const pastel = pastelFor(group.name);
   const members = Number(group.member_count) || 0;
   const isOwner = group.my_role === 'owner';
+  const spentCents = Number(group.spent_cents) || 0;
   return (
     <button
       type="button"
@@ -363,7 +403,7 @@ function GroupTile({ group, onOpen }) {
         '--gt-to': pastel.to,
         ...(cover ? { '--gt-cover': `url(${JSON.stringify(cover)})` } : {}),
       }}
-      aria-label={`View details for ${group.name}`}
+      aria-label={t('common.viewDetailsFor', { name: group.name })}
       onClick={onOpen}
     >
       <span className="group-hero">
@@ -371,23 +411,28 @@ function GroupTile({ group, onOpen }) {
         <span className="group-hero-scrim" aria-hidden />
         <span className="group-hero-top">
           <span className="group-meta">
-            {isOwner && <span className="group-owner">Owner</span>}
+            {isOwner && <span className="group-owner">{t('common.owner')}</span>}
             <span className="group-members">
-              {members} {members === 1 ? 'person' : 'people'}
+              {t('groupDetail.membersCount', {
+                count: members,
+                unit: members === 1 ? t('common.person') : t('common.people'),
+              })}
             </span>
-            <span className="group-currency">{group.currency}</span>
             {group.delinquent && <span className="group-flag">30d+</span>}
           </span>
         </span>
         <span className="group-hero-copy">
           <span className="group-name">{group.name}</span>
-          <span className={`group-status is-${tone}`}>{label}</span>
+          <span className={`net-chip is-${tone}`}>{label}</span>
+          {personalLabel && (
+            <span className={`group-personal is-${personalTone}`}>{personalLabel}</span>
+          )}
         </span>
       </span>
       <span className="group-foot">
         <span className="group-balance">
-          <span className="group-balance-currency">{group.currency}</span>
-          <span className="group-balance-value">{amount}</span>
+          <span className="group-balance-currency">{t('groups.totalSpend')}</span>
+          <span className="group-balance-value">{fmt(spentCents, group.currency)}</span>
         </span>
         <span className="group-go" aria-hidden>
           <ChevronRight size={16} label="" />
@@ -398,6 +443,7 @@ function GroupTile({ group, onOpen }) {
 }
 
 function HistoryCard({ groups, ready }) {
+  const t = useT();
   const nav = useNavigate();
   const [items, setItems] = useState(null);
   const key = groups.map((g) => g.group_id).join(',');
@@ -420,12 +466,12 @@ function HistoryCard({ groups, ready }) {
   return (
     <section className="dash-card dash-history">
       <Group justify="space-between" mb="sm" align="center">
-        <div className="dash-kicker">Activity</div>
-        <button type="button" className="splits-view-all" onClick={() => nav('/activity')}>View all</button>
+        <div className="dash-kicker">{t('dashboard.activity')}</div>
+        <button type="button" className="splits-view-all" onClick={() => nav('/activity')}>{t('common.viewAll')}</button>
       </Group>
       <div className="dash-history-list activity-list">
         {!items && <Skeleton height={88} radius="md" />}
-        {items && items.length === 0 && <Text size="sm" c="dimmed">No activity yet.</Text>}
+        {items && items.length === 0 && <Text size="sm" c="dimmed">{t('dashboard.noActivity')}</Text>}
         {items && items.map((a, i) => (
           <Link
             key={`${a.group_id}-${a.kind}-${a.at}-${i}`}
@@ -468,6 +514,7 @@ function activityPageTokens(current, total) {
 }
 
 function ActivityFeed({ groups, ready }) {
+  const t = useT();
   const nav = useNavigate();
   const [items, setItems] = useState(null);
   const [page, setPage] = useState(1);
@@ -503,25 +550,23 @@ function ActivityFeed({ groups, ready }) {
     <>
       <div className="dash-head">
         <div>
-          <Title order={2}>Activity</Title>
+          <Title order={2}>{t('activity.title')}</Title>
           <Text size="sm" c="dimmed">
-            {items
-              ? (total === 0
-                ? 'Latest updates across your groups'
-                : `${total} update${total === 1 ? '' : 's'} · ${ACTIVITY_PAGE_SIZE} per page`)
-              : 'Latest updates across your groups'}
+            {items && total > 0
+              ? t('activity.updatesPage', { count: total, size: ACTIVITY_PAGE_SIZE })
+              : t('activity.subtitle')}
           </Text>
         </div>
       </div>
       <div className="activity-panel">
         {!items && <Skeleton height={72} radius="md" />}
         {items && items.length === 0 && (
-          <Text c="dimmed" p="sm">Nothing yet. Add an expense in a group to see it here.</Text>
+          <Text c="dimmed" p="sm">{t('activity.empty')}</Text>
         )}
         {items && items.length > 0 && (
           <>
-            <div className="activity-pager" role="navigation" aria-label="Activity pages">
-              <span className="activity-pager-range">{from}–{to} of {total}</span>
+            <div className="activity-pager" role="navigation" aria-label={t('activity.pages')}>
+              <span className="activity-pager-range">{t('activity.range', { from, to, total })}</span>
               <div className="activity-pager-controls">
                 <button
                   type="button"
@@ -529,7 +574,7 @@ function ActivityFeed({ groups, ready }) {
                   disabled={safePage <= 1}
                   onClick={() => setPage((p) => Math.max(1, Math.min(p, totalPages) - 1))}
                 >
-                  Prev
+                  {t('common.prev')}
                 </button>
                 <button
                   type="button"
@@ -537,7 +582,7 @@ function ActivityFeed({ groups, ready }) {
                   disabled={safePage >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, Math.max(1, p) + 1))}
                 >
-                  Next
+                  {t('common.next')}
                 </button>
                 <div className="activity-pager-pages">
                   {activityPageTokens(safePage, totalPages).map((token, i) => (
@@ -585,14 +630,14 @@ function ActivityFeed({ groups, ready }) {
 
 function GroupWizard({
   step, setStep,
-  name, setName, cur, setCur, tpl, setTpl, create, cq, setCq, searchContacts,
+  name, setName, tpl, setTpl, create, cq, setCq, searchContacts,
   searching, contacts, picked, setPicked, emails, setEmails, creating, created, onOpenGroup,
-  currencies = [], templates = [],
+  templates = [],
 }) {
+  const t = useT();
   if (created) return <GroupCreated created={created} onOpenGroup={onOpenGroup} />;
   const nameOk = name.trim().length >= 3 && name.trim().length <= 50;
-  const currencyList = currencies.length ? currencies : [{ code: 'USD', name: 'US Dollar' }];
-  const templateOptions = templates.map((t) => ({ value: t.key, label: t.label }));
+  const templateOptions = templates.map((item) => ({ value: item.key, label: item.label }));
 
   const onSubmit = (ev) => {
     ev.preventDefault();
@@ -607,50 +652,39 @@ function GroupWizard({
   return (
     <form className="wizard-form" onSubmit={onSubmit}>
       {step === 1 && (
-        <section className="wizard-section">
-          <h3 className="wizard-section-title">Group details</h3>
+        <div className="wizard-fields">
           <TextInput
-            label="Group name"
-            placeholder="Trip to Alps"
+            label={t('wizard.groupName')}
+            placeholder={t('wizard.groupNamePh')}
             required
             maxLength={50}
             value={name}
             onChange={(x) => setName(x.target.value)}
           />
-          <div className="wizard-field">
-            <span className="wizard-label">Currency</span>
-            <div className="wizard-chips" role="radiogroup" aria-label="Currency">
-              {currencyList.map((c) => (
-                <button
-                  key={c.code}
-                  type="button"
-                  role="radio"
-                  className={cur === c.code ? 'wizard-chip is-on' : 'wizard-chip'}
-                  aria-checked={cur === c.code}
-                  onClick={() => setCur(c.code)}
-                >
-                  {c.code}
-                </button>
-              ))}
-            </div>
-          </div>
           <Select
-            label="Template"
-            placeholder="None"
+            label={t('wizard.template')}
+            placeholder={t('common.none')}
             clearable
             value={tpl || null}
             onChange={(v) => setTpl(v || '')}
             data={templateOptions}
             comboboxProps={{ withinPortal: true }}
           />
-        </section>
+        </div>
       )}
       {step === 2 && (
-        <section className="wizard-section">
-          <h3 className="wizard-section-title">Invite member</h3>
-          <Group gap="xs" align="flex-end" wrap="nowrap">
-            <TextInput label="Search contacts" placeholder="Name, username or email" value={cq} onChange={(x) => setCq(x.target.value)} style={{ flex: 1 }} />
-            <Button className="wizard-search" type="button" variant="default" onClick={searchContacts} loading={searching}>Search</Button>
+        <div className="wizard-fields">
+          <Group gap="xs" align="flex-end" wrap="nowrap" className="wizard-search-row">
+            <TextInput
+              label={t('wizard.searchContacts')}
+              placeholder={t('wizard.searchPh')}
+              value={cq}
+              onChange={(x) => setCq(x.target.value)}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+            <Button className="wizard-search" type="button" variant="default" onClick={searchContacts} loading={searching}>
+              {t('common.search')}
+            </Button>
           </Group>
           {contacts.length > 0 && (
             <Stack gap={8}>
@@ -667,22 +701,28 @@ function GroupWizard({
                       className={on ? 'wizard-chip is-on' : 'wizard-chip'}
                       onClick={() => setPicked(on ? picked.filter((p) => p.user_id !== c.user_id) : [...picked, c])}
                     >
-                      {on ? 'Added' : 'Add'}
+                      {on ? t('common.added') : t('common.add')}
                     </button>
                   </div>
                 );
               })}
             </Stack>
           )}
-          <Textarea label="Invite by email" placeholder="a@example.com, b@example.com" minRows={2} value={emails} onChange={(x) => setEmails(x.target.value)} />
-        </section>
+          <Textarea
+            label={t('wizard.inviteByEmail')}
+            placeholder={t('wizard.emailsPh')}
+            minRows={2}
+            value={emails}
+            onChange={(x) => setEmails(x.target.value)}
+          />
+        </div>
       )}
       {step === 1 ? (
-        <Button className="wizard-primary" fullWidth type="submit" disabled={!nameOk}>Continue</Button>
+        <Button className="wizard-primary" fullWidth type="submit" disabled={!nameOk}>{t('common.continue')}</Button>
       ) : (
-        <Group gap="sm" grow>
-          <Button className="wizard-back" type="button" onClick={() => setStep(1)} disabled={creating}>Back</Button>
-          <Button className="wizard-primary" type="submit" loading={creating} disabled={!nameOk}>Create group</Button>
+        <Group gap="sm" grow className="wizard-actions">
+          <Button className="wizard-back" type="button" onClick={() => setStep(1)} disabled={creating}>{t('common.back')}</Button>
+          <Button className="wizard-primary" type="submit" loading={creating} disabled={!nameOk}>{t('wizard.createGroup')}</Button>
         </Group>
       )}
     </form>
@@ -690,6 +730,7 @@ function GroupWizard({
 }
 
 function GroupCreated({ created, onOpenGroup }) {
+  const t = useT();
   return (
     <div className="wizard-success">
       <div className="wizard-happy" aria-hidden>
@@ -715,24 +756,40 @@ function GroupCreated({ created, onOpenGroup }) {
       {created.link && (
         <CopyButton value={created.link}>
           {({ copied, copy }) => (
-            <Button className="wizard-back" fullWidth onClick={copy}>{copied ? 'Copied' : 'Copy invite link'}</Button>
+            <Button className="wizard-back" fullWidth onClick={copy}>{copied ? t('common.copied') : t('wizard.copyInviteLink')}</Button>
           )}
         </CopyButton>
       )}
-      <Button className="wizard-primary" fullWidth onClick={onOpenGroup}>Open group</Button>
+      <Button className="wizard-primary" fullWidth onClick={onOpenGroup}>{t('wizard.openGroup')}</Button>
     </div>
   );
 }
 
-function Bars({ values, color }) {
-  const nums = (values || []).filter((n) => n > 0);
-  const src = nums.length ? nums : [6, 10, 8, 14];
-  const max = Math.max(...src, 1);
+function StatIconOwe() {
   return (
-    <div className="mini-bars" aria-hidden>
-      {src.map((v, i) => (
-        <span key={i} style={{ height: `${Math.max(18, (v / max) * 100)}%`, background: color }} />
-      ))}
-    </div>
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.75" />
+      <path d="M12 7v7m0 0l-3.2-3.2M12 14l3.2-3.2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function StatIconOwed() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.75" />
+      <path d="M12 17V10m0 0l-3.2 3.2M12 10l3.2 3.2" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function StatIconGroups() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+      <circle cx="9" cy="9" r="3.25" stroke="currentColor" strokeWidth="1.75" />
+      <circle cx="16.5" cy="10" r="2.5" stroke="currentColor" strokeWidth="1.75" />
+      <path d="M3.75 18.25c.7-2.4 2.7-3.75 5.25-3.75s4.55 1.35 5.25 3.75" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+      <path d="M14.4 14.7c1.05-.55 2.3-.8 3.6-.55 1.7.35 2.95 1.45 3.5 3.1" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
   );
 }

@@ -1,22 +1,74 @@
 import { useEffect, useState } from 'react';
 import {
-  Accordion, Alert, Button, Group, List, Select, Skeleton, Spoiler, Stack, Table, Text,
+  ActionIcon, Alert, Button, Group, Modal, Select, Skeleton, Spoiler, Stack, Text,
 } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { displayNameOf } from './Net.jsx';
+import { useT } from '../prefs.jsx';
 
-// Collapsible settlement explanation (spec §5/Why-box). Collapsed by default.
-export function SettlementBox({ groupId, currency, members, onPay }) {
-  const [plan, setPlan] = useState(null);
+function InfoIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 11v5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="12" cy="8" r="1.1" fill="currentColor" />
+    </svg>
+  );
+}
+
+function StatusGlyph({ settled }) {
+  if (settled) {
+    return (
+      <span className="report-status-glyph is-settled" aria-hidden>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M7.5 12.5 10.5 15.5 16.5 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+    );
+  }
+  return (
+    <span className="report-status-glyph is-open" aria-hidden>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
+        <path d="M12 7.5v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="12" cy="16.5" r="1.15" fill="currentColor" />
+      </svg>
+    </span>
+  );
+}
+
+function formatWhen(iso) {
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+/** Status card + detail dialog — first card of the Report section. */
+export function SettlementBox({ groupId, currency, members, onPay, plan: planProp = null }) {
+  const t = useT();
+  const [plan, setPlan] = useState(planProp);
   const [hist, setHist] = useState([]);
   const [viewV, setViewV] = useState(null);
   const [payments, setPayments] = useState([]);
+  const [open, setOpen] = useState(false);
   const [e, setE] = useState(null);
 
-  const load = () => api.get(`/api/v1/groups/${groupId}/settlement`).then((p) => { setPlan(p); setViewV(null); }).catch(setE);
-  useEffect(() => { load(); }, [groupId]);
-  // Completed-transfer history: kept forever, shown even when fully settled.
+  const load = () => api.get(`/api/v1/groups/${groupId}/settlement`)
+    .then((p) => { setPlan(p); setViewV(null); setE(null); })
+    .catch(setE);
+
+  useEffect(() => {
+    if (planProp) { setPlan(planProp); return; }
+    load();
+  }, [groupId, planProp]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     api.get(`/api/v1/groups/${groupId}/ledger?type=payment&limit=100`)
       .then((r) => setPayments(r.items || [])).catch(() => {});
@@ -26,109 +78,233 @@ export function SettlementBox({ groupId, currency, members, onPay }) {
     try { setHist(await api.get(`/api/v1/groups/${groupId}/settlement/history`)); }
     catch (err) { setE(err); }
   };
-  const view = viewV ? hist.find((h) => h.version === viewV) : plan;
-  if (!view && !e) return <Skeleton height={52} radius="md" />;
 
+  if (!plan && !e) {
+    return <Skeleton height={96} radius="lg" className="report-metric report-status-card" />;
+  }
+
+  const view = viewV ? hist.find((h) => h.version === viewV) : plan;
   const ex = view?.explanation || {};
   const transfers = view?.transfers || [];
   const historical = viewV !== null;
-  const head = transfers.length === 0
-    ? 'All settled — nets all $0.00'
-    : `Optimized: ${ex.raw_debts ?? '?'} debts → ${transfers.length} transfers (saved ${ex.saved ?? '?'}) • v${view?.version} • Why?`;
+  const settled = transfers.length === 0;
+  const tone = settled ? 'settled' : 'open';
+
+  const statusTitle = settled
+    ? t('settlement.statusSettled')
+    : t('settlement.statusOpen');
+  const subtitle = settled
+    ? t('settlement.statusSettledHint')
+    : t('settlement.statusOpenHint', {
+      n: transfers.length,
+      saved: ex.saved ?? '—',
+    });
+
+  const netEntries = Object.entries(ex.before_nets || {});
+  const balanceRows = netEntries.length > 0
+    ? netEntries.map(([uid, cents]) => ({
+      id: uid,
+      name: displayNameOf(members, uid),
+      cents,
+    }))
+    : (members || []).map((m) => ({
+      id: m.user_id,
+      name: m.display_name,
+      cents: 0,
+    }));
 
   return (
-    <Accordion
-      variant="separated"
-      radius="md"
-      styles={{ item: { borderColor: transfers.length > 0 ? 'var(--mantine-color-teal-3)' : undefined } }}
-    >
-      <Accordion.Item value="plan">
-        <Accordion.Control aria-expanded={undefined}>{head}</Accordion.Control>
-        <Accordion.Panel>
-          <Stack gap="sm">
+    <>
+      <section className={`report-metric report-status-card is-${tone}`}>
+        <div className="report-status-row">
+          <StatusGlyph settled={settled} />
+          <div className="report-status-copy">
+            <span className="report-status-title">{statusTitle}</span>
+            <p className="report-status-sub">{subtitle}</p>
+          </div>
+          <ActionIcon
+            className="report-status-info"
+            variant="subtle"
+            radius="xl"
+            size="md"
+            aria-label={t('settlement.viewDetails')}
+            title={t('settlement.viewDetails')}
+            onClick={() => setOpen(true)}
+          >
+            <InfoIcon />
+          </ActionIcon>
+        </div>
+      </section>
+
+      <Modal
+        opened={open}
+        onClose={() => setOpen(false)}
+        title={<span className="wizard-title-name">{t('settlement.detailTitle')}</span>}
+        centered
+        size="lg"
+        classNames={{ content: 'wizard-modal-content settle-modal', header: 'wizard-modal-header' }}
+      >
+        {!view ? (
+          <Err e={e} />
+        ) : (
+          <div className="settle-detail">
             {historical && (
-              <Alert color="yellow" variant="light">
-                Historical plan v{viewV} — read-only, not actionable.
+              <Alert color="yellow" variant="light" mb="sm">
+                {t('settlement.historical', { version: viewV })}
               </Alert>
             )}
-            <Text fw={600} size="sm">Net balances before</Text>
-            <Table striped highlightOnHover withTableBorder>
-              <Table.Tbody>
-                {Object.entries(ex.before_nets || {}).map(([id, v]) => (
-                  <Table.Tr key={id}>
-                    <Table.Td>{displayNameOf(members, id)}</Table.Td>
-                    <Table.Td>{fmt(v, currency)}</Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-            <Text fw={600} size="sm">Steps</Text>
-            <List size="sm" spacing="xs" type="ordered">
-              {(ex.steps || []).map((s, i) => <List.Item key={i}>{s}</List.Item>)}
-            </List>
-            <Text fw={600} size="sm">Final transfers</Text>
-            <Stack gap="xs">
-              {transfers.map((t, i) => (
-                <Group
-                  key={i}
-                  justify="space-between"
-                  wrap="nowrap"
-                  p="xs"
-                  style={{ background: 'var(--mantine-color-gray-0)', borderRadius: 'var(--mantine-radius-md)' }}
-                >
-                  <Text size="sm">
-                    <b>{displayNameOf(members, t.from_user_id)} → {displayNameOf(members, t.to_user_id)}</b>{' '}
-                    {fmt(t.amount_cents, currency)}
-                  </Text>
-                  {!historical && (
-                    <Button size="xs" variant="filled" color="teal" onClick={() => onPay(t)}>Pay</Button>
-                  )}
-                </Group>
-              ))}
-              {transfers.length === 0 && (
-                <Text size="sm" c="dimmed">All settled — nets $0.00 🎉</Text>
+
+            <div className={`settle-hero is-${tone}`}>
+              <StatusGlyph settled={settled} />
+              <div className="settle-hero-copy">
+                <span className={`net-chip is-${settled ? 'settled' : 'owe'}`}>
+                  {settled ? t('net.settledUp') : t('settlement.needsAction')}
+                </span>
+                <p className="settle-hero-sub">{subtitle}</p>
+              </div>
+            </div>
+
+            <section className="settle-block">
+              <h4 className="settle-block-title">{t('settlement.netBalances')}</h4>
+              {balanceRows.length === 0 ? (
+                <p className="settle-empty">{t('settlement.noNets')}</p>
+              ) : (
+                <ul className="settle-balance-list">
+                  {balanceRows.map((row) => {
+                    const toneNet = row.cents === 0 ? 'settled' : row.cents < 0 ? 'owe' : 'owed';
+                    return (
+                      <li key={row.id} className="settle-balance-row">
+                        <span className="settle-balance-name">{row.name}</span>
+                        <span className={`settle-balance-amt is-${toneNet}`}>
+                          {row.cents === 0 ? t('common.settled') : fmt(row.cents, currency)}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
-            </Stack>
-            <Text size="xs" c="dimmed">v{view.version} · {view.computed_at} · {view.inputs_hash}</Text>
-            <Text fw={600} size="sm" mt="sm">Completed transfers ({payments.length})</Text>
-            {payments.length === 0 ? (
-              <Text size="sm" c="dimmed">No transfers recorded yet.</Text>
-            ) : (
-              <List size="sm" spacing="xs">
-                {payments.map((p) => (
-                  <List.Item key={p.id}>
-                    {p.from_name || displayNameOf(members, p.from_user_id)} → {p.to_name || displayNameOf(members, p.to_user_id)}:{' '}
-                    <b>{fmt(p.amount_cents, currency)}</b>{' '}
-                    <Text span size="xs" c="dimmed">
-                      {new Date(p.created_at).toLocaleString()}{p.reversed ? ' · reversed' : ''}{p.status === 'LOCKED' ? ' · settled' : ''}
-                    </Text>
-                  </List.Item>
-                ))}
-              </List>
+            </section>
+
+            <section className="settle-block">
+              <h4 className="settle-block-title">{t('settlement.finalTransfers')}</h4>
+              {transfers.length === 0 ? (
+                <p className="settle-empty">{t('settlement.allSettledHint')}</p>
+              ) : (
+                <ul className="settle-xfer-list">
+                  {transfers.map((xfer, i) => (
+                    <li key={i} className="settle-xfer-row">
+                      <div className="settle-xfer-main">
+                        <span className="settle-xfer-people">
+                          {displayNameOf(members, xfer.from_user_id)}
+                          <span className="settle-xfer-arrow" aria-hidden>→</span>
+                          {displayNameOf(members, xfer.to_user_id)}
+                        </span>
+                        <span className="settle-xfer-amt">{fmt(xfer.amount_cents, currency)}</span>
+                      </div>
+                      {!historical && onPay && (
+                        <Button
+                          size="xs"
+                          variant="filled"
+                          color="teal"
+                          onClick={() => { onPay(xfer); setOpen(false); }}
+                        >
+                          {t('groupDetail.pay')}
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section className="settle-block">
+              <h4 className="settle-block-title">
+                {t('settlement.completed', { count: payments.length })}
+              </h4>
+              {payments.length === 0 ? (
+                <p className="settle-empty">{t('settlement.noTransfers')}</p>
+              ) : (
+                <ul className="settle-pay-list">
+                  {payments.map((p) => (
+                    <li key={p.id} className="settle-pay-row">
+                      <div className="settle-pay-main">
+                        <span className="settle-pay-people">
+                          {p.from_name || displayNameOf(members, p.from_user_id)}
+                          <span className="settle-xfer-arrow" aria-hidden>→</span>
+                          {p.to_name || displayNameOf(members, p.to_user_id)}
+                        </span>
+                        <span className="settle-pay-amt">{fmt(p.amount_cents, currency)}</span>
+                      </div>
+                      <div className="settle-pay-meta">
+                        <span>{formatWhen(p.created_at)}</span>
+                        {p.reversed && <span className="settle-pay-tag is-rev">{t('settlement.reversed')}</span>}
+                        {!p.reversed && String(p.status).toUpperCase() === 'LOCKED' && (
+                          <span className="settle-pay-tag is-ok">{t('common.settled')}</span>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {(ex.steps || []).length > 0 && (
+              <Spoiler
+                className="settle-spoiler"
+                maxHeight={0}
+                showLabel={t('settlement.steps')}
+                hideLabel={t('settlement.hide')}
+              >
+                <ol className="settle-steps">
+                  {(ex.steps || []).map((step, i) => <li key={i}>{step}</li>)}
+                </ol>
+              </Spoiler>
             )}
-            <Spoiler maxHeight={0} showLabel="View raw debts (unoptimized)" hideLabel="Hide">
+
+            <Spoiler
+              className="settle-spoiler"
+              maxHeight={0}
+              showLabel={t('settlement.viewRaw')}
+              hideLabel={t('settlement.hide')}
+            >
               <Text size="sm" c="dimmed">
-                Raw view: {ex.raw_debts} participant-share debts collapsed into {transfers.length} transfers.
+                {t('settlement.rawHint', {
+                  raw: ex.raw_debts ?? '—',
+                  n: transfers.length,
+                })}
               </Text>
             </Spoiler>
-            <Group gap="xs">
-              <Button size="xs" variant="default" onClick={loadHist}>History</Button>
-              <Button size="xs" variant="default" onClick={load}>Refresh</Button>
-              {hist.length > 0 && (
-                <Select
-                  size="xs"
-                  placeholder="current"
-                  clearable
-                  value={viewV ? String(viewV) : null}
-                  onChange={(v) => setViewV(v ? Number(v) : null)}
-                  data={hist.map((h) => ({ value: String(h.version), label: `v${h.version} · ${h.computed_at}` }))}
-                />
-              )}
-            </Group>
+
+            <div className="settle-footer">
+              <Group gap="xs">
+                <Button size="xs" variant="default" radius="xl" onClick={loadHist}>
+                  {t('settlement.history')}
+                </Button>
+                <Button size="xs" variant="default" radius="xl" onClick={load}>
+                  {t('common.refresh')}
+                </Button>
+                {hist.length > 0 && (
+                  <Select
+                    size="xs"
+                    placeholder={t('settlement.current')}
+                    clearable
+                    value={viewV ? String(viewV) : null}
+                    onChange={(v) => setViewV(v ? Number(v) : null)}
+                    data={hist.map((h) => ({
+                      value: String(h.version),
+                      label: `v${h.version} · ${formatWhen(h.computed_at)}`,
+                    }))}
+                  />
+                )}
+              </Group>
+              <Text size="xs" c="dimmed" className="settle-version">
+                v{view.version} · {formatWhen(view.computed_at)}
+              </Text>
+            </div>
             <Err e={e} />
-          </Stack>
-        </Accordion.Panel>
-      </Accordion.Item>
-    </Accordion>
+          </div>
+        )}
+      </Modal>
+    </>
   );
 }

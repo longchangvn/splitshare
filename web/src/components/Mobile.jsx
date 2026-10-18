@@ -1,5 +1,6 @@
 import { Box, Card, Group, Menu, Stack, Table, Text, ActionIcon } from '@mantine/core';
 import { fmt } from '../api.js';
+import { useT } from '../prefs.jsx';
 
 // Shared ⋯ row menu (mobile-simplify quiet rows): one pattern for
 // payment reverse, recurring pause/delete, debtor details.
@@ -15,7 +16,10 @@ export function RowMenu({ label, children }) {
 }
 
 // Dual-render name/value list: cards on mobile, table on desktop. Same data.
-export function NameValueList({ rows, totalLabel = 'Total', total, currency, emptyText }) {
+export function NameValueList({ rows, totalLabel, total, currency, emptyText }) {
+  const t = useT();
+  const empty = emptyText ?? t('mobile.nothingYet');
+  const totalLbl = totalLabel ?? t('common.total');
   return (
     <>
       <Box hiddenFrom="sm">
@@ -28,11 +32,11 @@ export function NameValueList({ rows, totalLabel = 'Total', total, currency, emp
               </Group>
             </Card>
           ))}
-          {rows.length === 0 && <Text size="sm" c="dimmed">{emptyText || 'Nothing yet.'}</Text>}
+          {rows.length === 0 && <Text size="sm" c="dimmed">{empty}</Text>}
           {total != null && (
             <Card withBorder radius="md" padding="sm">
               <Group justify="space-between">
-                <Text size="sm" fw={600}>{totalLabel}</Text>
+                <Text size="sm" fw={600}>{totalLbl}</Text>
                 <Text size="sm" fw={600}>{fmt(total, currency)}</Text>
               </Group>
             </Card>
@@ -52,7 +56,7 @@ export function NameValueList({ rows, totalLabel = 'Total', total, currency, emp
           {total != null && (
             <Table.Tfoot>
               <Table.Tr>
-                <Table.Td><Text size="sm" fw={600}>{totalLabel}</Text></Table.Td>
+                <Table.Td><Text size="sm" fw={600}>{totalLbl}</Text></Table.Td>
                 <Table.Td><Text size="sm" fw={600}>{fmt(total, currency)}</Text></Table.Td>
               </Table.Tr>
             </Table.Tfoot>
