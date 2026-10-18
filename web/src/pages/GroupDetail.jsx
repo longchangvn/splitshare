@@ -690,7 +690,6 @@ export function GroupDetail() {
                 <button type="button" onClick={delGroup}>
                   <GdActionIcon name="trash" />
                   <span>{t('groupDetail.deleteGroup')}</span>
-                  <span className="gd-action-owner">{t('common.owner')}</span>
                 </button>
               )}
             </div>
@@ -1515,7 +1514,7 @@ export function GroupDetail() {
         closeOnClickOutside={!leaveBusy}
         title={<span className="wizard-title-name">{t('groupDetail.leaveGroup')}</span>}
         classNames={{
-          content: 'wizard-modal-content',
+          content: 'wizard-modal-content group-danger-confirm-modal',
           header: 'wizard-modal-header',
           body: 'wizard-modal-body',
           title: 'wizard-modal-title',
@@ -1549,7 +1548,7 @@ export function GroupDetail() {
         closeOnClickOutside={!deleteBusy}
         title={<span className="wizard-title-name">{t('groupDetail.deleteGroup')}</span>}
         classNames={{
-          content: 'wizard-modal-content',
+          content: 'wizard-modal-content group-danger-confirm-modal',
           header: 'wizard-modal-header',
           body: 'wizard-modal-body',
           title: 'wizard-modal-title',
@@ -1599,7 +1598,6 @@ export function GroupDetail() {
         radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile}
       >
         <div className="wizard-form invite-dialog">
           <Tabs
