@@ -78,6 +78,15 @@ async function reqAuth(method, path, body, extra = {}) {
   }
 }
 
+// Raw fetch for non-JSON payloads (image blobs, CSV export). Applies the
+// same API base as req() — relative /api paths break on Azure Static Web
+// Apps, where navigationFallback answers them with index.html at 200.
+export async function apiBlob(path, init = {}) {
+  const headers = { ...(init.headers || {}) };
+  if (getAccess()) headers.Authorization = `Bearer ${getAccess()}`;
+  return fetch(BASE + path, { ...init, headers });
+}
+
 export const api = {
   get: (p) => reqAuth('GET', p),
   post: (p, b) => reqAuth('POST', p, b ?? {}),

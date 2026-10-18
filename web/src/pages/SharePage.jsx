@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Anchor, Card, Container, List, Stack, Table, Text, Title } from '@mantine/core';
-import { fmt } from '../api.js';
+import { apiBlob, fmt } from '../api.js';
 
 // Public read-only trip page. No login, no emails, no handles.
 export function SharePage() {
@@ -10,7 +10,7 @@ export function SharePage() {
   const [err, setErr] = useState(null);
 
   useEffect(() => {
-    fetch(`/api/v1/shared/${token}`).then(async (r) => {
+    apiBlob(`/api/v1/shared/${token}`).then(async (r) => {
       const j = await r.json();
       if (!r.ok) throw new Error(j.message || 'Invalid link');
       setD(j);

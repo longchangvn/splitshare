@@ -23,7 +23,9 @@ export default function App() {
           <Route path="/reset/:token" element={<Reset />} />
           <Route path="/verify/:token" element={<Verify />} />
           <Route path="/s/:token" element={<SharePage />} />
-          <Route path="/g/:token" element={<Guard><JoinPage /></Guard>} />
+          {/* Public route: anonymous visitors get an invite landing with
+              return-to auth links; authed visitors join automatically. */}
+          <Route path="/g/:token" element={<JoinPage />} />
           <Route path="/profile" element={<Guard><Profile /></Guard>} />
           <Route path="/settings" element={<Guard><Settings /></Guard>} />
           <Route path="/groups/:id/invite" element={<Guard><InvitePage /></Guard>} />

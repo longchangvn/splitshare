@@ -54,6 +54,9 @@ jobs:
       - name: Provision Azure resources & deploy API
         env:
           JWT_KEY_SECRET: ${{ secrets.SPLITSHARE_JWT_KEY }}
+          # Google login audience. Must match the VITE_GOOGLE_CLIENT_ID that
+          # cd-web.yml bakes into the SPA, or token verification fails.
+          GOOGLE_CLIENT_ID_SECRET: ${{ secrets.SPLITSHARE_GOOGLE_CLIENT_ID }}
         run: |
           set -euo pipefail
 
@@ -205,6 +208,28 @@ jobs:
           fi
           echo "::add-mask::$JWT_KEY"
 
+          # Google OAuth audience for /auth/google (see api/Auth/GoogleVerifier.cs).
+          # Must be identical to the VITE_GOOGLE_CLIENT_ID that cd-web.yml bakes
+          # into the SPA, otherwise the token is rejected as the wrong audience.
+          # Prefer the GitHub secret; otherwise keep what's already configured so
+          # a re-run without the secret set doesn't silently disable Google login.
+          GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID_SECRET"
+          if [ -z "$GOOGLE_CLIENT_ID" ]; then
+            EXISTING_GCID=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+              --query "properties.template.containers[0].env[?name=='Auth__GoogleClientId'].value | [0]" \
+              -o tsv 2>/dev/null || true)
+            if [ -n "${EXISTING_GCID:-}" ] && [ "$EXISTING_GCID" != "null" ]; then
+              GOOGLE_CLIENT_ID="$EXISTING_GCID"
+              echo "Reusing the Auth__GoogleClientId already configured on '$CA_NAME'."
+            else
+              echo "::warning::SPLITSHARE_GOOGLE_CLIENT_ID secret is not set — Google login stays disabled (POST /auth/google returns 'Auth:GoogleClientId not configured')."
+            fi
+          fi
+          if [ -n "$GOOGLE_CLIENT_ID" ]; then
+            echo "::add-mask::$GOOGLE_CLIENT_ID"
+            echo "Google client ID configured (audience for ID tokens)."
+          fi
+
           echo "=== 6/7 Container app: $CA_NAME ==="
           # CORS origin: allow the SWA origin if the SWA exists (best effort;
           # cd-web.yml sets it right after creating/verifying the SWA).
@@ -216,6 +241,18 @@ jobs:
             echo "Will allow origin: $SWA_CORS"
           else
             echo "Static Web App '$SWA_NAME' not found yet — skipping CORS origin (cd-web.yml will set it)."
+          fi
+
+          # App__BaseUrl drives invite/share links (App:BaseUrl, web origin).
+          # Repo var wins (custom domains); else the SWA default hostname.
+          WEB_BASE="${{ vars.SPLITSHARE_WEB_BASE_URL }}"
+          if [ -z "$WEB_BASE" ] && [ -n "${SWA_HOST:-}" ] && [ "$SWA_HOST" != "None" ]; then
+            WEB_BASE="https://$SWA_HOST"
+          fi
+          if [ -n "$WEB_BASE" ]; then
+            echo "Invite/share links will use: $WEB_BASE"
+          else
+            echo "::warning::Web base URL unknown (no SPLITSHARE_WEB_BASE_URL var; SWA '$SWA_NAME' not found) — App__BaseUrl skipped; links keep the localhost default until a later run."
           fi
 
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
@@ -233,6 +270,8 @@ jobs:
               --arg asp "$ASPNET_ENV" \
               --arg jwt "$JWT_KEY" \
               --arg cors "$SWA_CORS" \
+              --arg gcid "$GOOGLE_CLIENT_ID" \
+              --arg base "$WEB_BASE" \
               '
               del(.properties.provisioningState,
                   .properties.runningStatus,
@@ -253,14 +292,21 @@ jobs:
                         and .name != "Database__Provider"
                         and .name != "Jwt__Key"
                         and .name != "Uploads__Path"
-                        and (if $cors == "" then true else .name != "Cors__AllowedOrigins__0" end))))
+                        # Strip and re-add from $gcid so this list stays the
+                        # single source of truth (no duplicate entries when a
+                        # key was already present on the container).
+                        and .name != "Auth__GoogleClientId"
+                        and (if $cors == "" then true else .name != "Cors__AllowedOrigins__0" end)
+                        and (if $base == "" then true else .name != "App__BaseUrl" end))))
                   + [
                       {name: "ASPNETCORE_ENVIRONMENT", value: $asp},
                       {name: "Database__Provider", value: "sqlserver"},
                       {name: "Jwt__Key", value: $jwt},
                       {name: "Uploads__Path", value: "/data/uploads"}
                     ]
+                  + (if $gcid == "" then [] else [{name: "Auth__GoogleClientId", value: $gcid}] end)
                   + (if $cors == "" then [] else [{name: "Cors__AllowedOrigins__0", value: $cors}] end)
+                  + (if $base == "" then [] else [{name: "App__BaseUrl", value: $base}] end)
                 )
               | .properties.configuration.ingress = ((.properties.configuration.ingress // {})
                   * {external: true, targetPort: 8080, transport: "http", allowInsecure: false})
@@ -296,8 +342,14 @@ jobs:
               "Jwt__Key=$JWT_KEY"
               "Uploads__Path=/data/uploads"
             )
+            if [ -n "$GOOGLE_CLIENT_ID" ]; then
+              ENV_ARGS+=("Auth__GoogleClientId=$GOOGLE_CLIENT_ID")
+            fi
             if [ -n "$SWA_CORS" ]; then
               ENV_ARGS+=("Cors__AllowedOrigins__0=$SWA_CORS")
+            fi
+            if [ -n "$WEB_BASE" ]; then
+              ENV_ARGS+=("App__BaseUrl=$WEB_BASE")
             fi
             az containerapp create \
               --name "$CA_NAME" --resource-group "$RG" \

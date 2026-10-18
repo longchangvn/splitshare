@@ -1,11 +1,18 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Anchor, Button, PasswordInput, Stack, Text, TextInput, Title,
 } from '@mantine/core';
 import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
 import { BrandMark } from '../components/Shell.jsx';
+
+// Sanitized in-app destination from ?next= (same-origin path only).
+const safeNext = (search) => {
+  const n = new URLSearchParams(search).get('next');
+  return n && n.startsWith('/') && !n.startsWith('//') ? n : null;
+};
+const withNext = (path, next) => (next ? `${path}?next=${encodeURIComponent(next)}` : path);
 
 function AuthBrand() {
   return (
@@ -87,6 +94,8 @@ function AuthActionIcon({ name }) {
 export function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
+  const location = useLocation();
+  const next = safeNext(location.search);
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [e, setE] = useState(null);
@@ -95,7 +104,7 @@ export function Login() {
     ev.preventDefault();
     if (busy) return;
     setBusy(true);
-    try { await login(id, pw); nav('/'); } catch (err) { setE(err); } finally { setBusy(false); }
+    try { await login(id, pw); nav(next || '/'); } catch (err) { setE(err); } finally { setBusy(false); }
   };
   return (
     <AuthLayout>
@@ -128,9 +137,9 @@ export function Login() {
           </Stack>
         </form>
         <Err e={e} />
-        <GoogleBtn />
+        <GoogleBtn next={next} />
         <Text ta="center" size="sm" className="auth-links">
-          <Anchor component={Link} to="/register">Register</Anchor>
+          <Anchor component={Link} to={withNext('/register', next)}>Register</Anchor>
           <span aria-hidden>·</span>
           <Anchor component={Link} to="/forgot">Forgot password?</Anchor>
         </Text>
@@ -142,6 +151,8 @@ export function Login() {
 export function Register() {
   const { register } = useAuth();
   const nav = useNavigate();
+  const location = useLocation();
+  const next = safeNext(location.search);
   const [f, setF] = useState({ username: '', email: '', display_name: '', password: '' });
   const [e, setE] = useState(null);
   const [done, setDone] = useState(null);
@@ -153,7 +164,7 @@ export function Register() {
     try {
       const d = await register(f.username, f.email, f.display_name, f.password);
       setDone(d);
-      nav('/');
+      nav(next || '/');
     } catch (err) { setE(err); } finally { setBusy(false); }
   };
   const set = (k) => (x) => setF({ ...f, [k]: x.target.value });
@@ -178,14 +189,14 @@ export function Register() {
           <Text size="sm">Auto-joined {done.auto_joined_groups.length} group(s) from email invites.</Text>
         )}
         <Text ta="center" size="sm" className="auth-links">
-          <Anchor component={Link} to="/login">Back to login</Anchor>
+          <Anchor component={Link} to={withNext('/login', next)}>Back to login</Anchor>
         </Text>
       </Stack>
     </AuthLayout>
   );
 }
 
-function GoogleBtn() {
+function GoogleBtn({ next }) {
   const { setUser } = useAuth();
   const nav = useNavigate();
   const [e, setE] = useState(null);
@@ -200,7 +211,7 @@ function GoogleBtn() {
           const d = await api.post('/api/v1/auth/google', { id_token: resp.credential });
           setTokens(d.access_token, d.refresh_token);
           setUser(d.user);
-          nav('/');
+          nav(next || '/');
         } catch (err) { setE(err); }
       },
     });

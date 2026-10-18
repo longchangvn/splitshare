@@ -7,7 +7,7 @@ import {
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { api, fmt } from '../api.js';
+import { api, apiBlob, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, Net, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
@@ -284,8 +284,7 @@ export function GroupDetail() {
   };
   const exportCsv = async () => {
     try {
-      const r = await fetch(`/api/v1/groups/${id}/export.csv`,
-        { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
+      const r = await apiBlob(`/api/v1/groups/${id}/export.csv`);
       if (!r.ok) throw new Error(`export ${r.status}`);
       const blob = await r.blob();
       const url = URL.createObjectURL(blob);

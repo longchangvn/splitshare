@@ -148,8 +148,10 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         if (g is null) return new(false, "INVITE_ROTATED", "Invite invalid or rotated.");
         var user = await db.Users.FindAsync(userId);
         if (user is null) return new(false, "UNAUTH", "Not authenticated.");
-        if (user.EmailVerifiedAt is null)
-            return new(false, "FORBIDDEN", "Verify your email before joining groups.");
+        // Invite-token possession is the authorization: the link never expires
+        // (only a deliberate owner rotate kills it), and register-time auto-join
+        // of email invites has no verification gate either — so joining via the
+        // link must not require a verified email (it is undeliverable in prod).
         if (await db.GroupMembers.FindAsync(g.Id, userId) is not null)
             return new(true, null, null, new JoinedGroup(g.Id, true));
         if (await db.GroupMembers.CountAsync(m => m.GroupId == g.Id) >= MaxMembers)

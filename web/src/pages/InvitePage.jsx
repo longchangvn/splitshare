@@ -27,6 +27,11 @@ export function InvitePage() {
     api.get(`/api/v1/groups/${id}`).then(setDetail).catch(setE);
   }, [id]);
 
+  // Show the existing stable link (owner/treasurer only) without rotating.
+  useEffect(() => {
+    if (detail?.invite_link) setLink(detail.invite_link);
+  }, [detail]);
+
   const inviteMany = async (ev) => {
     ev.preventDefault();
     const list = emails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);

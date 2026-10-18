@@ -157,6 +157,7 @@ app.MapGet("/db-ping", async (AppDbContext db) =>
 var v1 = app.MapGroup("/api/v1");
 v1.MapGet("/health", () => Results.Ok(new { status = "ok", service = "splitshare-api", time = DateTime.UtcNow }));
 AuthEndpoints.Map(v1); // public: auth/* (rate-limited)
+GroupEndpoints.MapPublic(v1); // public: invite preview for /g/:token landing (anonymous)
 TripPackEndpoints.MapPublic(v1); // public: capabilities + shared links (anonymous)
 
 var api = v1.MapGroup("/").RequireAuthorization(); // everything else needs JWT (task 3.4)

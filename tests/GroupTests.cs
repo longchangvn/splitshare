@@ -117,7 +117,7 @@ public sealed class GroupTests
     }
 
     [Fact]
-    public async Task SoleOwner_CannotLeave_And_JoinRequiresVerifiedEmail()
+    public async Task SoleOwner_CannotLeave_And_JoinNeedsNoVerification()
     {
         var (db, auth, groups) = Setup();
         var a = await Reg(auth, "ga5");
@@ -127,10 +127,11 @@ public sealed class GroupTests
         Assert.Equal("VALIDATION", leave.ErrorCode);
 
         var b = await Reg(auth, "gb5");
-        // unverified email blocks join
+        // token-possession join works for unverified emails (links are undeliverable in prod)
         var token = ((Group)db.Groups.Find(gid)!).InviteToken;
-        var denied = await groups.JoinByTokenAsync(b.Id, token);
-        Assert.Equal("FORBIDDEN", denied.ErrorCode);
+        var joined = await groups.JoinByTokenAsync(b.Id, token);
+        Assert.True(joined.Ok);
+        Assert.True(await db.GroupMembers.FindAsync(gid, b.Id) is not null);
         // stale token rejected
         var stale = await groups.JoinByTokenAsync(b.Id, "nope");
         Assert.Equal("INVITE_ROTATED", stale.ErrorCode);

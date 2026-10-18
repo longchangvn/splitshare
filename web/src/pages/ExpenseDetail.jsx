@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Badge, Button, Card, Code, Group, Image, List, Stack,
+  Anchor, Badge, Button, Card, Center, Code, Group, Image, List, Loader, Stack,
   Text, TextInput, Title,
 } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { api, fmt } from '../api.js';
-import { Err } from '../auth.jsx';
+import { api, apiBlob, fmt } from '../api.js';
+import { Err, useAuth } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { displayNameOf } from '../components/Net.jsx';
 import { ExpenseForm } from '../components/Forms.jsx';
@@ -248,18 +248,23 @@ function Comments({ eid, members }) {
 function ImgView({ id, mime, size }) {
   const [url, setUrl] = useState(null);
   const [err, setErr] = useState(null);
+  const urlRef = useRef(null);
   useEffect(() => {
     let live = true;
     (async () => {
       try {
-        const r = await fetch(`/api/v1/images/${id}`,
-          { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
+        const r = await apiBlob(`/api/v1/images/${id}`);
         if (!r.ok) { if (live) setErr(`load failed (${r.status})`); return; }
         const blob = await r.blob();
-        if (live) setUrl(URL.createObjectURL(blob));
+        if (live) { urlRef.current = URL.createObjectURL(blob); setUrl(urlRef.current); }
       } catch (e) { if (live) setErr(String(e?.message || e)); }
     })();
-    return () => { live = false; if (url) URL.revokeObjectURL(url); };
+    return () => {
+      live = false;
+      // Revoke via ref: the closure captures the initial null state, so the
+      // object URL created above would otherwise leak on unmount.
+      urlRef.current && URL.revokeObjectURL(urlRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   if (err) return <Text size="xs" c="red">{mime} {(size / 1024).toFixed(1)}KB · {err}</Text>;
@@ -271,11 +276,25 @@ function ImgView({ id, mime, size }) {
   );
 }
 
+// /g/:token — join hub. Anonymous visitors get an invite landing with
+// return-to login/register links; once authenticated the join runs here
+// automatically (covers login, register, and returning sessions alike).
 export function JoinPage() {
   const { token } = useParams();
   const nav = useNavigate();
-  const [msg, setMsg] = useState('Joining…');
+  const { user, loading } = useAuth();
+  const [msg, setMsg] = useState(null);
+  const [e, setE] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const next = `/g/${token}`;
+
   useEffect(() => {
+    // Best-effort public preview so the landing can name the group.
+    api.get(`/api/v1/invites/${token}`).then(setPreview).catch(setE);
+  }, [token]);
+
+  useEffect(() => {
+    if (loading || !user) return; // wait for auth; the landing handles anonymous
     api.post('/api/v1/groups/join', { token })
       .then((r) => {
         const gid = r.group_id ?? r.group?.id;
@@ -283,11 +302,35 @@ export function JoinPage() {
         nav(`/groups/${gid}`);
       })
       .catch((err) => setMsg(`Join failed: ${err.code || ''} ${err.message}`));
-  }, [token, nav]);
+  }, [user, loading, token, nav]);
+
+  if (loading) return <Center h={240}><Loader /></Center>;
+  if (!user) {
+    return (
+      <Shell>
+        <Card withBorder shadow="sm" padding="lg" radius="md">
+          <Stack gap="sm">
+            <Title order={4}>You're invited to SplitShare</Title>
+            <Text size="sm">
+              {preview
+                ? `“${preview.name}” (${preview.currency || 'USD'}) is waiting for you — log in or create an account to join.`
+                : 'Log in or create an account to accept this invite.'}
+            </Text>
+            <Group>
+              <Button component={Link} to={`/login?next=${encodeURIComponent(next)}`}>Log in</Button>
+              <Button variant="light" component={Link} to={`/register?next=${encodeURIComponent(next)}`}>Create account</Button>
+            </Group>
+            <Err e={e} />
+            <Text size="xs" c="dimmed">The invite link never expires.</Text>
+          </Stack>
+        </Card>
+      </Shell>
+    );
+  }
   return (
     <Shell>
       <Card withBorder shadow="sm" padding="lg" radius="md">
-        <Text>{msg}</Text>
+        <Text>{msg || 'Joining…'}</Text>
         <Anchor component={Link} to="/" size="sm">Home</Anchor>
       </Card>
     </Shell>
