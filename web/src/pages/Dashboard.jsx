@@ -4,7 +4,6 @@ import {
   Button, CopyButton, Group, Modal, Select, Skeleton, Stack, Text,
   TextInput, Textarea, Title,
 } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
@@ -31,7 +30,6 @@ export function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [step, setStep] = useState(1);
   const [templates, setTemplates] = useState(() => getTemplates());
-  const isMobile = useMediaQuery('(max-width: 36em)');
 
   const load = () => api.get('/api/v1/me/balances').then(setData).catch(setE);
   useEffect(() => { load(); }, []);
@@ -304,17 +302,16 @@ export function Dashboard() {
           ? <span className="wizard-sr">{t('wizard.groupCreated')}</span>
           : <span className="wizard-title-name">{t('wizard.newGroup')}</span>}
         classNames={{
-          content: 'wizard-modal-content',
+          content: 'wizard-modal-content new-group-modal-content',
           header: created ? 'wizard-modal-header is-done' : 'wizard-modal-header',
           body: 'wizard-modal-body',
           title: 'wizard-modal-title',
         }}
-        centered={!isMobile || !!created}
+        centered
         size={created ? 420 : 520}
-        radius={isMobile && !created ? 0 : 24}
+        radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile && !created}
       >
         {wizard}
         <Err e={e} />

@@ -154,6 +154,12 @@ test('mobile group actions open expense and payment forms directly', async () =>
   assert.doesNotMatch(groupDetail, /<summary>\{t\('groupDetail\.groupSettings'\)\}<\/summary>/);
 });
 
+test('mobile group action bar does not add a divider above the primary actions', async () => {
+  const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+  assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.sticky-bar\.gd-actions\.is-calm\s*\{[\s\S]*?border-top:\s*0;/);
+});
+
 test('mobile report makes the settlement metric span the first row', async () => {
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
@@ -169,6 +175,52 @@ test('mobile group details removes the action spacer and hides only the members 
   assert.match(report, /className="report-metric is-members"/);
   assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.gd-actions\.is-calm \+ \.sticky-spacer\s*\{\s*display:\s*none;/);
   assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.report-metric\.is-members\s*\{\s*display:\s*none;/);
+});
+
+test('mobile group danger actions share a row and confirmation dialogs stay compact', async () => {
+  const [groupDetail, styles] = await Promise.all([
+    readFile(new URL('../src/pages/GroupDetail.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(styles, /\.gd-action-danger-opts\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
+  assert.match(styles, /\.gd-action-danger-opts button:only-child\s*\{\s*grid-column:\s*1\s*\/\s*-1;/);
+  assert.match(groupDetail, /content: 'wizard-modal-content group-danger-confirm-modal'/);
+  assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.group-danger-confirm-modal\s*\{[\s\S]*?height:\s*auto !important;[\s\S]*?border-radius:\s*20px;/);
+});
+
+test('mobile group delete action does not show an owner badge', async () => {
+  const groupDetail = await readFile(new URL('../src/pages/GroupDetail.jsx', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(groupDetail, /className="gd-action-owner"/);
+});
+
+test('mobile invite dialog wraps its content instead of filling the viewport', async () => {
+  const [groupDetail, styles] = await Promise.all([
+    readFile(new URL('../src/pages/GroupDetail.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
+  ]);
+  const inviteStart = groupDetail.indexOf('opened={inviteOpen}');
+  const inviteEnd = groupDetail.indexOf('</Modal>', inviteStart);
+  const inviteModal = groupDetail.slice(inviteStart, inviteEnd);
+
+  assert.match(inviteModal, /content: 'wizard-modal-content invite-modal-content'/);
+  assert.doesNotMatch(inviteModal, /fullScreen=/);
+  assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.invite-modal-content\s*\{[\s\S]*?height:\s*auto !important;[\s\S]*?border-radius:\s*20px;/);
+});
+
+test('mobile new group dialog wraps its content instead of filling the viewport', async () => {
+  const [dashboard, styles] = await Promise.all([
+    readFile(new URL('../src/pages/Dashboard.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
+  ]);
+  const modalStart = dashboard.indexOf('opened={open}');
+  const modalEnd = dashboard.indexOf('</Modal>', modalStart);
+  const modal = dashboard.slice(modalStart, modalEnd);
+
+  assert.match(modal, /content: 'wizard-modal-content new-group-modal-content'/);
+  assert.doesNotMatch(modal, /fullScreen=/);
+  assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.new-group-modal-content\s*\{[\s\S]*?height:\s*auto !important;[\s\S]*?border-radius:\s*20px;/);
 });
 
 test('mobile bottom navigation shows a brand pill and menu name only for the active tab', async () => {
