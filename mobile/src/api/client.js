@@ -6,6 +6,7 @@
 // - Un-settle preview for edits: POST /expenses/:id/preview-edit
 // - Images: authenticated GET /images/:id binary; upload POST /expenses/:id/images multipart
 // - Idempotency-Key OPTIONAL server-side; client ALWAYS sends it on expenses/payments.
+import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import uuid from 'react-native-uuid';
@@ -13,12 +14,38 @@ import uuid from 'react-native-uuid';
 const AT_KEY = 'ss_at';
 const RT_KEY = 'ss_rt';
 
+function isLoopback(hostname) {
+  return !hostname || hostname === 'localhost' || hostname === '127.0.0.1';
+}
+
+function packagerLanHost() {
+  const hostUri = Constants.expoConfig?.hostUri || '';
+  const ip = String(hostUri).match(/(\d+\.\d+\.\d+\.\d+)/);
+  if (ip) return ip[1];
+  try {
+    const u = new URL(hostUri.includes('://') ? hostUri : `http://${hostUri}`);
+    if (!isLoopback(u.hostname)) return u.hostname;
+  } catch { /* ignore */ }
+  return null;
+}
+
 export function baseUrl() {
-  return (
+  const configured = (
     Constants?.expoConfig?.extra?.apiUrl ||
     process.env.EXPO_PUBLIC_API_URL ||
     'http://localhost:8081'
-  );
+  ).replace(/\/+$/, '');
+
+  let parsed;
+  try { parsed = new URL(configured); } catch { parsed = null; }
+  const port = parsed?.port || '8081';
+  const proto = parsed?.protocol || 'http:';
+  const host = parsed?.hostname || 'localhost';
+
+  const lan = packagerLanHost();
+  if (lan && isLoopback(host)) return `${proto}//${lan}:${port}`;
+  if (Platform.OS === 'android' && isLoopback(host)) return `${proto}//10.0.2.2:${port}`;
+  return configured;
 }
 
 export class ApiError extends Error {

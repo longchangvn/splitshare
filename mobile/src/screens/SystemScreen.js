@@ -17,10 +17,22 @@ export default function SystemScreen({ navigation }) {
   const [optOuts, setOptOuts] = useState({});
   const [groups, setGroups] = useState([]);
 
+  const [feed, setFeed] = useState([]);
+
   const refresh = useCallback(async () => {
     setQueue(await getQueue());
     setOptOuts(await getOptOuts());
-    try { setGroups((await api.get('/api/v1/me/balances')).groups || []); } catch { /* offline */ }
+    try {
+      const gs = (await api.get('/api/v1/me/balances')).groups || [];
+      setGroups(gs);
+      const lists = await Promise.all(gs.map(async (g) => {
+        try {
+          const rows = await api.get(`/api/v1/groups/${g.group_id}/activity?limit=10`);
+          return (rows || []).map((r) => ({ ...r, group_name: g.name, group_id: g.group_id }));
+        } catch { return []; }
+      }));
+      setFeed(lists.flat().sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 20));
+    } catch { /* offline */ }
   }, []);
   useFocusEffect(useCallback(() => {
     refresh();
@@ -49,6 +61,22 @@ export default function SystemScreen({ navigation }) {
 
   return (
     <ScrollView style={s.wrap}>
+      <View style={s.card}>
+        <Text style={s.h}>Recent activity</Text>
+        {feed.length === 0 && <Text style={s.muted}>Nothing yet. Add an expense in a group to see it here.</Text>}
+        {feed.map((a, i) => (
+          <Pressable
+            key={`${a.group_id}-${a.kind}-${a.at}-${i}`}
+            style={s.row}
+            onPress={() => navigation.navigate('GroupDetail', { id: a.group_id })}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={s.muted}>{a.text || a.kind}</Text>
+              <Text style={s.muted}>{a.group_name}</Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
       <View style={s.card}>
         <View style={s.row}><Text style={s.h}>Offline queue ({queue.length})</Text><Text style={s.bWarn}>AUTO-SYNC</Text></View>
         <Text style={s.muted}>Expense + Payment → same Idempotency-Key, no duplicate</Text>

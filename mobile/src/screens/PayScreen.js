@@ -46,7 +46,7 @@ export default function PayScreen({ route, navigation }) {
         res = await send();
       } catch (err) {
         if (!err.status) {
-          await queueOrSend('payment', id, send, body);
+          await queueOrSend('payment', id, send, body, key);
           Alert.alert('Queued offline', 'Payment will auto-sync with the same Idempotency-Key.');
           navigation.goBack();
           return;

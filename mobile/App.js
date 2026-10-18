@@ -7,6 +7,7 @@ import { Text, View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import AuthScreen, { RegisterScreen, ForgotScreen, ResetScreen, GoogleTokenScreen } from './src/screens/AuthScreen';
@@ -46,9 +47,11 @@ const linking = {
 };
 
 function JoinScreen({ route, navigation }) {
+  const { user } = useAuth();
   const { token } = route.params || {};
-  const [msg, setMsg] = React.useState('Joining…');
+  const [msg, setMsg] = React.useState(user ? 'Joining…' : 'Sign in to join this group.');
   React.useEffect(() => {
+    if (!user) return;
     (async () => {
       try {
         const g = await api.post('/api/v1/groups/join', { token });
@@ -59,27 +62,43 @@ function JoinScreen({ route, navigation }) {
         setMsg(e.code === 'INVITE_ROTATED' ? 'Invite rotated (410) — ask owner for a new link.' : `Join failed: ${e.code || e.message}`);
       }
     })();
-  }, [token]);
-  return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}><Text>{msg}</Text></View>;
+  }, [token, user]);
+  return (
+    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 }}>
+      <Text>{msg}</Text>
+      {!user ? (
+        <Text style={{ color: colors.primary, fontWeight: '700' }} onPress={() => navigation.navigate('Login')}>
+          Go to login
+        </Text>
+      ) : null}
+    </View>
+  );
 }
 
-function AddPlaceholder({ navigation }) {
-  React.useEffect(() => {
-    const t = setTimeout(() => navigation.replace('NewGroup'), 0);
-    return () => clearTimeout(t);
-  }, []);
+function AddPlaceholder() {
   return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator /></View>;
 }
 
 function Main() {
   return (
-    <Tab.Navigator screenOptions={{ headerShown: false, tabBarActiveTintColor: colors.primary }}>
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Groups" component={GroupsScreen} />
-      <Tab.Screen name="Add" component={AddPlaceholder} />
-      <Tab.Screen name="Activity" component={SystemScreen} />
-      <Tab.Screen name="You" component={ProfileScreen} />
-    </Tab.Navigator>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.screen }} edges={['top']}>
+      <Tab.Navigator screenOptions={{ headerShown: false, tabBarActiveTintColor: colors.primary }}>
+        <Tab.Screen name="Home" component={HomeScreen} />
+        <Tab.Screen name="Groups" component={GroupsScreen} />
+        <Tab.Screen
+          name="Add"
+          component={AddPlaceholder}
+          listeners={({ navigation }) => ({
+            tabPress: (e) => {
+              e.preventDefault();
+              navigation.navigate('NewGroup');
+            },
+          })}
+        />
+        <Tab.Screen name="Activity" component={SystemScreen} />
+        <Tab.Screen name="You" component={ProfileScreen} />
+      </Tab.Navigator>
+    </SafeAreaView>
   );
 }
 
@@ -95,6 +114,7 @@ function Root() {
           <Stack.Screen name="Forgot" component={ForgotScreen} />
           <Stack.Screen name="Reset" component={ResetScreen} />
           <Stack.Screen name="GoogleToken" component={GoogleTokenScreen} options={{ title: 'Google' }} />
+          <Stack.Screen name="Join" component={JoinScreen} options={{ title: 'Join' }} />
         </>
       ) : (
         <>
@@ -114,10 +134,12 @@ function Root() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <NavigationContainer linking={linking} fallback={<Text>Loading…</Text>}>
-        <Root />
-      </NavigationContainer>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <NavigationContainer linking={linking} fallback={<Text>Loading…</Text>}>
+          <Root />
+        </NavigationContainer>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }

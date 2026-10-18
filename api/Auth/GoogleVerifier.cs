@@ -25,7 +25,12 @@ public sealed class GoogleVerifier(HttpClient http, IConfiguration config)
             _cachedAt = DateTime.UtcNow;
         }
 
-        var handler = new JwtSecurityTokenHandler();
+        // MUST match Program.cs's AddJwtBearer(o => o.MapInboundClaims = false):
+        // JwtSecurityTokenHandler defaults MapInboundClaims=true, which renames
+        // "sub" -> .../nameidentifier and "email" -> .../emailaddress, so the
+        // FindFirst(JwtRegisteredClaimNames.*) lookups below would both return null
+        // and every valid token would be rejected as UNAUTH "Invalid Google token."
+        var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
         try
         {
             var principal = handler.ValidateToken(idToken, new TokenValidationParameters

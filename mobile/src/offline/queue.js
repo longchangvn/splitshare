@@ -6,9 +6,9 @@ import { api, newIdempotencyKey } from '../api/client';
 
 const QUEUE_KEY = 'ss_offline_queue_v1';
 
-export function createDraft(type, payload, groupId) {
+export function createDraft(type, payload, groupId, key) {
   return {
-    key: newIdempotencyKey(), // stable across retries — never regenerate
+    key: key || newIdempotencyKey(), // stable across retries — never regenerate
     type, // 'expense' | 'payment'
     group_id: groupId,
     payload,
@@ -38,12 +38,16 @@ export async function removeDraft(key) {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(q));
 }
 
-export async function queueOrSend(type, groupId, sendFn, payload) {
+export async function queueOrSend(type, groupId, sendFn, payload, key) {
   const net = await NetInfo.fetch().catch(() => ({ isConnected: true }));
   if (net.isConnected) {
-    return sendFn(); // online: direct send with fresh idempotency key
+    try {
+      return await sendFn();
+    } catch (err) {
+      if (err.status) throw err;
+    }
   }
-  const draft = createDraft(type, payload, groupId);
+  const draft = createDraft(type, payload, groupId, key);
   await enqueueDraft(draft);
   return { queued: true, draft };
 }

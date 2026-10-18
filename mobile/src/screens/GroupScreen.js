@@ -1,8 +1,8 @@
 // Frame 3 · Group — FR-10/11. Web parity: GroupDetail ledger/people tabs.
 // B-proposed action hierarchy (UX polish): 1 teal CTA + quiet Invite row +
 // Group settings··· two-tap destructives. Skeletons + spinner buttons throughout.
-import React, { useCallback, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, FlatList, TextInput, Alert, Modal, ScrollView, ActivityIndicator } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { View, Text, Pressable, StyleSheet, FlatList, TextInput, Alert, Modal, ScrollView, ActivityIndicator, Share } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Sharing from 'expo-sharing';
 import { api, fmt, groupIdOf, displayNameOf } from '../api/client';
@@ -44,6 +44,7 @@ export default function GroupDetailScreen({ route, navigation }) {
   const [plan, setPlan] = useState(null);
   const [tab, setTab] = useState('Ledger');
   const [q, setQ] = useState('');
+  const [qDebounced, setQDebounced] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [showF, setShowF] = useState(false);
   const [items, setItems] = useState([]);
@@ -59,12 +60,16 @@ export default function GroupDetailScreen({ route, navigation }) {
       const [g, m, l, p] = await Promise.all([
         api.get(`/api/v1/groups/${id}`),
         api.get(`/api/v1/groups/${id}/me`).catch(() => null),
-        api.get(`/api/v1/groups/${id}/ledger?limit=100${q ? `&q=${encodeURIComponent(q)}` : ''}${fStatus ? `&status=${fStatus}` : ''}`).catch(() => ({ items: [] })),
+        api.get(`/api/v1/groups/${id}/ledger?limit=100${qDebounced ? `&q=${encodeURIComponent(qDebounced)}` : ''}${fStatus ? `&status=${fStatus}` : ''}`).catch(() => ({ items: [] })),
         api.get(`/api/v1/groups/${id}/settlement`).catch(() => null),
       ]);
       setGroup(g.group || g); setMe(m); setItems(l.items || []); setPlan(p);
     } catch (err) { setE(err); } finally { setLoading(false); }
-  }, [id, q, fStatus]);
+  }, [id, qDebounced, fStatus]);
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(q), 400);
+    return () => clearTimeout(t);
+  }, [q]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
   const members = group?.members || [];
@@ -157,14 +162,13 @@ export default function GroupDetailScreen({ route, navigation }) {
                   ))}
                 </View>
               )}
-              <FlatList
-                data={items}
-                keyExtractor={(it, i) => `${it.kind || it.type}-${it.id || it.expense_id || it.payment_id || i}`}
-                renderItem={({ item: it }) => {
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 12 }}>
+                {items.map((it, i) => {
                   const isPay = (it.kind || it.type) === 'payment';
                   const eid = it.expense_id || it.id;
                   return (
                     <Pressable
+                      key={`${it.kind || it.type}-${it.id || it.expense_id || it.payment_id || i}`}
                       style={s.card}
                       onPress={() => {
                         if (!isPay && eid) navigation.navigate('ExpenseDetail', { groupId: id, expenseId: eid });
@@ -183,17 +187,15 @@ export default function GroupDetailScreen({ route, navigation }) {
                       </View>
                     </Pressable>
                   );
-                }}
-              />
+                })}
+              </ScrollView>
             </>
           )}
 
           {tab === 'Members' && (
-            <FlatList
-              data={members}
-              keyExtractor={(m) => m.user_id}
-              renderItem={({ item: m }) => (
-                <View style={s.card}>
+            <ScrollView style={{ flex: 1 }}>
+              {members.map((m) => (
+                <View key={m.user_id} style={s.card}>
                   <View style={s.row}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                       <Avatar name={m.display_name} />
@@ -205,8 +207,8 @@ export default function GroupDetailScreen({ route, navigation }) {
                     {isOwner && <Pressable onPress={() => doRemove(m.user_id, m.display_name)}><Text style={s.dangerT}>Remove</Text></Pressable>}
                   </View>
                 </View>
-              )}
-            />
+              ))}
+            </ScrollView>
           )}
 
           {tab === 'Photos' && (
@@ -306,7 +308,11 @@ function InviteSheet({ visible, onClose, groupId, isOwner, inviteLink }) {
           <Text style={[s.h, { marginTop: 10 }]}>Link</Text>
           <Text style={s.kbd}>{link || '—'}</Text>
           <View style={s.row}>
-            <Pressable style={s.quiet} onPress={() => Alert.alert('Copied', String(link || ''))}><Text>Copy</Text></Pressable>
+            <Pressable style={s.quiet} onPress={async () => {
+              const url = String(link || '');
+              try { await Share.share({ message: url, url }); }
+              catch { Alert.alert('Invite link', url); }
+            }}><Text>Copy</Text></Pressable>
             {isOwner && <Pressable style={s.quiet} onPress={rotate}><Text>Rotate (owner)</Text></Pressable>}
             <Pressable style={s.quiet} onPress={async () => {
               const url = String(link || '');

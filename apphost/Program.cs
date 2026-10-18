@@ -28,6 +28,7 @@ var api = builder.AddExecutable("api", "dotnet", "../api", "run", "--project", "
 // dev server as a plain executable on the fixed port the API CORS allows.
 var web = builder.AddExecutable("web", "npm", "../web", "run", "dev")
     .WithHttpEndpoint(port: 3000, targetPort: 3000, name: "vite")
-    .WithEnvironment("VITE_API_URL", api.GetEndpoint("http"));
+    .WithEnvironment("VITE_API_URL", api.GetEndpoint("http"))
+    .WithEnvironment("VITE_ONESIGNAL_APP_ID", "95038e0d-3c11-4469-8ee4-e1580d4d0edd");
 
 builder.Build().Run();

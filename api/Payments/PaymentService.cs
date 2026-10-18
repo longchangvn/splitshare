@@ -12,7 +12,7 @@ public sealed record PaymentOp(bool Ok, string? ErrorCode, string? Error, object
 public sealed record PaymentRecorded(Payment Payment, bool FullySettled, int SettlementVersion);
 public sealed record PaymentReversed(Payment Payment, int SettlementVersion);
 
-public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatabaseProvider? provider = null)
+public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatabaseProvider? provider = null, Notifications.GroupNotifier? notifier = null)
 {
     private static readonly HashSet<string> Methods =
         new(StringComparer.OrdinalIgnoreCase) { "cash", "transfer", "other" };
@@ -79,6 +79,8 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
             var (plan, _) = await ledger.RecomputeAsync(groupId);
             var settled = await TryLockAsync(groupId);
             if (tx is not null) await tx.CommitAsync();
+            if (notifier is not null)
+                await notifier.NotifyPaymentAsync(groupId, actorId, cents, g.Currency);
             return new(true, null, null, new PaymentRecorded(p, settled, plan.VersionSeq));
         }
         catch (DbUpdateException ex) when (provider?.IsConcurrencyConflict(ex) == true)

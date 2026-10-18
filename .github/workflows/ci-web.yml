@@ -40,6 +40,7 @@ jobs:
           # Placeholder only — CD injects the real API origin at deploy time.
           # Vite inlines it into the bundle, so build a realistic one here.
           VITE_API_BASE: https://ci-placeholder.example.invalid
+          VITE_ONESIGNAL_APP_ID: 95038e0d-3c11-4469-8ee4-e1580d4d0edd
         run: |
           npm ci
           npm run build

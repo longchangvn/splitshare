@@ -154,6 +154,8 @@ jobs:
         env:
           VITE_API_BASE: https://${{ steps.infra.outputs.api_fqdn }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.SPLITSHARE_GOOGLE_CLIENT_ID }}
+          # Public OneSignal app id (embedded in the bundle; not a secret).
+          VITE_ONESIGNAL_APP_ID: ${{ vars.SPLITSHARE_ONESIGNAL_APP_ID }}
         run: |
           npm ci
           npm run build

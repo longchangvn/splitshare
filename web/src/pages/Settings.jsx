@@ -9,12 +9,16 @@ import {
   deleteCurrency, deleteTemplate, getCurrencies, getTemplates,
   saveCurrency, saveTemplate, subscribeCatalogs,
 } from '../settingsStore.js';
+import { onesignalConfigured, pushPermission, requestPushPermission } from '../onesignal.js';
 
 export function Settings() {
   const [tab, setTab] = useState('currency');
   const [currencies, setCurrencies] = useState(() => getCurrencies());
   const [templates, setTemplates] = useState(() => getTemplates());
   const [e, setE] = useState(null);
+
+  const [pushPerm, setPushPerm] = useState(null);
+  const [pushBusy, setPushBusy] = useState(false);
 
   const [currencyOpen, setCurrencyOpen] = useState(false);
   const [editingCurrency, setEditingCurrency] = useState(null);
@@ -36,6 +40,26 @@ export function Settings() {
     setCurrencies(getCurrencies());
     setTemplates(getTemplates());
   }), []);
+
+  // Read current permission on mount (no prompting — explicit button only).
+  useEffect(() => { pushPermission().then(setPushPerm); }, []);
+
+  const enablePush = async () => {
+    setPushBusy(true);
+    try {
+      const granted = await requestPushPermission();
+      setPushPerm(await pushPermission());
+      notifications.show({
+        title: granted ? 'Notifications enabled' : 'Notifications not enabled',
+        color: granted ? 'teal' : 'orange',
+        message: granted
+          ? "You'll get push alerts when group expenses or payments change."
+          : 'Permission was not granted — enable notifications in your browser settings.',
+      });
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const openAddCurrency = () => {
     setEditingCurrency(null);
@@ -150,6 +174,7 @@ export function Settings() {
           <Tabs.List>
             <Tabs.Tab value="currency">Currency</Tabs.Tab>
             <Tabs.Tab value="template">Template</Tabs.Tab>
+            <Tabs.Tab value="notifications">Notifications</Tabs.Tab>
           </Tabs.List>
         </div>
 
@@ -221,6 +246,37 @@ export function Settings() {
                 <Text size="sm" c="dimmed">No templates yet — add one to use in New group.</Text>
               )}
             </div>
+          </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="notifications" className="profile-panel">
+          <div className="settings-panel">
+            {!onesignalConfigured() ? (
+              <Text size="sm" c="dimmed">
+                Push notifications are not configured for this build.
+              </Text>
+            ) : (
+              <Group justify="space-between" mb="sm">
+                <div>
+                  <Text className="settings-row-title">
+                    Push notifications
+                    {pushPerm === 'granted' ? ' — on' : pushPerm === 'denied' ? ' — blocked' : ''}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    {pushPerm === 'granted'
+                      ? "You'll be notified when members of your groups add expenses or record payments."
+                      : pushPerm === 'denied'
+                        ? 'Notifications are blocked for this site — allow them in your browser settings to re-enable.'
+                        : 'Get a push when someone in your group adds an expense or records a payment.'}
+                  </Text>
+                </div>
+                {pushPerm !== 'granted' && pushPerm !== 'denied' && (
+                  <Button className="gd-action-btn settings-add-btn" loading={pushBusy} onClick={enablePush}>
+                    Enable notifications
+                  </Button>
+                )}
+              </Group>
+            )}
           </div>
         </Tabs.Panel>
       </Tabs>

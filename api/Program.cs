@@ -11,6 +11,7 @@ using SplitShare.Api.Data.Providers;
 using SplitShare.Api.Endpoints;
 using SplitShare.Api.Expenses;
 using SplitShare.Api.Groups;
+using SplitShare.Api.Notifications;
 using SplitShare.Api.Payments;
 using SplitShare.Api.Services;
 
@@ -59,6 +60,15 @@ builder.Services.AddSingleton<IOcrService, DisabledOcrService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
 builder.Services.AddSingleton<IEmailSender, StubEmailSender>();
+// Push notifications (add-onesignal-group-notifications): provider is config-driven
+// (Notification:Provider — unset = null provider, "onesignal" = OneSignal REST).
+builder.Services.AddHttpClient(OneSignalProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<INotificationProvider>(sp => NotificationProviderFactory.Create(
+    builder.Configuration,
+    sp.GetRequiredService<IHttpClientFactory>(),
+    sp.GetRequiredService<ILogger<OneSignalProvider>>(),
+    sp.GetRequiredService<ILogger<NullNotificationProvider>>()));
+builder.Services.AddScoped<GroupNotifier>();
 
 // --- Auth (tasks 3.1-3.4): JWT access (15 min) + opaque rotating refresh (30 d).
 var jwtKey = builder.Configuration["Jwt:Key"];

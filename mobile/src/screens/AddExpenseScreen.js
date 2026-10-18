@@ -173,7 +173,7 @@ export default function AddExpenseScreen({ route, navigation }) {
       } catch (err) {
         // Offline: queue draft with SAME key for auto-sync, no duplicate.
         if (!err.status) {
-          await queueOrSend('expense', groupId, send, body);
+          await queueOrSend('expense', groupId, send, body, key);
           Alert.alert('Queued offline', 'Will auto-sync with the same Idempotency-Key.');
           navigation.goBack();
           return;

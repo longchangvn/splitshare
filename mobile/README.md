@@ -8,12 +8,19 @@ B-proposed action hierarchy). **Trip-pack excluded**
 ## Run
 
 ```sh
+# 1) API on :8081 (required — Expo Metro uses :8082 so they do not collide)
+dotnet run --project api --urls http://localhost:8081
+
+# 2) Mobile
 cd mobile
 npm install
-npx expo start
-# API URL: app.json extra.apiUrl (default http://localhost:8081)
-# iOS: npx expo start --ios | Android: npx expo start --android
+npm start          # Expo Metro on :8082
+# then press i (iOS simulator) or a (Android emulator)
+# or: npm run ios / npm run android
 ```
+
+API URL: `app.json` `extra.apiUrl` (default `http://localhost:8081`). On a physical
+device the client rewrites loopback to the Metro LAN IP; Android emulator uses `10.0.2.2`.
 
 Deep link test: `npx uri-scheme open splitshare://g/<token> --ios`.
 

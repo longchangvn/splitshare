@@ -5,7 +5,7 @@
 // Pending email auto-consumed ≤30d. Join idempotent; rotated 410.
 // UX polish: spinner buttons, validation messages.
 import React, { useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView, Share as RnShare } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { api, groupIdOf } from '../api/client';
 import { colors } from '../theme';
@@ -102,7 +102,11 @@ export default function NewGroupScreen({ navigation }) {
         <Text style={s.darkH}>Invite link</Text>
         <Text style={s.kbd}>{link || 'created after save · splitshare://g/<token>'}</Text>
         <View style={s.row}>
-          <Pressable style={s.btn} onPress={() => Alert.alert('Copied', String(link || ''))}><Text style={s.btnT}>Copy link</Text></Pressable>
+          <Pressable style={s.btn} onPress={async () => {
+            const url = String(link || '');
+            try { await RnShare.share({ message: url, url }); }
+            catch { Alert.alert('Invite link', url); }
+          }}><Text style={s.btnT}>Copy link</Text></Pressable>
           <Pressable style={[s.btn, s.btnSec]} onPress={share}><Text style={[s.btnT, s.btnSecT]}>Share sheet</Text></Pressable>
         </View>
         <Text style={s.darkSub}>Any member can invite · only owner removes / rotates / deletes</Text>

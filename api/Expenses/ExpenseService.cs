@@ -29,7 +29,7 @@ public sealed record ExpenseOptions(
     List<GuestEntry>? Guests = null,
     bool OnlyPresent = false);
 
-public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileStore files, Auth.IEmailSender? email = null)
+public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileStore files, Auth.IEmailSender? email = null, Notifications.GroupNotifier? notifier = null)
 {
     public const long MaxAmountCents = 100_000_000; // 1,000,000.00
     public const long MaxImageBytes = 10 * 1024 * 1024;
@@ -265,6 +265,8 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         db.Expenses.Add(e);
         await db.SaveChangesAsync();
         await CheckBudgetAlertAsync(group, e.AmountCents);
+        if (notifier is not null)
+            await notifier.NotifyExpenseAsync(groupId, actorId, e.Title, e.AmountCents, group.Currency);
         var (plan, _) = await ledger.RecomputeAsync(groupId);
         var after = LedgerService.ApplyDelta(before, null, (payerId, totalCents, map));
         return new(true, null, null, new ExpenseCreated(e, Unsettled(before, after), plan.VersionSeq));
