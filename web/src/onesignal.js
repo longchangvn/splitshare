@@ -25,26 +25,36 @@ export function oneSignal() {
   return ready;
 }
 
+// Single init per page load; every other call waits on it. The SDK throws
+// (internal state undefined) if login/logout runs while init is still in
+// flight, and auth boot (/me) usually beats script/CDN init — so serialize.
+let initDone = null;
 export async function initOneSignal() {
   const os = await oneSignal();
   if (!os) return false;
-  try {
-    await os.init({
-      appId: APP_ID,
-      // Browsers treat http://localhost as a secure origin; the flag lets web
-      // push work on the local dev server (see OneSignal docs).
-      allowLocalhostAsSecureOrigin: import.meta.env.DEV,
-    });
-    return true;
-  } catch (err) {
-    console.warn('[onesignal] init failed', err);
-    return false;
+  if (!initDone) {
+    initDone = (async () => {
+      try {
+        await os.init({
+          appId: APP_ID,
+          // Browsers treat http://localhost as a secure origin; the flag lets web
+          // push work on the local dev server (see OneSignal docs).
+          allowLocalhostAsSecureOrigin: import.meta.env.DEV,
+        });
+        return true;
+      } catch (err) {
+        console.warn('[onesignal] init failed', err);
+        return false;
+      }
+    })();
   }
+  return initDone;
 }
 
 export async function loginOneSignal(userId) {
   const os = await oneSignal();
   if (!os) return;
+  if (!(await initOneSignal())) return; // never call login before init settles
   try {
     await os.login(String(userId));
   } catch (err) {
@@ -55,6 +65,7 @@ export async function loginOneSignal(userId) {
 export async function logoutOneSignal() {
   const os = await oneSignal();
   if (!os) return;
+  if (!(await initOneSignal())) return;
   try {
     await os.logout();
   } catch (err) {
@@ -73,8 +84,15 @@ export async function pushPermission() {
 export async function requestPushPermission() {
   const os = await oneSignal();
   if (!os) return false;
+  if (!(await initOneSignal())) return false;
   try {
-    return await os.Notifications.requestPermission();
+    await os.Notifications.requestPermission();
+    // v16's requestPermission() return value is not a reliable grant indicator
+    // (internal early-returns can yield false even on success) — read the real
+    // browser permission state instead.
+    const native = os.Notifications.permissionNative
+      ?? (typeof Notification !== 'undefined' ? Notification.permission : 'default');
+    return native === 'granted';
   } catch (err) {
     console.warn('[onesignal] requestPermission failed', err);
     return false;

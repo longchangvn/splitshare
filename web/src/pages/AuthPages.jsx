@@ -5,6 +5,7 @@ import {
 } from '@mantine/core';
 import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
+import { takePending, PING, makeNonce } from '../googleReturn.js';
 import { BrandMark } from '../components/Shell.jsx';
 
 // Sanitized in-app destination from ?next= (same-origin path only).
@@ -197,6 +198,17 @@ export function Register() {
   );
 }
 
+// One Tap lives in a third-party iframe that mobile browsers throttle or block,
+// and on mobile window.open opens a *tab that takes focus*, backgrounding the
+// page that started the flow. Skipping One Tap there is both more reliable and
+// faster: the popup is full-screen, so it reads like a normal redirect.
+// iPadOS 13+ claims a desktop UA, hence the maxTouchPoints check.
+const isMobile = () => {
+  const ua = navigator.userAgent || '';
+  return /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(ua)
+    || (navigator.maxTouchPoints > 1 && /Macintosh/.test(ua));
+};
+
 // Official Google "G" mark (48px grid, brand colors). Sized via CSS/attr.
 function GoogleGIcon() {
   return (
@@ -211,6 +223,16 @@ function GoogleGIcon() {
 
 // Shared SSO block: "or" divider + Google button. intent picks the Google
 // brand label ("Sign in" on login, "Sign up" on register).
+//
+// Flow:
+//   - desktop -> prime a popup *synchronously inside the click gesture* (a
+//     deferred OAuth navigation 3s later is only allowed on a window that is
+//     already open), then One Tap first; when it answers with nothing — the
+//     norm under Safari's ITP — navigate that primed window to OAuth;
+//   - mobile  -> no popup at all: redirect this tab straight to Google. Nothing
+//     to popup-block, no backgrounded tab waiting on timers.
+// Either way googleReturn.js hands the token back from the document Google
+// returns to, rather than this page polling for it.
 function GoogleBtn({ next, intent = 'signin' }) {
   const { setUser } = useAuth();
   const nav = useNavigate();
@@ -219,45 +241,180 @@ function GoogleBtn({ next, intent = 'signin' }) {
   const timer = useRef(null);
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
-  // GIS ships no dismissal callback in the FedCM build (no onMomentListener),
-  // so a silently-dismissed One Tap would otherwise leave the button spinning.
+  // Always point at the latest render's closures, so the listeners below can
+  // be subscribed exactly once.
+  const activeRef = useRef(false);
+  const popupRef = useRef(null);
+  const drainRef = useRef(() => {});
+  const wakeRef = useRef(() => {});
+
+  useEffect(() => {
+    const onMsg = (ev) => {
+      if (ev.origin === window.location.origin && ev.data?.type === PING) drainRef.current();
+    };
+    const onWake = () => { if (!document.hidden) wakeRef.current(); };
+    window.addEventListener('message', onMsg);
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    drainRef.current(); // a tab opened mid-flow finishes the flow here
+    return () => {
+      window.removeEventListener('message', onMsg);
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
+  }, []);
   useEffect(() => () => clearTimeout(timer.current), []);
 
   if (!clientId) return null;
 
-  const stopBusy = () => { clearTimeout(timer.current); setBusy(false); };
+  const closePopup = () => {
+    const p = popupRef.current;
+    popupRef.current = null;
+    if (p && !p.closed) { try { p.close(); } catch { /* already gone */ } }
+  };
+
+  const exchange = async (idToken, dest) => {
+    try {
+      const d = await api.post('/api/v1/auth/google', { id_token: idToken });
+      setTokens(d.access_token, d.refresh_token);
+      setUser(d.user);
+      nav(dest || next || '/');
+    } catch (err) { setE(err); } finally { setBusy(false); }
+  };
+
+  const stop = (msg) => {
+    clearTimeout(timer.current);
+    activeRef.current = false;
+    closePopup();
+    if (msg) setE({ message: msg });
+    setBusy(false);
+  };
+
+  // Apply the result the returning OAuth tab parked. takePending() removed it
+  // already, so several listeners racing here can still only exchange once.
+  const complete = (payload) => {
+    if (!payload?.id_token) {
+      stop(payload?.error_description
+        || (payload?.error ? `Google sign-in failed (${payload.error}).` : 'Google sign-in was cancelled.'));
+      return;
+    }
+    clearTimeout(timer.current);
+    activeRef.current = false;
+    closePopup();
+    exchange(payload.id_token, payload.next);
+  };
+
+  drainRef.current = () => { const p = takePending(); if (p) complete(p); };
+
+  // Runs when this tab regains the foreground — e.g. the popup was closed.
+  wakeRef.current = () => {
+    drainRef.current();
+    const p = popupRef.current;
+    if (!activeRef.current || !p || !p.closed) return;
+    if (!localStorage.getItem('ss_at')) { stop('Google sign-in was cancelled.'); return; }
+    // Tokens exist, yet nothing was parked for us: another tab probably
+    // already exchanged it. Confirm before calling a completed sign-in a
+    // cancellation.
+    activeRef.current = false;
+    clearTimeout(timer.current);
+    api.get('/api/v1/me')
+      .then((u) => { setUser(u); nav(next || '/'); })
+      .catch(() => stop('Google sign-in was cancelled.'));
+  };
 
   const start = () => {
     if (busy) return;
     setE(null);
     setBusy(true);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => setBusy(false), 10000);
+    activeRef.current = true;
+
+    // Build the URL on its own first: a throw here is a different fault than a
+    // failed window.open, and one catch around both hides which one happened.
+    let url;
+    try {
+      const nonce = makeNonce();
+      const q = new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: window.location.origin,
+        response_type: 'id_token',
+        scope: 'openid email profile',
+        nonce,
+        state: next || '',
+        prompt: 'select_account',
+      });
+      url = `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
+    } catch (err) {
+      console.error('[google] building the OAuth URL threw', err);
+      stop(`Could not build the Google sign-in link: ${err?.message || err}`);
+      return;
+    }
+
+    const blocked = () => stop(
+      'Your browser blocked the Google sign-in window. Allow pop-ups for this site, then try again.',
+    );
+    const couldNotOpen = (err) => {
+      console.error('[google] opening the Google window threw', err);
+      stop(`Could not open the Google sign-in window: ${err?.message || err}`);
+    };
+
+    // Mobile: navigate this tab to Google rather than open a popup. Mobile
+    // browsers treat window.open as a new tab (iOS has no popup windows), and
+    // "Block Pop-ups" can refuse it outright, leaving nowhere to go. A plain
+    // navigation cannot be blocked and needs no gesture trickery. Google then
+    // returns to this same document with no opener, which is googleReturn.js's
+    // no-opener path: park the token, load /login, drain it there.
+    if (isMobile()) {
+      try { window.location.assign(url); } catch (err) { couldNotOpen(err); }
+      return;
+    }
+
+    // Desktop: prime a placeholder inside the gesture so OAuth can still be
+    // opened 3s later — browsers never popup-block a location assignment on a
+    // window that is already open, but they will block a fresh window.open().
+    try {
+      popupRef.current = window.open('about:blank', 'SplitShareGoogle', 'width=520,height=640');
+    } catch { popupRef.current = null; }
+
+    const fallback = () => {
+      if (!activeRef.current) return;
+      const p = popupRef.current;
+      if (!p || p.closed) { blocked(); return; }
+      try { p.location.replace(url); } catch (err) { couldNotOpen(err); }
+    };
+
+    const p = popupRef.current;
+    if (p) {
+      // Same-origin placeholder so the window reads as intentional rather than
+      // as a stray blank page during the One Tap wait.
+      try {
+        p.document.write(
+          '<!doctype html><meta charset="utf-8"><title>SplitShare</title>'
+          + '<body style="margin:0;display:grid;place-items:center;height:100vh;'
+          + 'font:500 15px/1.4 system-ui,-apple-system,sans-serif;color:#3d4a44;'
+          + 'background:linear-gradient(180deg,#fff,#f7faf8)">Continue in this window…</body>',
+        );
+        p.document.close();
+      } catch { /* harmless if the browser raced us */ }
+    }
+
+    // Desktop fast path: One Tap where ITP permits it, OAuth otherwise.
     try {
       // eslint-disable-next-line no-undef
       google.accounts.id.initialize({
         client_id: clientId,
-        callback: async (resp) => {
-          clearTimeout(timer.current);
-          if (!resp?.credential) {
-            setBusy(false);
-            setE({ message: 'Google did not return a credential. Please try again.' });
-            return;
-          }
-          try {
-            const d = await api.post('/api/v1/auth/google', { id_token: resp.credential });
-            setTokens(d.access_token, d.refresh_token);
-            setUser(d.user);
-            nav(next || '/');
-          } catch (err) { setE(err); setBusy(false); }
+        callback: (resp) => {
+          if (resp?.credential) complete({ id_token: resp.credential });
+          else fallback();
         },
       });
       // eslint-disable-next-line no-undef
       google.accounts.id.prompt();
-    } catch (err) {
-      stopBusy();
-      setE({ message: `Google Sign-In could not start: ${err?.message || err}` });
-    }
+    } catch { fallback(); }
+
+    // This GIS build exposes no dismissal signal, so "no answer" is the only
+    // failure cue available. One Tap replies immediately or not at all.
+    timer.current = setTimeout(fallback, 3000);
   };
 
   const label = intent === 'signup' ? 'Sign up with Google' : 'Sign in with Google';

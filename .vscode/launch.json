@@ -59,11 +59,13 @@
       "request": "launch",
       "command": "npm run dev",
       "cwd": "${workspaceFolder}/web",
+      "stopAtEntry": true,
       "serverReadyAction": {
         "action": "openExternally",
         "pattern": "Local:\\s+(https?://\\S+)",
         "uriFormat": "%s"
-      }
+      },
+      
     },
     {
       "name": "Web: Chrome (http://localhost:3000)",
