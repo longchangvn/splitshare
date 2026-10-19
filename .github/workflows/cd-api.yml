@@ -15,7 +15,11 @@ name: CD API — Azure Container Apps
 
 on:
   workflow_dispatch:
-
+    inputs:
+        environment:
+          description: "Select deployment environment"
+          required: true
+          type: environment
 # Same group as cd-web.yml so the two never mutate Azure concurrently.
 concurrency:
   group: deploy-azure-main

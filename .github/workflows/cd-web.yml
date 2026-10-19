@@ -13,7 +13,11 @@ name: CD Web — Azure Static Web Apps
 
 on:
   workflow_dispatch:
-
+    inputs:
+        environment:
+          description: "Select deployment environment"
+          required: true
+          type: environment
 # Same group as cd-api.yml so the two never mutate Azure concurrently.
 concurrency:
   group: deploy-azure-main

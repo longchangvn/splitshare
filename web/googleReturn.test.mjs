@@ -2,7 +2,7 @@
 const store = new Map();
 const ss = new Map();
 let failStorage = false;
-const calls = { posts: [], closes: 0, replaces: [] };
+const calls = { posts: [], closes: 0, replaces: [], nav: [] };
 
 globalThis.localStorage = {
   getItem: (k) => (store.has(k) ? store.get(k) : null),
@@ -29,7 +29,7 @@ const makeWindow = ({ hash, opener }) => ({
     origin: 'http://localhost:3000',
     pathname: '/',
     search: '',
-    replace: (u) => calls.replaces.push(u),
+    replace: (u) => calls.nav.push(u),
   },
   get opener() { return opener; },
   get closed() { return this._closed; },
@@ -63,7 +63,7 @@ check('pinged opener with our origin', calls.posts[0]?.origin === 'http://localh
 check('ping carries PING type', calls.posts[0]?.msg?.type === mod.PING);
 check('fragment stripped', calls.replaces[0] === '/', calls.replaces[0]);
 check('popup closed itself after handing over', globalThis.window.closed === true);
-check('did not ALSO redirect (would double-exchange)', !calls.replaces.includes('/login'), JSON.stringify(calls.replaces));
+check('did not ALSO navigate (would double-exchange)', !calls.nav.includes('/login'), JSON.stringify(calls.nav));
 check('parked token is consumed exactly once', mod.takePending() === null);
 
 // 3. hostile state cannot escape the origin
