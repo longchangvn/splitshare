@@ -281,9 +281,9 @@ jobs:
             ENV_SYNC_SECRETS+=("$is_secret")
             echo "Will set $name from GitHub environment."
           }
-          env_sync_add "Notification__Provider" "${{ vars.NOTIFICATION_PROVIDER }}" "false"
-          env_sync_add "Notification__OneSignal__AppId" "${{ vars.ONESIGNAL_APP_ID }}" "false"
-          env_sync_add "Notification__OneSignal__ApiKey" "${{ secrets.ONESIGNAL_REST_API_KEY }}" "true"
+          env_sync_add "Notification__Provider" "${{ vars.NOTIFICATION__PROVIDER }}" "false"
+          env_sync_add "Notification__OneSignal__AppId" "${{ vars.NOTIFICATION__ONESIGNAL__APPID }}" "false"
+          env_sync_add "Notification__OneSignal__ApiKey" "${{ secrets.NOTIFICATION__ONESIGNAL__APIKEY }}" "true"
 
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
           if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
