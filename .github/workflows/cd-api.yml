@@ -284,6 +284,13 @@ jobs:
           env_sync_add "Notification__Provider" "${{ vars.NOTIFICATION__PROVIDER }}" "false"
           env_sync_add "Notification__OneSignal__AppId" "${{ vars.NOTIFICATION__ONESIGNAL__APPID }}" "false"
           env_sync_add "Notification__OneSignal__ApiKey" "${{ secrets.NOTIFICATION__ONESIGNAL__APIKEY }}" "true"
+          env_sync_add "Database__SqlServer" "${{ secrets.DATABASE__SQLSERVER }}" "true"
+          env_sync_add "Database__Provider" "${{ vars.DATABASE__PROVIDER }}" "false"
+          env_sync_add "ASPNETCORE_ENVIRONMENT" "${{ vars.ASPNETCORE_ENVIRONMENT }}" "false"
+          env_sync_add "Jwt__Key" "${{ secrets.SPLITSHARE_JWT_KEY }}" "true"
+          env_sync_add "Uploads__Path" "${{ vars.UPLOADS__PATH }}" "false"
+          env_sync_add "Auth__GoogleClientId" "${{ vars.AUTH__GOOGLECLIENTID }}" "false"
+          env_sync_add "Cors__AllowedOrigins__0" "${{ vars.SPLITSHARE_WEB_BASE_URL }}" "false"
 
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
           if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
