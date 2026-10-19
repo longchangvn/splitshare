@@ -259,6 +259,32 @@ jobs:
             echo "::warning::Web base URL unknown (no SPLITSHARE_WEB_BASE_URL var; SWA '$SWA_NAME' not found) — App__BaseUrl skipped; links keep the localhost default until a later run."
           fi
 
+          # Generic env sync: forward all allowlisted GitHub env vars/secrets to the
+          # container app, but only if not already configured there (existing values win).
+          EXISTING_NAMES=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+            --query "properties.template.containers[0].env[].name" -o tsv 2>/dev/null || true)
+          ENV_SYNC_NAMES=()
+          ENV_SYNC_VALUES=()
+          ENV_SYNC_SECRETS=()
+          env_sync_add() {
+            local name="$1" value="$2" is_secret="$3"
+            if [ -z "$value" ]; then return; fi
+            if echo "$EXISTING_NAMES" | grep -qxF "$name"; then
+              echo "Skipping $name — already configured on container app."
+              return
+            fi
+            if [ "$is_secret" = "true" ]; then
+              echo "::add-mask::$value"
+            fi
+            ENV_SYNC_NAMES+=("$name")
+            ENV_SYNC_VALUES+=("$value")
+            ENV_SYNC_SECRETS+=("$is_secret")
+            echo "Will set $name from GitHub environment."
+          }
+          env_sync_add "Notification__Provider" "${{ vars.NOTIFICATION_PROVIDER }}" "false"
+          env_sync_add "Notification__OneSignal__AppId" "${{ vars.ONESIGNAL_APP_ID }}" "false"
+          env_sync_add "Notification__OneSignal__ApiKey" "${{ secrets.ONESIGNAL_REST_API_KEY }}" "true"
+
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
           if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
             echo "Container app exists — updating image, env vars, ingress and registry in place."
@@ -276,6 +302,9 @@ jobs:
               --arg cors "$SWA_CORS" \
               --arg gcid "$GOOGLE_CLIENT_ID" \
               --arg base "$WEB_BASE" \
+              --argjson env_sync_names "$(printf '%s\n' "${ENV_SYNC_NAMES[@]+"${ENV_SYNC_NAMES[@]}"}" | jq -R . | jq -s .)" \
+              --argjson env_sync_values "$(printf '%s\n' "${ENV_SYNC_VALUES[@]+"${ENV_SYNC_VALUES[@]}"}" | jq -R . | jq -s .)" \
+              --argjson env_sync_secrets "$(printf '%s\n' "${ENV_SYNC_SECRETS[@]+"${ENV_SYNC_SECRETS[@]}"}" | jq -R . | jq -s .)" \
               '
               del(.properties.provisioningState,
                   .properties.runningStatus,
@@ -301,7 +330,8 @@ jobs:
                         # key was already present on the container).
                         and .name != "Auth__GoogleClientId"
                         and (if $cors == "" then true else .name != "Cors__AllowedOrigins__0" end)
-                        and (if $base == "" then true else .name != "App__BaseUrl" end))))
+                        and (if $base == "" then true else .name != "App__BaseUrl" end)
+                         and ([.name] - [$env_sync_names[]] | length == 0 | not)))
                   + [
                       {name: "ASPNETCORE_ENVIRONMENT", value: $asp},
                       {name: "Database__Provider", value: "sqlserver"},
@@ -311,6 +341,10 @@ jobs:
                   + (if $gcid == "" then [] else [{name: "Auth__GoogleClientId", value: $gcid}] end)
                   + (if $cors == "" then [] else [{name: "Cors__AllowedOrigins__0", value: $cors}] end)
                   + (if $base == "" then [] else [{name: "App__BaseUrl", value: $base}] end)
+                  + ([range(0; ($env_sync_names | length))] | map({
+                      "name": $env_sync_names[.],
+                      "value": (if $env_sync_secrets[.] == "true" then $env_sync_values[.] else $env_sync_values[.] end)
+                    }))
                 )
               | .properties.configuration.ingress = ((.properties.configuration.ingress // {})
                   * {external: true, targetPort: 8080, transport: "http", allowInsecure: false})
@@ -355,6 +389,9 @@ jobs:
             if [ -n "$WEB_BASE" ]; then
               ENV_ARGS+=("App__BaseUrl=$WEB_BASE")
             fi
+             for i in "${!ENV_SYNC_NAMES[@]}"; do
+               ENV_ARGS+=("${ENV_SYNC_NAMES[$i]}=${ENV_SYNC_VALUES[$i]}")
+             done
             az containerapp create \
               --name "$CA_NAME" --resource-group "$RG" \
               --environment "$ENV_ID" \
