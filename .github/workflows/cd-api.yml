@@ -331,7 +331,7 @@ jobs:
                         and .name != "Auth__GoogleClientId"
                         and (if $cors == "" then true else .name != "Cors__AllowedOrigins__0" end)
                         and (if $base == "" then true else .name != "App__BaseUrl" end)
-                         and ([.name] - [$env_sync_names[]] | length == 0 | not)))
+                         and ([.name] - [$env_sync_names[]] | length == 0 | not))))
                   + [
                       {name: "ASPNETCORE_ENVIRONMENT", value: $asp},
                       {name: "Database__Provider", value: "sqlserver"},
