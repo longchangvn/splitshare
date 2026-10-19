@@ -35,11 +35,14 @@ env:
   SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
   LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southcentralus' }}
   REG_URL_VAR: ${{ vars.SPLITSHARE_REGISTRY_URL }}
-  ASPNET_ENV: Production
 
 jobs:
   deploy-api:
     name: Build & deploy API
+    # Binds the selected GitHub environment so its vars/secrets (NOTIFICATION__*,
+    # DATABASE__*, AUTH__*, etc.) are actually exposed to this job. Without it,
+    # ${{ vars.* }} / ${{ secrets.* }} resolve to empty strings.
+    environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -61,6 +64,16 @@ jobs:
           # Google login audience. Must match the VITE_GOOGLE_CLIENT_ID that
           # cd-web.yml bakes into the SPA, or token verification fails.
           GOOGLE_CLIENT_ID_SECRET: ${{ secrets.SPLITSHARE_GOOGLE_CLIENT_ID }}
+          # GitHub-environment values consumed by ENV_MAP below. Referenced
+          # indirectly (${!name}) so the map can be a plain data list.
+          GH_NOTIFICATION__PROVIDER: ${{ vars.NOTIFICATION__PROVIDER }}
+          GH_NOTIFICATION__ONESIGNAL__APPID: ${{ vars.NOTIFICATION__ONESIGNAL__APPID }}
+          GH_NOTIFICATION__ONESIGNAL__APIKEY: ${{ secrets.NOTIFICATION__ONESIGNAL__APIKEY }}
+          GH_DATABASE__SQLSERVER: ${{ secrets.DATABASE__SQLSERVER }}
+          GH_DATABASE__PROVIDER: ${{ vars.DATABASE__PROVIDER || 'sqlserver' }}
+          GH_ASPNETCORE_ENVIRONMENT: ${{ vars.ASPNETCORE_ENVIRONMENT || 'Production' }}
+          GH_UPLOADS__PATH: ${{ vars.UPLOADS__PATH || '/data/uploads' }}
+          GH_AUTH__GOOGLECLIENTID: ${{ vars.AUTH__GOOGLECLIENTID }}
         run: |
           set -euo pipefail
 
@@ -265,7 +278,6 @@ jobs:
             --query "properties.template.containers[0].env[].name" -o tsv 2>/dev/null || true)
           ENV_SYNC_NAMES=()
           ENV_SYNC_VALUES=()
-          ENV_SYNC_SECRETS=()
           env_sync_add() {
             local name="$1" value="$2" is_secret="$3"
             if [ -z "$value" ]; then return; fi
@@ -278,19 +290,28 @@ jobs:
             fi
             ENV_SYNC_NAMES+=("$name")
             ENV_SYNC_VALUES+=("$value")
-            ENV_SYNC_SECRETS+=("$is_secret")
             echo "Will set $name from GitHub environment."
           }
-          env_sync_add "Notification__Provider" "${{ vars.NOTIFICATION__PROVIDER }}" "false"
-          env_sync_add "Notification__OneSignal__AppId" "${{ vars.NOTIFICATION__ONESIGNAL__APPID }}" "false"
-          env_sync_add "Notification__OneSignal__ApiKey" "${{ secrets.NOTIFICATION__ONESIGNAL__APIKEY }}" "true"
-          env_sync_add "Database__SqlServer" "${{ secrets.DATABASE__SQLSERVER }}" "true"
-          env_sync_add "Database__Provider" "${{ vars.DATABASE__PROVIDER }}" "false"
-          env_sync_add "ASPNETCORE_ENVIRONMENT" "${{ vars.ASPNETCORE_ENVIRONMENT }}" "false"
-          env_sync_add "Jwt__Key" "${{ secrets.SPLITSHARE_JWT_KEY }}" "true"
-          env_sync_add "Uploads__Path" "${{ vars.UPLOADS__PATH }}" "false"
-          env_sync_add "Auth__GoogleClientId" "${{ vars.AUTH__GOOGLECLIENTID }}" "false"
-          env_sync_add "Cors__AllowedOrigins__0" "${{ vars.SPLITSHARE_WEB_BASE_URL }}" "false"
+          # Container env var mapping: "<container-name>:<source-variable>:<isSecret>".
+          # Source is a shell variable name (GitHub value exported in the step env,
+          # or a value computed above). To add/change a container env var, edit ONLY
+          # this list — no other pipeline change is needed.
+          ENV_MAP=(
+            "Notification__Provider:GH_NOTIFICATION__PROVIDER:false"
+            "Notification__OneSignal__AppId:GH_NOTIFICATION__ONESIGNAL__APPID:false"
+            "Notification__OneSignal__ApiKey:GH_NOTIFICATION__ONESIGNAL__APIKEY:true"
+            "Database__SqlServer:GH_DATABASE__SQLSERVER:true"
+            "Database__Provider:GH_DATABASE__PROVIDER:false"
+            "ASPNETCORE_ENVIRONMENT:GH_ASPNETCORE_ENVIRONMENT:false"
+            "Jwt__Key:JWT_KEY:true"
+            "Uploads__Path:GH_UPLOADS__PATH:false"
+            "Auth__GoogleClientId:GOOGLE_CLIENT_ID:false"
+            "Cors__AllowedOrigins__0:SWA_CORS:false"
+          )
+          for entry in "${ENV_MAP[@]}"; do
+            IFS=':' read -r name src is_secret <<< "$entry"
+            env_sync_add "$name" "${!src:-}" "$is_secret"
+          done
 
           CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
           if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
@@ -304,14 +325,9 @@ jobs:
               --arg server "$REG_SERVER" \
               --arg user "$ACR_USER" \
               --arg pass "$ACR_PASS" \
-              --arg asp "$ASPNET_ENV" \
-              --arg jwt "$JWT_KEY" \
-              --arg cors "$SWA_CORS" \
-              --arg gcid "$GOOGLE_CLIENT_ID" \
               --arg base "$WEB_BASE" \
               --argjson env_sync_names "$(printf '%s\n' "${ENV_SYNC_NAMES[@]+"${ENV_SYNC_NAMES[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
               --argjson env_sync_values "$(printf '%s\n' "${ENV_SYNC_VALUES[@]+"${ENV_SYNC_VALUES[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
-              --argjson env_sync_secrets "$(printf '%s\n' "${ENV_SYNC_SECRETS[@]+"${ENV_SYNC_SECRETS[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
               '
               del(.properties.provisioningState,
                   .properties.runningStatus,
@@ -326,32 +342,17 @@ jobs:
               | .properties.template = (.properties.template // {})
               | .properties.template.containers[0].image = $image
               | .properties.template.containers[0].env = (
+                  # Preserve every existing env var except the ones env-sync will
+                  # re-add (single source of truth, no duplicates).
                   ((.properties.template.containers[0].env // [])
                     | map(select(
-                        .name != "ASPNETCORE_ENVIRONMENT"
-                        and .name != "Database__Provider"
-                        and .name != "Jwt__Key"
-                        and .name != "Uploads__Path"
-                        # Strip and re-add from $gcid so this list stays the
-                        # single source of truth (no duplicate entries when a
-                        # key was already present on the container).
-                        and .name != "Auth__GoogleClientId"
-                        and (if $cors == "" then true else .name != "Cors__AllowedOrigins__0" end)
-                        and (if $base == "" then true else .name != "App__BaseUrl" end)
-                         and ([.name] - [$env_sync_names[]] | length == 0 | not))))
-                  + [
-                      {name: "ASPNETCORE_ENVIRONMENT", value: $asp},
-                      {name: "Database__Provider", value: "sqlserver"},
-                      {name: "Jwt__Key", value: $jwt},
-                      {name: "Uploads__Path", value: "/data/uploads"}
-                    ]
-                  + (if $gcid == "" then [] else [{name: "Auth__GoogleClientId", value: $gcid}] end)
-                  + (if $cors == "" then [] else [{name: "Cors__AllowedOrigins__0", value: $cors}] end)
-                  + (if $base == "" then [] else [{name: "App__BaseUrl", value: $base}] end)
+                        ([.name] - $env_sync_names | length) > 0
+                        and (if $base == "" then true else .name != "App__BaseUrl" end))))
                   + ([range(0; ($env_sync_names | length))] | map({
                       "name": $env_sync_names[.],
-                      "value": (if $env_sync_secrets[.] == "true" then $env_sync_values[.] else $env_sync_values[.] end)
+                      "value": $env_sync_values[.]
                     }))
+                  + (if $base == "" then [] else [{name: "App__BaseUrl", value: $base}] end)
                 )
               | .properties.configuration.ingress = ((.properties.configuration.ingress // {})
                   * {external: true, targetPort: 8080, transport: "http", allowInsecure: false})
@@ -381,24 +382,14 @@ jobs:
             done
           else
             echo "Container app does not exist — creating it."
-            ENV_ARGS=(
-              "ASPNETCORE_ENVIRONMENT=$ASPNET_ENV"
-              "Database__Provider=sqlserver"
-              "Jwt__Key=$JWT_KEY"
-              "Uploads__Path=/data/uploads"
-            )
-            if [ -n "$GOOGLE_CLIENT_ID" ]; then
-              ENV_ARGS+=("Auth__GoogleClientId=$GOOGLE_CLIENT_ID")
-            fi
-            if [ -n "$SWA_CORS" ]; then
-              ENV_ARGS+=("Cors__AllowedOrigins__0=$SWA_CORS")
-            fi
+            # All mapped env vars come from ENV_SYNC_NAMES/VALUES (built above).
+            ENV_ARGS=()
+            for i in "${!ENV_SYNC_NAMES[@]}"; do
+              [ -n "${ENV_SYNC_NAMES[$i]}" ] && [ -n "${ENV_SYNC_VALUES[$i]}" ] && ENV_ARGS+=("${ENV_SYNC_NAMES[$i]}=${ENV_SYNC_VALUES[$i]}")
+            done
             if [ -n "$WEB_BASE" ]; then
               ENV_ARGS+=("App__BaseUrl=$WEB_BASE")
             fi
-             for i in "${!ENV_SYNC_NAMES[@]}"; do
-               [ -n "${ENV_SYNC_NAMES[$i]}" ] && [ -n "${ENV_SYNC_VALUES[$i]}" ] && ENV_ARGS+=("${ENV_SYNC_NAMES[$i]}=${ENV_SYNC_VALUES[$i]}")
-             done
             az containerapp create \
               --name "$CA_NAME" --resource-group "$RG" \
               --environment "$ENV_ID" \
