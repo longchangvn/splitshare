@@ -302,9 +302,9 @@ jobs:
               --arg cors "$SWA_CORS" \
               --arg gcid "$GOOGLE_CLIENT_ID" \
               --arg base "$WEB_BASE" \
-              --argjson env_sync_names "$(printf '%s\n' "${ENV_SYNC_NAMES[@]+"${ENV_SYNC_NAMES[@]}"}" | jq -R . | jq -s .)" \
-              --argjson env_sync_values "$(printf '%s\n' "${ENV_SYNC_VALUES[@]+"${ENV_SYNC_VALUES[@]}"}" | jq -R . | jq -s .)" \
-              --argjson env_sync_secrets "$(printf '%s\n' "${ENV_SYNC_SECRETS[@]+"${ENV_SYNC_SECRETS[@]}"}" | jq -R . | jq -s .)" \
+              --argjson env_sync_names "$(printf '%s\n' "${ENV_SYNC_NAMES[@]+"${ENV_SYNC_NAMES[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
+              --argjson env_sync_values "$(printf '%s\n' "${ENV_SYNC_VALUES[@]+"${ENV_SYNC_VALUES[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
+              --argjson env_sync_secrets "$(printf '%s\n' "${ENV_SYNC_SECRETS[@]+"${ENV_SYNC_SECRETS[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
               '
               del(.properties.provisioningState,
                   .properties.runningStatus,
@@ -390,7 +390,7 @@ jobs:
               ENV_ARGS+=("App__BaseUrl=$WEB_BASE")
             fi
              for i in "${!ENV_SYNC_NAMES[@]}"; do
-               ENV_ARGS+=("${ENV_SYNC_NAMES[$i]}=${ENV_SYNC_VALUES[$i]}")
+               [ -n "${ENV_SYNC_NAMES[$i]}" ] && [ -n "${ENV_SYNC_VALUES[$i]}" ] && ENV_ARGS+=("${ENV_SYNC_NAMES[$i]}=${ENV_SYNC_VALUES[$i]}")
              done
             az containerapp create \
               --name "$CA_NAME" --resource-group "$RG" \
