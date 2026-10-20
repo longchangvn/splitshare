@@ -13,7 +13,11 @@ name: CD Web — Azure Static Web Apps
 
 on:
   workflow_dispatch:
-
+    inputs:
+        environment:
+          description: "Select deployment environment"
+          required: true
+          type: environment
 # Same group as cd-api.yml so the two never mutate Azure concurrently.
 concurrency:
   group: deploy-azure-main
@@ -157,8 +161,25 @@ jobs:
           # Public OneSignal app id (embedded in the bundle; not a secret).
           VITE_ONESIGNAL_APP_ID: ${{ vars.SPLITSHARE_ONESIGNAL_APP_ID }}
         run: |
+          echo "=== Build-time env check ==="
+          echo "VITE_API_BASE='${VITE_API_BASE:-<empty>}'"
+          echo "VITE_ONESIGNAL_APP_ID='${VITE_ONESIGNAL_APP_ID:-<empty>}' (length ${#VITE_ONESIGNAL_APP_ID})"
+          echo "VITE_GOOGLE_CLIENT_ID: $([ -n "${VITE_GOOGLE_CLIENT_ID:-}" ] && echo set || echo empty)"
+          if [ -z "${VITE_ONESIGNAL_APP_ID:-}" ]; then
+            echo "::warning::VITE_ONESIGNAL_APP_ID is empty (vars.SPLITSHARE_ONESIGNAL_APP_ID not visible to this job) — the built SPA will show 'Push notifications are not configured for this build'."
+          fi
+
           npm ci
           npm run build
+
+          echo "=== Post-build bundle check ==="
+          if [ -z "${VITE_ONESIGNAL_APP_ID:-}" ]; then
+            echo "Skipped: no OneSignal app id to look for."
+          elif grep -rq "$VITE_ONESIGNAL_APP_ID" dist/assets 2>/dev/null; then
+            echo "OK: OneSignal app id '$VITE_ONESIGNAL_APP_ID' is embedded in dist/assets."
+          else
+            echo "::warning::OneSignal app id was set at build time but was NOT found in dist/assets — check the Vite env inlining."
+          fi
 
       - name: Deploy web to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
