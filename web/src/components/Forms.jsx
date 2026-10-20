@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert, Box, Button, Checkbox, Group, Select, Stack, Text, TextInput,
+  Alert, Button, Checkbox, Group, Modal, Select, Stack, Text, TextInput,
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
+import { categorySelectData } from '../categories.js';
 import { displayNameOf } from './Net.jsx';
+import { useT } from '../prefs.jsx';
 
 const splitVal = (s, type) => {
   if (!s) return '';
@@ -33,9 +35,42 @@ const equalPercent = (n) => {
   return out.map((c) => (c / 100).toString());
 };
 
+const MAX_MONEY_AMOUNT = 1_000_000;
+
+/** Keep only digits + one `.`, max 2 decimal places (currency input). */
+function sanitizeMoneyInput(raw) {
+  let s = String(raw ?? '').replace(/[^\d.]/g, '');
+  const dot = s.indexOf('.');
+  if (dot !== -1) {
+    s = `${s.slice(0, dot + 1)}${s.slice(dot + 1).replace(/\./g, '')}`;
+    const [whole, dec = ''] = s.split('.');
+    s = `${whole.slice(0, 7)}.${dec.slice(0, 2)}`;
+  } else {
+    s = s.slice(0, 7);
+  }
+  if (s.startsWith('.')) s = `0${s}`;
+  return s;
+}
+
+function isValidMoneyAmount(raw) {
+  if (!raw || !/^\d+(\.\d{1,2})?$/.test(raw)) return false;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n <= MAX_MONEY_AMOUNT;
+}
+
+function moneyAmountError(raw, t) {
+  if (!raw) return null;
+  if (!/^\d+(\.\d{1,2})?$/.test(raw)) return t('forms.payment.invalidAmount');
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return t('forms.payment.invalidAmount');
+  if (n > MAX_MONEY_AMOUNT) return t('forms.payment.amountMax', { max: '1,000,000' });
+  return null;
+}
+
 // Expense create/edit with live split preview + un-settle confirm (tasks 8.2/8.3).
 // copyFrom: detail.expense payload to prefill a copy (task 4.1); images carried on save (4.2).
 export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, currency = '' }) {
+  const t = useT();
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const activeIds = new Set(members.map((m) => m.user_id));
@@ -64,9 +99,10 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   };
 
   const [title, setTitle] = useState(
-    existing?.title ?? (copyFrom ? `Copy of ${copyFrom.title}` : ''));
+    existing?.title ?? (copyFrom ? t('forms.expense.copyOf', { title: copyFrom.title }) : ''));
   const [amount, setAmount] = useState(
     source ? (source.amount_cents / 100).toFixed(2) : '');
+  const [amountErr, setAmountErr] = useState(null);
   const [payer, setPayer] = useState(() => {
     const p = source?.payer_id;
     if (p && activeIds.has(p)) return p;
@@ -82,10 +118,13 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const [saving, setSaving] = useState(false);
   const [imgErrs, setImgErrs] = useState([]);
   const [e, setE] = useState(null);
-  // Trip-pack richness.
-  const CATS = ['food', 'transport', 'stay', 'activity', 'shopping', 'health', 'bills', 'other'];
   const todayStr = () => new Date().toISOString().slice(0, 10);
-  const [category, setCategory] = useState(source?.category || 'other');
+  const [categories, setCategories] = useState([]);
+  const [category, setCategory] = useState(source?.category || 'food');
+  const [newCatName, setNewCatName] = useState('');
+  const [addingCat, setAddingCat] = useState(false);
+  const [catModalOpen, setCatModalOpen] = useState(false);
+  const [catModalErr, setCatModalErr] = useState(null);
   const [spentAt, setSpentAt] = useState(() =>
     source?.spent_at ? String(source.spent_at).slice(0, 10) : todayStr());
   const [tax, setTax] = useState(source?.tax_cents ? (source.tax_cents / 100).toFixed(2) : '');
@@ -104,19 +143,19 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     : [];
   // Copy expense never carries receipts: the upload section starts empty.
 
-  const changeType = (t) => {
-    setType(t);
-    if (t === 'EQUAL') return;
+  const changeType = (nextType) => {
+    setType(nextType);
+    if (nextType === 'EQUAL') return;
     // Prefill empty boxes with equal defaults (keeps typed values).
     setValues((prev) => {
       const checked = sel.filter((id) => !(id in prev) || prev[id] === '');
       if (checked.length === 0) return prev;
       const next = { ...prev };
-      if (t === 'PERCENT') {
+      if (nextType === 'PERCENT') {
         const all = sel.filter((id) => !(id in next) || next[id] === '');
         const dist = equalPercent(sel.length);
         sel.forEach((id, i) => { if (all.includes(id)) next[id] = dist[i]; });
-      } else if (t === 'SHARES') {
+      } else if (nextType === 'SHARES') {
         checked.forEach((id) => { next[id] = '1'; });
       }
       return next;
@@ -182,18 +221,70 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     if (nums.some((n) => Number.isNaN(n))) return null;
     if (type === 'EXACT') {
       const sum = nums.reduce((a, b) => a + b, 0);
-      return { text: `sum = $${sum.toFixed(2)} of $${Number(amount || 0).toFixed(2)}`, ok: Math.abs(sum - Number(amount || 0)) < 0.005 };
+      return {
+        text: t('forms.expense.totalsExact', { sum: sum.toFixed(2), total: Number(amount || 0).toFixed(2) }),
+        ok: Math.abs(sum - Number(amount || 0)) < 0.005,
+      };
     }
     if (type === 'PERCENT') {
       const sum = nums.reduce((a, b) => a + b, 0);
-      return { text: `${sum}% of 100%`, ok: Math.abs(sum - 100) < 1e-9 };
+      return { text: t('forms.expense.totalsPercent', { sum }), ok: Math.abs(sum - 100) < 1e-9 };
     }
-    return { text: `${nums.reduce((a, b) => a + b, 0)} shares total`, ok: true };
+    return { text: t('forms.expense.totalsShares', { sum: nums.reduce((a, b) => a + b, 0) }), ok: true };
   })();
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await api.get(`/api/v1/groups/${groupId}/categories`);
+        if (cancelled) return;
+        const list = Array.isArray(rows) ? rows : [];
+        setCategories(list);
+        setCategory((prev) => {
+          if (list.some((c) => c.key === prev)) return prev;
+          if (source?.category && list.some((c) => c.key === source.category)) return source.category;
+          return list.find((c) => c.key === 'food')?.key
+            || list.find((c) => c.key === 'other')?.key
+            || list[0]?.key
+            || prev;
+        });
+      } catch (err) {
+        if (!cancelled) setE(err);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId]);
+
+  const openAddCategory = () => {
+    setNewCatName('');
+    setCatModalErr(null);
+    setCatModalOpen(true);
+  };
+
+  const addCategoryFromModal = async () => {
+    const name = newCatName.trim();
+    if (!name) return;
+    setAddingCat(true);
+    setCatModalErr(null);
+    try {
+      const created = await api.post(`/api/v1/groups/${groupId}/categories`, { name });
+      setCategories((prev) => [...prev, created]);
+      setCategory(created.key);
+      setNewCatName('');
+      setCatModalOpen(false);
+      notifications.show({ message: t('groupDetail.categoryAdded'), color: 'teal' });
+    } catch (err) {
+      setCatModalErr(err);
+    } finally {
+      setAddingCat(false);
+    }
+  };
+
+  useEffect(() => {
     if (!amount || sel.length === 0) { setPreview(null); return; }
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       try {
         const b = build();
         const url = existing
@@ -203,7 +294,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
         setE(null);
       } catch (err) { setPreview(null); setE(err); }
     }, 350);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amount, type, payer, category, spentAt, tax, tip, fee, origCur, origAmt, fxRate,
     JSON.stringify(guests), onlyPresent, sel.join(','), Object.values(values).join('|')]);
@@ -220,7 +311,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     const ok = [];
     for (const f of picked) {
       if (f.size > 10 * 1024 * 1024) {
-        setE({ message: `${f.name}: over 10MB.` });
+        setE({ message: t('forms.expense.over10mb', { name: f.name }) });
         continue;
       }
       ok.push(f);
@@ -241,9 +332,20 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     return failures;
   };
 
+  const onAmountChange = (raw) => {
+    const next = sanitizeMoneyInput(raw);
+    setAmount(next);
+    setAmountErr(moneyAmountError(next, t));
+  };
+
   const submit = async (ev) => {
     ev.preventDefault();
     if (saving) return; // double-submit guard
+    const amtErr = moneyAmountError(amount, t) || (!amount ? t('forms.payment.invalidAmount') : null);
+    if (amtErr || !isValidMoneyAmount(amount)) {
+      setAmountErr(amtErr || t('forms.payment.invalidAmount'));
+      return;
+    }
     setE(null);
     setImgErrs([]);
     setSaving(true);
@@ -255,9 +357,9 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           const failures = await uploadStaged(newId);
           if (failures.length > 0) {
             setImgErrs(failures);
-            notifications.show({ title: 'Expense saved; some receipts failed', message: failures.join('; '), color: 'orange' });
+            notifications.show({ title: t('forms.expense.savedSomeFailed'), message: failures.join('; '), color: 'orange' });
           } else {
-            notifications.show({ title: 'Expense saved with receipts', color: 'teal' });
+            notifications.show({ title: t('forms.expense.savedWithReceipts'), color: 'teal' });
           }
         }
         onDone(r);
@@ -292,7 +394,11 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     await submit(ev);
   };
 
-  const boxLabel = type === 'EXACT' ? 'Exact $' : type === 'PERCENT' ? 'Percent %' : 'Shares';
+  const boxLabel = type === 'EXACT'
+    ? t('forms.expense.exactBox')
+    : type === 'PERCENT'
+      ? t('forms.expense.percentBox')
+      : t('forms.expense.sharesBox');
 
   // Receipt strip: staged (create) or existing images (edit).
   const receiptCount = existing
@@ -307,39 +413,46 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     const vals = entries.map(([, v]) => v);
     const lo = Math.min(...vals);
     const hi = Math.max(...vals);
-    const base = `EQUAL: ${fmt(lo, currency)} × ${entries.length}`;
-    if (hi === lo) return `${base} · sum == total ✓`;
+    const base = fmt(lo, currency);
+    if (hi === lo) {
+      return t('forms.expense.equalNoteOk', { base, count: entries.length });
+    }
     const lucky = entries.filter(([, v]) => v === hi).map(([id]) => displayNameOf(members, id)).join(', ');
-    return `${base} — floor + remainder 1¢ → ${lucky} gets +1¢ · sum == total ✓`;
+    return t('forms.expense.equalNoteLucky', { base, count: entries.length, lucky });
   })();
 
-  const splitTypes = ['EQUAL', 'EXACT', 'PERCENT', 'SHARES'];
+  const splitTypes = [
+    { value: 'EQUAL', label: t('forms.expense.equal') },
+    { value: 'EXACT', label: t('forms.expense.exact') },
+    { value: 'PERCENT', label: t('forms.expense.percent') },
+    { value: 'SHARES', label: t('forms.expense.shares') },
+  ];
+  const catData = categorySelectData(categories, t);
+  const saveActionLabel = isCopy ? t('forms.expense.saveCopy') : t('forms.expense.addExpense');
 
   return (
+    <>
     <form className="wizard-form" onSubmit={existing ? submitEdit : submit}>
       {isCopy && dropped.length > 0 && (
-        <Alert color="yellow" variant="light" title="Former members excluded from the copy">
+        <Alert color="yellow" variant="light" title={t('forms.expense.formerExcluded')}>
           <Text size="sm">{dropped.map((id) => id.slice(0, 8)).join(', ')}</Text>
         </Alert>
       )}
 
-      <section className="wizard-section">
-        <h3 className="wizard-section-title">Basics</h3>
-        <div className="wizard-person" style={{ alignItems: 'stretch', flexDirection: 'column', gap: 8 }}>
+      <div className="wizard-fields">
+        <div className="wizard-person wizard-pay-hint">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             {receiptCount > 0 ? (
               Array.from({ length: Math.min(receiptCount, 3) }).map((_, i) => (
-                <Box key={i} w={40} h={40} style={{ background: '#fff4e5', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flex: 'none' }} aria-hidden>🧾</Box>
+                <span key={i} className="wizard-receipt-thumb" aria-hidden>🧾</span>
               ))
             ) : (
-              <Box w={40} h={40} style={{ border: '1.5px dashed #d7e2dc', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#8a938f', flex: 'none' }} aria-hidden>＋</Box>
+              <span className="wizard-receipt-slot" aria-hidden>＋</span>
             )}
             <div style={{ minWidth: 0, flex: 1 }}>
-              <Text size="sm" fw={600}>{receiptCount}/5 receipts</Text>
+              <Text size="sm" fw={600}>{t('forms.expense.receiptsCount', { count: receiptCount })}</Text>
               <Text size="xs" c="dimmed">
-                {existing
-                  ? 'Manage on the expense page.'
-                  : 'Added now, uploaded on Save · jpg/png/webp/heic ≤10MB'}
+                {existing ? t('forms.expense.receiptsManage') : t('forms.expense.receiptsHint')}
               </Text>
             </div>
             {!existing && (
@@ -352,8 +465,16 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
                   style={{ display: 'none' }}
                   onChange={onPickFiles}
                 />
-                <Button size="xs" variant="light" style={{ flex: 'none' }} disabled={maxStaged <= 0 || staged.length >= maxStaged} onClick={() => fileRef.current?.click()}>
-                  Add receipt{maxStaged <= 0 || staged.length >= maxStaged ? ' (full)' : ''}
+                <Button
+                  size="xs"
+                  variant="light"
+                  style={{ flex: 'none' }}
+                  disabled={maxStaged <= 0 || staged.length >= maxStaged}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  {maxStaged <= 0 || staged.length >= maxStaged
+                    ? t('forms.expense.addReceiptFull')
+                    : t('forms.expense.addReceipt')}
                 </Button>
               </>
             )}
@@ -367,102 +488,149 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
                   <Button size="xs" variant="subtle" color="red" style={{ flex: 'none' }} onClick={() => setStaged(staged.filter((_, j) => j !== i))}>X</Button>
                 </Group>
               ))}
-              <Text size="xs" c="dimmed">Uploads when you click {isCopy ? 'Save copy' : 'Add expense'}.</Text>
+              <Text size="xs" c="dimmed">{t('forms.expense.uploadsOnSave', { action: saveActionLabel })}</Text>
             </Stack>
           )}
         </div>
-        <TextInput label="Title" required placeholder="Dinner" value={title} onChange={(x) => setTitle(x.target.value)} />
-        <TextInput label="Amount" required inputMode="decimal" placeholder="0.00" value={amount} onChange={(x) => setAmount(x.target.value)} />
-        <Group gap="xs" grow>
-          <Select
-            label="Category"
-            value={category}
-            onChange={setCategory}
-            data={CATS}
-            comboboxProps={{ withinPortal: true }}
-          />
-          <TextInput label="Spent on" type="date" value={spentAt} onChange={(x) => setSpentAt(x.target.value)} />
-        </Group>
+
+        <TextInput
+          label={t('forms.expense.title')}
+          required
+          placeholder={t('forms.expense.titlePh')}
+          value={title}
+          onChange={(x) => setTitle(x.target.value)}
+        />
+        <TextInput
+          label={t('forms.expense.amount')}
+          required
+          inputMode="decimal"
+          placeholder="0.00"
+          value={amount}
+          error={amountErr}
+          onChange={(x) => onAmountChange(x.target.value)}
+          onBlur={() => {
+            if (amount) setAmountErr(moneyAmountError(amount, t));
+          }}
+        />
+        <div className="wizard-field">
+          <span className="wizard-label">{t('forms.expense.category')}</span>
+          <Group gap="xs" align="flex-end" wrap="nowrap">
+            <Select
+              style={{ flex: 1 }}
+              value={category || null}
+              onChange={(v) => setCategory(v || '')}
+              data={catData}
+              searchable
+              comboboxProps={{ withinPortal: true }}
+              aria-label={t('forms.expense.category')}
+            />
+            <Button
+              type="button"
+              variant="light"
+              color="teal"
+              className="wizard-cat-add"
+              onClick={openAddCategory}
+            >
+              {t('forms.expense.addCategoryBtn')}
+            </Button>
+          </Group>
+        </div>
+        <TextInput
+          label={t('forms.expense.spentOn')}
+          type="date"
+          value={spentAt}
+          onChange={(x) => setSpentAt(x.target.value)}
+        />
         <Select
-          label="Payer"
+          label={t('forms.expense.payer')}
           value={payer || null}
           onChange={(v) => setPayer(v || '')}
           data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
           comboboxProps={{ withinPortal: true }}
         />
-      </section>
 
-      <details className="wizard-section">
-        <summary className="wizard-section-title" style={{ cursor: 'pointer' }}>Bill details (optional)</summary>
-        <Group gap="xs" grow>
-          <TextInput label="Tax (opt)" inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
-          <TextInput label="Tip (opt)" inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
-          <TextInput label="Fee (opt)" inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
-        </Group>
-        <div className="wizard-field">
-          <span className="wizard-label">Foreign currency (optional)</span>
-          <Group gap="xs" grow>
-            <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
-            <TextInput placeholder="Amount" inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
-            <TextInput placeholder="Rate" inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
-          </Group>
-          {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
-            <Text size="xs" c="dimmed" mt={6}>≈ {(Number(origAmt) * Number(fxRate)).toFixed(2)} in group currency</Text>
-          )}
-        </div>
-        <div className="wizard-field">
-          <Group justify="space-between" mb={6}>
-            <span className="wizard-label" style={{ marginBottom: 0 }}>Guest shares (optional)</span>
-            <button
-              type="button"
-              className="wizard-chip"
-              onClick={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}
-            >
-              + Guest
-            </button>
-          </Group>
-          {guests.map((g, i) => (
-            <Group key={i} gap="xs" mb={6} wrap="nowrap">
-              <TextInput placeholder="Label" value={g.label} style={{ flex: 2 }}
-                onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: x.target.value } : gg)))} />
-              <TextInput placeholder="$" inputMode="decimal" value={g.amount} style={{ flex: 1 }}
-                onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))} />
-              <Select
-                value={g.covered_by}
-                style={{ flex: 2 }}
-                onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
-                data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
-                comboboxProps={{ withinPortal: true }}
-              />
-              <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((_, j) => j !== i))}>X</Button>
+        <details className="wizard-optional">
+          <summary>{t('forms.expense.billDetails')}</summary>
+          <div className="wizard-optional-body">
+            <Group gap="xs" grow>
+              <TextInput label={t('forms.expense.taxOpt')} inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
+              <TextInput label={t('forms.expense.tipOpt')} inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
+              <TextInput label={t('forms.expense.feeOpt')} inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
             </Group>
-          ))}
-          {guests.length === 0 && (
-            <Text size="xs" c="dimmed">Extra mouths covered by a member (on top of their share).</Text>
-          )}
-        </div>
-        <Checkbox
-          checked={onlyPresent}
-          onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
-          label="Only members present (joined before spent date)"
-        />
-      </details>
+            <div className="wizard-field">
+              <span className="wizard-label">{t('forms.expense.foreign')}</span>
+              <Group gap="xs" grow>
+                <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
+                <TextInput placeholder={t('forms.expense.fxAmount')} inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
+                <TextInput placeholder={t('forms.expense.fxRate')} inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
+              </Group>
+              {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
+                <Text size="xs" c="dimmed" mt={6}>
+                  {t('forms.expense.fxApprox', { amount: (Number(origAmt) * Number(fxRate)).toFixed(2) })}
+                </Text>
+              )}
+            </div>
+            <div className="wizard-field">
+              <Group justify="space-between" mb={6}>
+                <span className="wizard-label" style={{ marginBottom: 0 }}>{t('forms.expense.guestShares')}</span>
+                <button
+                  type="button"
+                  className="wizard-chip"
+                  onClick={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}
+                >
+                  {t('forms.expense.addGuest')}
+                </button>
+              </Group>
+              {guests.map((g, i) => (
+                <Group key={i} gap="xs" mb={6} wrap="nowrap">
+                  <TextInput
+                    placeholder={t('forms.expense.guestLabel')}
+                    value={g.label}
+                    style={{ flex: 2 }}
+                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: x.target.value } : gg)))}
+                  />
+                  <TextInput
+                    placeholder="$"
+                    inputMode="decimal"
+                    value={g.amount}
+                    style={{ flex: 1 }}
+                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))}
+                  />
+                  <Select
+                    value={g.covered_by}
+                    style={{ flex: 2 }}
+                    onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
+                    data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
+                    comboboxProps={{ withinPortal: true }}
+                  />
+                  <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((_, j) => j !== i))}>X</Button>
+                </Group>
+              ))}
+              {guests.length === 0 && (
+                <Text size="xs" c="dimmed">{t('forms.expense.guestHint')}</Text>
+              )}
+            </div>
+            <Checkbox
+              checked={onlyPresent}
+              onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
+              label={t('forms.expense.onlyPresent')}
+            />
+          </div>
+        </details>
 
-      <section className="wizard-section">
-        <h3 className="wizard-section-title">Split</h3>
         <div className="wizard-field">
-          <span className="wizard-label">Method</span>
-          <div className="wizard-chips" role="radiogroup" aria-label="Split type">
-            {splitTypes.map((t) => (
+          <span className="wizard-label">{t('forms.expense.method')}</span>
+          <div className="wizard-chips" role="radiogroup" aria-label={t('forms.expense.method')}>
+            {splitTypes.map((st) => (
               <button
-                key={t}
+                key={st.value}
                 type="button"
                 role="radio"
-                className={type === t ? 'wizard-chip is-on' : 'wizard-chip'}
-                aria-checked={type === t}
-                onClick={() => changeType(t)}
+                className={type === st.value ? 'wizard-chip is-on' : 'wizard-chip'}
+                aria-checked={type === st.value}
+                onClick={() => changeType(st.value)}
               >
-                {t.charAt(0) + t.slice(1).toLowerCase()}
+                {st.label}
               </button>
             ))}
           </div>
@@ -471,7 +639,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           <Text size="xs" c="dimmed">{equalNote}</Text>
         )}
         <div className="wizard-field">
-          <span className="wizard-label">Participants</span>
+          <span className="wizard-label">{t('forms.expense.participants')}</span>
           <Stack gap={8}>
             {members.map((m) => (
               <div key={m.user_id} className="wizard-person">
@@ -500,29 +668,29 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           <Text size="sm" c={totals.ok ? 'teal' : 'orange'}>{totals.text}</Text>
         )}
         {preview && (
-          <div className="wizard-person" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-            <Text size="sm" fw={600}>Live preview</Text>
-            <Text size="sm" mt={4}>
+          <div className="wizard-person wizard-pay-hint">
+            <Text size="sm" fw={600}>{t('forms.expense.livePreview')}</Text>
+            <Text size="sm">
               {Object.entries(preview.shares || {}).map(([id, v]) => (
                 `${displayNameOf(members, id)} ${fmt(v, currency)}`
               )).join(' · ')}
             </Text>
             {preview.unsettled_user_ids?.length > 0 && (
-              <Text size="sm" fw={600} c="orange" mt={4}>
-                Will un-settle {preview.unsettled_user_ids.length} member(s)
+              <Text size="sm" fw={600} c="orange">
+                {t('forms.expense.unsettle', { count: preview.unsettled_user_ids.length })}
               </Text>
             )}
           </div>
         )}
-      </section>
+      </div>
 
       {confirm && (
-        <Alert color="orange" variant="light" title="This will un-settle the following members">
-          <Text size="sm" mb="xs">{confirm.join(', ')}. Continue?</Text>
+        <Alert color="orange" variant="light" title={t('forms.expense.unsettleConfirm')}>
+          <Text size="sm" mb="xs">{t('forms.expense.unsettleContinue', { names: confirm.join(', ') })}</Text>
           <Group gap="xs">
-            <Button className="wizard-primary" size="sm" type="submit" loading={saving}>Yes, save</Button>
+            <Button className="wizard-primary" size="sm" type="submit" loading={saving}>{t('forms.expense.yesSave')}</Button>
             <Button className="wizard-back" size="sm" onClick={() => { setConfirm(null); setPending(null); }}>
-              Cancel
+              {t('common.cancel')}
             </Button>
           </Group>
         </Alert>
@@ -534,25 +702,76 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           type="submit"
           loading={saving}
         >
-          {existing ? 'Save changes' : isCopy ? 'Save copy' : 'Add expense'}
+          {existing ? t('common.saveChanges') : saveActionLabel}
         </Button>
       )}
       {imgErrs.length > 0 && (
-        <Alert color="orange" variant="light" title="Receipt carry-over failed">
+        <Alert color="orange" variant="light" title={t('forms.expense.receiptFailed')}>
           <Text size="sm">{imgErrs.join('; ')}</Text>
         </Alert>
       )}
       <Err e={e} />
     </form>
+
+    <Modal
+      opened={catModalOpen}
+      onClose={() => { if (!addingCat) setCatModalOpen(false); }}
+      title={t('forms.expense.addCategory')}
+      centered
+      size="sm"
+      radius="lg"
+      overlayProps={{ backgroundOpacity: 0.45, blur: 4 }}
+      zIndex={400}
+    >
+      <Stack gap="sm">
+        <TextInput
+          label={t('groupDetail.categoryName')}
+          placeholder={t('forms.expense.addCategoryPh')}
+          value={newCatName}
+          data-autofocus
+          autoFocus
+          onChange={(x) => setNewCatName(x.target.value)}
+          onKeyDown={(ev) => {
+            if (ev.key === 'Enter') {
+              ev.preventDefault();
+              addCategoryFromModal();
+            }
+          }}
+        />
+        <Err e={catModalErr} />
+        <Group justify="flex-end" gap="xs">
+          <Button
+            variant="default"
+            disabled={addingCat}
+            onClick={() => setCatModalOpen(false)}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            color="teal"
+            loading={addingCat}
+            disabled={!newCatName.trim()}
+            onClick={addCategoryFromModal}
+          >
+            {t('forms.expense.addCategoryBtn')}
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
+    </>
   );
 }
 
 export function PaymentForm({ groupId, members, preset, onDone }) {
+  const t = useT();
   const options = [...members];
   for (const key of ['from_user_id', 'to_user_id']) {
     const id = preset?.[key];
     if (id && !options.some((m) => m.user_id === id)) {
-      options.push({ user_id: id, display_name: `${id.slice(0, 8)} (former member)` });
+      options.push({
+        user_id: id,
+        display_name: t('forms.payment.formerMember', { id: id.slice(0, 8) }),
+      });
     }
   }
   const [from, setFrom] = useState(preset?.from_user_id || '');
@@ -563,6 +782,7 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
   const [proofRef, setProofRef] = useState('');
   const [handles, setHandles] = useState([]);
   const [e, setE] = useState(null);
+  const [amountErr, setAmountErr] = useState(null);
   const [paying, setPaying] = useState(false);
 
   // Settle sheet: show the receiver's payment handles + exact amount.
@@ -571,9 +791,21 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
     api.get(`/api/v1/users/${to}/handles`).then(setHandles).catch(() => setHandles([]));
   }, [to]);
 
+  const onAmountChange = (raw) => {
+    const next = sanitizeMoneyInput(raw);
+    setAmount(next);
+    setAmountErr(moneyAmountError(next, t));
+  };
+
   const go = async (ev) => {
     ev.preventDefault();
     if (paying) return;
+    const err = moneyAmountError(amount, t) || (!amount ? t('forms.payment.invalidAmount') : null);
+    if (err || !isValidMoneyAmount(amount)) {
+      setAmountErr(err || t('forms.payment.invalidAmount'));
+      return;
+    }
+    setAmountErr(null);
     setPaying(true);
     try {
       const r = await api.post(`/api/v1/groups/${groupId}/payments`,
@@ -584,13 +816,16 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
 
   const data = options.map((m) => ({ value: m.user_id, label: m.display_name }));
   const toName = options.find((m) => m.user_id === to)?.display_name;
-  const methods = ['cash', 'transfer', 'other'];
+  const methods = [
+    { value: 'cash', label: t('forms.payment.cash') },
+    { value: 'transfer', label: t('forms.payment.bank') },
+    { value: 'other', label: t('forms.payment.other') },
+  ];
   return (
     <form className="wizard-form" onSubmit={go}>
-      <section className="wizard-section">
-        <h3 className="wizard-section-title">Transfer</h3>
+      <div className="wizard-fields">
         <Select
-          label="From"
+          label={t('forms.payment.from')}
           required
           searchable
           value={from || null}
@@ -599,7 +834,7 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           comboboxProps={{ withinPortal: true }}
         />
         <Select
-          label="To"
+          label={t('forms.payment.to')}
           required
           searchable
           value={to || null}
@@ -608,58 +843,69 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           comboboxProps={{ withinPortal: true }}
         />
         <TextInput
-          label="Amount"
+          label={t('forms.expense.amount')}
           required
           inputMode="decimal"
           placeholder="0.00"
           value={amount}
-          onChange={(x) => setAmount(x.target.value)}
+          error={amountErr}
+          onChange={(x) => onAmountChange(x.target.value)}
+          onBlur={() => {
+            if (amount) setAmountErr(moneyAmountError(amount, t));
+          }}
         />
         {to && (
-          <div className="wizard-person" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-            <Text size="sm" fw={600}>Pay {toName}{amount ? ` · ${amount}` : ''}</Text>
+          <div className="wizard-person wizard-pay-hint">
+            <Text size="sm" fw={600}>
+              {isValidMoneyAmount(amount)
+                ? t('forms.payment.payNamedAmount', { name: toName, amount })
+                : t('forms.payment.payNamed', { name: toName })}
+            </Text>
             {handles.length === 0
-              ? <Text size="xs" c="dimmed">No payment accounts on file — ask {toName} to add one in Profile.</Text>
+              ? (
+                <Text size="xs" c="dimmed">
+                  {t('forms.payment.noAccountsHint', { name: toName })}
+                </Text>
+              )
               : handles.map((h) => (
                 <Text key={h.handle_id} size="sm">{h.label}: <b>{h.details}</b></Text>
               ))}
           </div>
         )}
-      </section>
-      <section className="wizard-section">
-        <h3 className="wizard-section-title">Details</h3>
         <div className="wizard-field">
-          <span className="wizard-label">Method</span>
-          <div className="wizard-chips" role="radiogroup" aria-label="Payment method">
+          <span className="wizard-label">{t('forms.payment.method')}</span>
+          <div className="wizard-chips" role="radiogroup" aria-label={t('forms.payment.method')}>
             {methods.map((m) => (
               <button
-                key={m}
+                key={m.value}
                 type="button"
                 role="radio"
-                className={method === m ? 'wizard-chip is-on' : 'wizard-chip'}
-                aria-checked={method === m}
-                onClick={() => setMethod(m)}
+                className={method === m.value ? 'wizard-chip is-on' : 'wizard-chip'}
+                aria-checked={method === m.value}
+                onClick={() => setMethod(m.value)}
               >
-                {m.charAt(0).toUpperCase() + m.slice(1)}
+                {m.label}
               </button>
             ))}
           </div>
         </div>
         <TextInput
-          label="Note (optional)"
-          placeholder="Dinner repayment"
+          label={t('forms.payment.note')}
+          placeholder={t('forms.payment.notePh')}
           value={note}
           onChange={(x) => setNote(x.target.value)}
         />
         <TextInput
-          label="Proof ref (optional)"
-          description="Transaction id after you paid"
-          placeholder="TXN-123"
+          label={t('forms.payment.proofRef')}
+          description={t('forms.payment.proofHint')}
+          placeholder={t('forms.payment.proofPh')}
           value={proofRef}
           onChange={(x) => setProofRef(x.target.value)}
         />
-      </section>
-      <Button className="wizard-primary" fullWidth type="submit" loading={paying}>Record payment</Button>
+      </div>
+      <Button className="wizard-primary" fullWidth type="submit" loading={paying}>
+        {t('forms.payment.record')}
+      </Button>
       <Err e={e} />
     </form>
   );

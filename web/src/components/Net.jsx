@@ -1,5 +1,5 @@
-import { Badge } from '@mantine/core';
 import { fmt } from '../api.js';
+import { useT } from '../prefs.jsx';
 
 const GROUP_PASTELS = [
   ['#dcefe6', '#b7d9c8'],
@@ -21,10 +21,14 @@ export function pastelFor(name) {
 }
 
 export function Net({ v, c }) {
-  if (v === 0) return <Badge color="gray" variant="light">Settled up</Badge>;
-  return v < 0
-    ? <Badge color="red" variant="light">You owe {fmt(-v, c)}</Badge>
-    : <Badge color="teal" variant="light">You are owed {fmt(v, c)}</Badge>;
+  const t = useT();
+  if (v === 0) {
+    return <span className="net-chip is-settled">{t('net.settledUp')}</span>;
+  }
+  if (v < 0) {
+    return <span className="net-chip is-owe">{t('net.youOwe', { amount: fmt(-v, c) })}</span>;
+  }
+  return <span className="net-chip is-owed">{t('net.youAreOwed', { amount: fmt(v, c) })}</span>;
 }
 
 export function displayNameOf(members, userId) {
@@ -39,43 +43,31 @@ export function initialsOf(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
-const ACTIVITY_KIND_SHORT = {
-  join: 'JOIN',
-  expense: 'EXP',
-  payment: 'PAY',
-  comment: 'NOTE',
-  nudge: 'NUDGE',
-};
-
-const ACTIVITY_KIND_FULL = {
-  join: 'join',
-  expense: 'expense',
-  payment: 'payment',
-  comment: 'comment',
-  nudge: 'nudge',
-};
+const ACTIVITY_KIND_KEYS = ['join', 'expense', 'payment', 'comment', 'nudge'];
 
 /** Kind mark — soft tile with accent dot + short uppercase label. */
 export function ActivityKindThumb({ kind, className = '' }) {
+  const t = useT();
   const key = String(kind || 'other').toLowerCase();
-  const label = ACTIVITY_KIND_SHORT[key] || key.slice(0, 4).toUpperCase();
-  const full = ACTIVITY_KIND_FULL[key] || key;
+  const known = ACTIVITY_KIND_KEYS.includes(key);
+  const label = known ? t(`activity.kindShort.${key}`) : key.slice(0, 4).toUpperCase();
+  const full = known ? t(`activity.kind.${key}`) : key;
   return (
     <span
       className={`activity-kind-thumb is-${key} ${className}`.trim()}
       aria-label={full}
       title={full}
     >
-      <span className="activity-kind-dot" aria-hidden />
       <span className="activity-kind-label">{label}</span>
     </span>
   );
 }
 
 export function ActivityKindTag({ kind }) {
+  const t = useT();
   if (!kind) return null;
   const key = String(kind).toLowerCase();
-  const label = ACTIVITY_KIND_FULL[key] || key;
+  const label = ACTIVITY_KIND_KEYS.includes(key) ? t(`activity.kind.${key}`) : key;
   return <span className={`activity-kind is-${key}`}>{label}</span>;
 }
 
@@ -99,7 +91,9 @@ export function GroupThumb({ name, size = 44, className = '' }) {
   );
 }
 
-export function ChevronRight({ size = 20, label = 'View details' }) {
+export function ChevronRight({ size = 20, label }) {
+  const t = useT();
+  const aria = label || t('common.viewDetails');
   return (
     <svg
       width={size}
@@ -111,7 +105,7 @@ export function ChevronRight({ size = 20, label = 'View details' }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       role="img"
-      aria-label={label}
+      aria-label={aria}
       style={{ flex: 'none', opacity: 0.55 }}
     >
       <path d="m 9 6 6 6 -6 6" />

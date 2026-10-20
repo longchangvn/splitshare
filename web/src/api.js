@@ -95,6 +95,21 @@ export const api = {
   del: (p) => reqAuth('DELETE', p),
 };
 
-export function fmt(cents, currency) {
-  return `${currency} ${(cents / 100).toFixed(2)}`;
+const CURRENCY_SYMBOL = {
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  VND: '₫',
+};
+
+/** Format cents → money string with grouping. USD → `$1,789.32`. */
+export function fmt(cents, currency = 'USD') {
+  const code = String(currency || 'USD').toUpperCase();
+  const value = Number(cents || 0) / 100;
+  const amount = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(value) ? value : 0);
+  const sym = CURRENCY_SYMBOL[code];
+  return sym ? `${sym}${amount}` : `${code} ${amount}`;
 }

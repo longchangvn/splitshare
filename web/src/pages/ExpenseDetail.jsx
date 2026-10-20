@@ -1,37 +1,52 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Badge, Button, Card, Center, Code, Group, Image, List, Loader, Stack,
+  Anchor, Badge, Button, Card, Code, Group, Image, List, Modal, Stack,
   Text, TextInput, Title,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
-import { api, apiBlob, fmt } from '../api.js';
+import { api, fmt } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { displayNameOf } from '../components/Net.jsx';
 import { ExpenseForm } from '../components/Forms.jsx';
+import { categoryLabelForKey } from '../categories.js';
+import { useT } from '../prefs.jsx';
 
 const statusColor = (s) => (s === 'LOCKED' ? 'gray' : s === 'OPEN' ? 'teal' : 'blue');
 
 export function ExpenseDetail() {
+  const t = useT();
+  const { user } = useAuth();
   const { id, eid } = useParams();
   const nav = useNavigate();
   const location = useLocation();
+  const isMobile = useMediaQuery('(max-width: 36em)');
   const [d, setD] = useState(null);
   const [members, setMembers] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [groupCur, setGroupCur] = useState('');
-  const [edit, setEdit] = useState(!!location.state?.openEdit);
+  const [myRole, setMyRole] = useState(null);
+  const [edit, setEdit] = useState(false);
   const [e, setE] = useState(null);
+  const wantEdit = !!location.state?.openEdit;
 
   const load = async () => {
     try {
-      const [det, g] = await Promise.all([
+      const [det, g, cats] = await Promise.all([
         api.get(`/api/v1/expenses/${eid}`),
         api.get(`/api/v1/groups/${id}`).catch(() => null),
+        api.get(`/api/v1/groups/${id}/categories`).catch(() => []),
       ]);
       setD(det);
-      if (g) { setMembers(g.members); setGroupCur(g.currency || ''); }
+      setCategories(Array.isArray(cats) ? cats : []);
+      if (g) {
+        setMembers(g.members);
+        setGroupCur(g.currency || '');
+        setMyRole(g.my_role || null);
+      }
     } catch (err) { setE(err); }
   };
   useEffect(() => { load(); }, [eid]);
@@ -84,27 +99,36 @@ export function ExpenseDetail() {
     try { await api.del(`/api/v1/images/${iid}`); load(); } catch (err) { setE(err); } finally { setDeletingImg(null); }
   };
 
-  if (!d) {
+  const x = d?.expense;
+  const canModify = !!x
+    && String(x.status || '').toUpperCase() === 'OPEN'
+    && (myRole === 'owner' || myRole === 'treasurer' || (!!user?.user_id && x.created_by === user.user_id));
+
+  useEffect(() => {
+    if (wantEdit && canModify) setEdit(true);
+  }, [wantEdit, canModify]);
+
+  if (!d || !x) {
     return (
       <Shell>
-        <Text c="dimmed">Loading…</Text>
+        <Text c="dimmed">{t('common.loading')}</Text>
         <Err e={e} />
       </Shell>
     );
   }
-  const x = d.expense;
+
   return (
     <Shell>
-      <Anchor component={Link} to={`/groups/${id}`} size="sm">← Back to group</Anchor>
+      <Anchor component={Link} to={`/groups/${id}`} size="sm">{t('common.backToGroup')}</Anchor>
       <Card withBorder shadow="sm" padding="md" radius="md" mt="xs">
         <Group gap="sm" mb="xs">
           <Title order={2}>{x.title}</Title>
           <Badge color={statusColor(x.status)} variant="light">{x.status}</Badge>
         </Group>
         {x.description && <Text mb="sm">{x.description}</Text>}
-        <Text size="sm" mb="sm">Paid by <b>{displayNameOf(members, x.payer_id)}</b> · <b>{fmt(x.amount_cents, '')}</b></Text>
+        <Text size="sm" mb="sm">{t('expense.paidBy')} <b>{displayNameOf(members, x.payer_id)}</b> · <b>{fmt(x.amount_cents, '')}</b></Text>
         <Group gap="xs" mb="sm">
-          {x.category && <Badge variant="light">{x.category}</Badge>}
+          {x.category && <Badge variant="light">{categoryLabelForKey(x.category, categories, t)}</Badge>}
           {x.spent_at && <Badge variant="light">{String(x.spent_at).slice(0, 10)}</Badge>}
         </Group>
         {((x.tax_cents > 0 || x.tip_cents > 0 || x.fee_cents > 0) || x.orig_currency || (x.guests || []).length > 0) && (
@@ -120,34 +144,54 @@ export function ExpenseDetail() {
         )}
         <Err e={e} />
         <Group gap="sm">
-          <Button variant="light" onClick={() => setEdit(!edit)}>
-            {edit ? 'Close editor' : 'Edit'}
-          </Button>
-          <Button variant="light" color="red" onClick={del}>Delete</Button>
+          {canModify && (
+            <Button variant="light" onClick={() => setEdit(true)}>
+              {t('groupDetail.editExpense')}
+            </Button>
+          )}
+          {canModify && (
+            <Button variant="light" color="red" onClick={del}>{t('common.delete')}</Button>
+          )}
           <Button
             variant="light"
             color="teal"
             onClick={() => nav(`/groups/${id}`, { state: { copyFrom: x } })}
           >
-            Copy
+            {t('groupDetail.copyExpense')}
           </Button>
         </Group>
       </Card>
 
-      {edit && (
-        <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
-          <ExpenseForm
-            groupId={id}
-            members={members}
-            existing={x}
-            currency={groupCur}
-            onDone={() => { setEdit(false); load(); }}
-          />
-        </Card>
-      )}
+      <Modal
+        opened={edit && canModify}
+        onClose={() => setEdit(false)}
+        closeOnClickOutside={false}
+        title={<span className="wizard-title-name">{t('groupDetail.editExpense')}</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={560}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+        fullScreen={isMobile}
+      >
+        <ExpenseForm
+          key={x.expense_id}
+          groupId={id}
+          members={members}
+          existing={x}
+          currency={groupCur}
+          onDone={() => { setEdit(false); load(); }}
+        />
+      </Modal>
 
       <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
-        <Title order={4} mb="sm">Splits</Title>
+        <Title order={4} mb="sm">{t('expense.splits')}</Title>
         <List size="sm" spacing="xs">
           {x.splits.map((s) => (
             <List.Item key={s.user_id}>
@@ -159,7 +203,7 @@ export function ExpenseDetail() {
 
       <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
         <Group justify="space-between" mb="sm">
-          <Title order={4}>Receipts</Title>
+          <Title order={4}>{t('expense.receipts')}</Title>
           <input
             ref={fileRef}
             type="file"
@@ -167,9 +211,9 @@ export function ExpenseDetail() {
             style={{ display: 'none' }}
             onChange={onFilePicked}
           />
-          <Button size="xs" loading={uploading} onClick={pickFile}>Upload receipt</Button>
+          <Button size="xs" loading={uploading} onClick={pickFile}>{t('expense.uploadReceipt')}</Button>
         </Group>
-        {x.images.length === 0 && <Text size="sm" c="dimmed">No receipts attached. jpg/png/webp/heic ≤10MB, GPS stripped.</Text>}
+        {x.images.length === 0 && <Text size="sm" c="dimmed">{t('expense.noReceipts')}</Text>}
         <Group gap="sm">
           {x.images.map((i) => (
             <Stack key={i.image_id} gap={4} align="center">
@@ -202,6 +246,7 @@ export function ExpenseDetail() {
 }
 
 function Comments({ eid, members }) {
+  const t = useT();
   const [items, setItems] = useState([]);
   const [body, setBody] = useState('');
   const [e, setE] = useState(null);
@@ -232,7 +277,7 @@ function Comments({ eid, members }) {
             <Button size="xs" variant="subtle" color="red" onClick={() => del(c.comment_id)}>Delete</Button>
           </Group>
         ))}
-        {items.length === 0 && <Text size="sm" c="dimmed">No comments yet.</Text>}
+        {items.length === 0 && <Text size="sm" c="dimmed">{t('expense.noComments')}</Text>}
       </Stack>
       <form onSubmit={send}>
         <Group gap="xs" align="flex-end">
@@ -248,23 +293,18 @@ function Comments({ eid, members }) {
 function ImgView({ id, mime, size }) {
   const [url, setUrl] = useState(null);
   const [err, setErr] = useState(null);
-  const urlRef = useRef(null);
   useEffect(() => {
     let live = true;
     (async () => {
       try {
-        const r = await apiBlob(`/api/v1/images/${id}`);
+        const r = await fetch(`/api/v1/images/${id}`,
+          { headers: { Authorization: `Bearer ${localStorage.getItem('ss_at')}` } });
         if (!r.ok) { if (live) setErr(`load failed (${r.status})`); return; }
         const blob = await r.blob();
-        if (live) { urlRef.current = URL.createObjectURL(blob); setUrl(urlRef.current); }
+        if (live) setUrl(URL.createObjectURL(blob));
       } catch (e) { if (live) setErr(String(e?.message || e)); }
     })();
-    return () => {
-      live = false;
-      // Revoke via ref: the closure captures the initial null state, so the
-      // object URL created above would otherwise leak on unmount.
-      urlRef.current && URL.revokeObjectURL(urlRef.current);
-    };
+    return () => { live = false; if (url) URL.revokeObjectURL(url); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   if (err) return <Text size="xs" c="red">{mime} {(size / 1024).toFixed(1)}KB · {err}</Text>;
@@ -276,25 +316,12 @@ function ImgView({ id, mime, size }) {
   );
 }
 
-// /g/:token — join hub. Anonymous visitors get an invite landing with
-// return-to login/register links; once authenticated the join runs here
-// automatically (covers login, register, and returning sessions alike).
 export function JoinPage() {
+  const t = useT();
   const { token } = useParams();
   const nav = useNavigate();
-  const { user, loading } = useAuth();
-  const [msg, setMsg] = useState(null);
-  const [e, setE] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const next = `/g/${token}`;
-
+  const [msg, setMsg] = useState(t('expense.joining'));
   useEffect(() => {
-    // Best-effort public preview so the landing can name the group.
-    api.get(`/api/v1/invites/${token}`).then(setPreview).catch(setE);
-  }, [token]);
-
-  useEffect(() => {
-    if (loading || !user) return; // wait for auth; the landing handles anonymous
     api.post('/api/v1/groups/join', { token })
       .then((r) => {
         const gid = r.group_id ?? r.group?.id;
@@ -302,36 +329,12 @@ export function JoinPage() {
         nav(`/groups/${gid}`);
       })
       .catch((err) => setMsg(`Join failed: ${err.code || ''} ${err.message}`));
-  }, [user, loading, token, nav]);
-
-  if (loading) return <Center h={240}><Loader /></Center>;
-  if (!user) {
-    return (
-      <Shell>
-        <Card withBorder shadow="sm" padding="lg" radius="md">
-          <Stack gap="sm">
-            <Title order={4}>You're invited to SplitShare</Title>
-            <Text size="sm">
-              {preview
-                ? `“${preview.name}” (${preview.currency || 'USD'}) is waiting for you — log in or create an account to join.`
-                : 'Log in or create an account to accept this invite.'}
-            </Text>
-            <Group>
-              <Button component={Link} to={`/login?next=${encodeURIComponent(next)}`}>Log in</Button>
-              <Button variant="light" component={Link} to={`/register?next=${encodeURIComponent(next)}`}>Create account</Button>
-            </Group>
-            <Err e={e} />
-            <Text size="xs" c="dimmed">The invite link never expires.</Text>
-          </Stack>
-        </Card>
-      </Shell>
-    );
-  }
+  }, [token, nav]);
   return (
     <Shell>
       <Card withBorder shadow="sm" padding="lg" radius="md">
-        <Text>{msg || 'Joining…'}</Text>
-        <Anchor component={Link} to="/" size="sm">Home</Anchor>
+        <Text>{msg}</Text>
+        <Anchor component={Link} to="/" size="sm">{t('common.home')}</Anchor>
       </Card>
     </Shell>
   );

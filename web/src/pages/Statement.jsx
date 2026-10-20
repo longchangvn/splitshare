@@ -4,8 +4,10 @@ import { Anchor, Box, Card, Group, Select, Stack, Table, Text, Title, ScrollArea
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
+import { useT } from '../prefs.jsx';
 
 export function StatementPanel({ groupId, members = [], currency = '', embedded = false }) {
+  const t = useT();
   const [uid, setUid] = useState(members[0]?.user_id || '');
   const [stmt, setStmt] = useState(null);
   const [e, setE] = useState(null);
@@ -90,6 +92,7 @@ export function StatementPanel({ groupId, members = [], currency = '', embedded 
 }
 
 export function Statement() {
+  const t = useT();
   const { id } = useParams();
   const [detail, setDetail] = useState(null);
   const [e, setE] = useState(null);
@@ -100,8 +103,8 @@ export function Statement() {
 
   return (
     <Shell>
-      <Anchor component={Link} to={`/groups/${id}`} size="sm">← Back to group</Anchor>
-      <Title order={2} mt="xs">Statement</Title>
+      <Anchor component={Link} to={`/groups/${id}`} size="sm">{t('common.backToGroup')}</Anchor>
+      <Title order={2} mt="xs">{t('statement.title')}</Title>
       <Err e={e} />
       <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
         {detail ? (
@@ -111,7 +114,7 @@ export function Statement() {
             currency={detail.currency || ''}
           />
         ) : (
-          <Text size="sm" c="dimmed">Loading…</Text>
+          <Text size="sm" c="dimmed">{t('common.loading')}</Text>
         )}
       </Card>
     </Shell>

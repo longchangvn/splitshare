@@ -17,7 +17,8 @@ public sealed record JoinedGroup(Guid GroupId, bool AlreadyMember);
 public sealed record NewInviteLink(string InviteLink);
 public sealed record StatusResult(string Status);
 
-public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSender email, IConfiguration config)
+public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSender email,
+    IConfiguration config, CategoryService categories)
 {
     public const int MaxMembers = 50;
     public const int MaxGroupsPerUser = 200;
@@ -60,6 +61,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         db.Groups.Add(g);
         db.GroupMembers.Add(new GroupMember { GroupId = g.Id, UserId = creatorId, Role = "owner" });
         await db.SaveChangesAsync();
+        await categories.EnsureAsync(g.Id);
 
         var added = new List<Guid>();
         if (memberIds.Count > 0)

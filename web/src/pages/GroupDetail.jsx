@@ -1,21 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  ActionIcon, Anchor, Avatar, Badge, Box, Button, Card, Collapse, CopyButton, Group, Indicator, Loader,
-  Menu, Modal, Progress, ScrollArea, SegmentedControl, Select, Skeleton, Stack, Table, Tabs, Text, Textarea, TextInput, Title,
+  ActionIcon, Anchor, Avatar, Box, Button, Card, Collapse, CopyButton, Group, Indicator, Loader,
+  Menu, Modal, Progress, SegmentedControl, Select, Skeleton, Stack, Tabs, Text, Textarea, TextInput, Title,
   Tooltip,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { api, apiBlob, fmt } from '../api.js';
-import { Err } from '../auth.jsx';
+import { api, fmt } from '../api.js';
+import { Err, useAuth } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
-import { ActivityKindThumb, Net, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
+import { ActivityKindThumb, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
 import { RowMenu } from '../components/Mobile.jsx';
-import { SettlementBox } from '../components/SettlementBox.jsx';
 import { ExpenseForm, PaymentForm } from '../components/Forms.jsx';
+import { categoryLabel, categoryLabelForKey, categorySelectData } from '../categories.js';
 import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
+import { useT } from '../prefs.jsx';
 
 // Mockup receipt thumbnails (docs/mobile-design.html screen 3): category →
 // emoji tile so ledger cards scan like receipts. Pure presentation.
@@ -37,6 +38,8 @@ function tileFor(t) {
 }
 
 export function GroupDetail() {
+  const t = useT();
+  const { user } = useAuth();
   const { id } = useParams();
   const nav = useNavigate();
   const [detail, setDetail] = useState(null);
@@ -63,10 +66,19 @@ export function GroupDetail() {
   const [activityPage, setActivityPage] = useState(1);
   const ACTIVITY_PAGE_SIZE = 10;
   const [rules, setRules] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [catBusy, setCatBusy] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [categoryTarget, setCategoryTarget] = useState(null);
+  const [categoryName, setCategoryName] = useState('');
+  const [categoryDeleteTarget, setCategoryDeleteTarget] = useState(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renName, setRenName] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [showExp, setShowExp] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editExisting, setEditExisting] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payPreset, setPayPreset] = useState(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -86,7 +98,6 @@ export function GroupDetail() {
   const [contactQ, setContactQ] = useState('');
   const [contacts, setContacts] = useState([]);
   const [contactBusy, setContactBusy] = useState(false);
-  const [newSheetOpen, setNewSheetOpen] = useState(false);
   const [activityLoading, setActivityLoading] = useState(false);
   const ledgerReq = useRef(0);
   const [e, setE] = useState(null);
@@ -95,11 +106,17 @@ export function GroupDetail() {
   const location = useLocation();
   const [copyFrom, setCopyFrom] = useState(() => location.state?.copyFrom ?? null);
   // Deep-link handoff from the mobile Activity tab: open on a given tab.
-  const ALL_TABS = ['ledger', 'balances', 'statement', 'people', 'report', 'activity', 'recurring'];
+  const ALL_TABS = ['ledger', 'balances', 'statement', 'people', 'activity', 'recurring'];
   const [tab, setTab] = useState('ledger');
   useEffect(() => {
     let t = location.state?.tab;
     if (t === 'payments') t = 'activity';
+    if (t === 'report') {
+      setTimeout(() => {
+        document.getElementById('group-report')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+      return;
+    }
     if (t && ALL_TABS.includes(t)) {
       setTab(t);
       if (t === 'activity') { loadActivityFeed(); }
@@ -117,8 +134,16 @@ export function GroupDetail() {
 
   const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '');
 
+  const loadCategories = async () => {
+    if (!validId) return;
+    try {
+      const rows = await api.get(`/api/v1/groups/${id}/categories`);
+      const list = Array.isArray(rows) ? rows : [];
+      setCategories(list);
+    } catch (err) { setE(err); }
+  };
   const load = async () => {
-    if (!validId) { setE({ message: 'Invalid group link.' }); return; }
+    if (!validId) { setE({ message: t('errors.invalidGroupLink') }); return; }
     try {
       const [d, m, s, p] = await Promise.all([
         api.get(`/api/v1/groups/${id}`),
@@ -126,7 +151,8 @@ export function GroupDetail() {
         api.get(`/api/v1/groups/${id}/summary`),
         api.get(`/api/v1/groups/${id}/settlement`).catch(() => null),
       ]);
-      setDetail(d); setMe(m); setSummary(s); if (p) setPlan(p); setE(null);
+      setDetail(d); setMe(m); setSummary(s); setPlan(p); setE(null);
+      loadCategories();
     } catch (err) { setE(err); }
   };
   const loadLedger = async () => {
@@ -144,6 +170,23 @@ export function GroupDetail() {
       if (fTo) params.set('to_date', new Date(`${fTo}T23:59:59Z`).toISOString());
       if (fSort === 'oldest') params.set('sort', 'created_at');
       const res = await api.get(`/api/v1/groups/${id}/ledger?${params.toString()}`);
+      const items = res?.items || [];
+      // Older API builds omit ledger.category — fill from expense detail when missing.
+      const missing = items.filter((it) => it.kind === 'expense' && !it.category);
+      if (missing.length > 0) {
+        const pairs = await Promise.all(missing.map(async (it) => {
+          try {
+            const d = await api.get(`/api/v1/expenses/${it.id}`);
+            return [it.id, d?.expense?.category || null];
+          } catch {
+            return [it.id, null];
+          }
+        }));
+        const byId = Object.fromEntries(pairs);
+        res.items = items.map((it) => (
+          byId[it.id] ? { ...it, category: byId[it.id] } : it
+        ));
+      }
       if (req === ledgerReq.current) setLedger(res);
     } catch (err) { setE(err); } finally {
       if (req === ledgerReq.current) setLedgerLoading(false);
@@ -175,7 +218,7 @@ export function GroupDetail() {
         api.get(`/api/v1/groups/${id}/summary`),
         api.get(`/api/v1/groups/${id}/settlement`).catch(() => null),
       ]);
-      setSummary(s); if (p) setPlan(p);
+      setSummary(s); setPlan(p);
     } catch (err) { setE(err); }
   };
   useEffect(() => { load(); }, [id]);
@@ -244,6 +287,16 @@ export function GroupDetail() {
     }
   };
 
+  // Creator, owner, or treasurer can edit OPEN expenses (matches API GuardAsync).
+  const canEditExpense = (item) => {
+    if (!item || item.kind !== 'expense') return false;
+    if (String(item.status || '').toUpperCase() === 'LOCKED') return false;
+    const role = detail?.my_role;
+    if (role === 'owner' || role === 'treasurer') return true;
+    const me = user?.user_id;
+    return !!(me && item.created_by && item.created_by === me);
+  };
+
   // Per-row copy / edit for expenses.
   const copyExpense = async (item) => {
     try {
@@ -253,26 +306,37 @@ export function GroupDetail() {
       setShowExp(true);
     } catch (err) { setE(err); }
   };
-  const editExpense = (item) => nav(`/groups/${id}/expenses/${item.id}`, { state: { openEdit: true } });
+  const editExpense = async (item) => {
+    if (!canEditExpense(item) || editBusy) return;
+    setEditBusy(true);
+    setE(null);
+    try {
+      const d = await api.get(`/api/v1/expenses/${item.id}`);
+      setEditExisting(d.expense);
+      setEditOpen(true);
+    } catch (err) { setE(err); }
+    finally { setEditBusy(false); }
+  };
+  const closeEdit = () => { setEditOpen(false); setEditExisting(null); };
 
   const nudge = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/nudges`, { user_ids: [uid] });
-      notifications.show({ title: `Nudged ${name}`, color: 'teal' });
+      notifications.show({ title: t('groupDetail.nudged', { name }), color: 'teal' });
       loadActivity();
     } catch (err) { setE(err); }
   };
   const reversePay = async (pid) => {
     try {
       await api.post(`/api/v1/payments/${pid}/reverse`, {});
-      notifications.show({ title: 'Payment reversed', color: 'teal' });
+      notifications.show({ title: t('groupDetail.paymentReversed'), color: 'teal' });
       load(); loadLedger(); loadSummary(); loadActivityFeed();
     } catch (err) { setE(err); }
   };
   const setRole = async (uid, role) => {
     try {
       await api.patch(`/api/v1/groups/${id}/members/${uid}`, { role });
-      notifications.show({ title: `Role → ${role}`, color: 'teal' });
+      notifications.show({ title: t('groupDetail.roleUpdated', { role }), color: 'teal' });
       load();
     } catch (err) { setE(err); }
   };
@@ -282,26 +346,64 @@ export function GroupDetail() {
       load();
     } catch (err) { setE(err); }
   };
-  const exportCsv = async () => {
+  const openAddCategory = () => {
+    setCategoryTarget(null);
+    setCategoryName('');
+    setE(null);
+    setCategoryModalOpen(true);
+  };
+  const openEditCategory = (category) => {
+    setCategoryTarget(category);
+    setCategoryName(category.name);
+    setE(null);
+    setCategoryModalOpen(true);
+  };
+  const saveCategory = async (ev) => {
+    ev.preventDefault();
+    const name = categoryName.trim();
+    if (!name) return;
+    setCatBusy(true);
+    setE(null);
     try {
-      const r = await apiBlob(`/api/v1/groups/${id}/export.csv`);
-      if (!r.ok) throw new Error(`export ${r.status}`);
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `${detail?.name || 'group'}-export.csv`; a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) { setE(err); }
+      if (categoryTarget) {
+        await api.patch(`/api/v1/groups/${id}/categories/${categoryTarget.category_id}`, { name });
+      } else {
+        await api.post(`/api/v1/groups/${id}/categories`, { name });
+      }
+      await loadCategories();
+      setCategoryModalOpen(false);
+      notifications.show({ message: t(categoryTarget ? 'groupDetail.categorySaved' : 'groupDetail.categoryAdded'), color: 'teal' });
+    } catch (err) { setE(err); } finally { setCatBusy(false); }
+  };
+  const confirmDeleteCategory = async () => {
+    if (!categoryDeleteTarget) return;
+    setCatBusy(true);
+    setE(null);
+    try {
+      await api.del(`/api/v1/groups/${id}/categories/${categoryDeleteTarget.category_id}`);
+      await loadCategories();
+      setCategoryDeleteTarget(null);
+      notifications.show({ message: t('groupDetail.categoryDeleted'), color: 'teal' });
+    } catch (err) { setE(err); } finally { setCatBusy(false); }
+  };
+  const exportPdf = () => {
+    const prev = document.title;
+    if (detail?.name) document.title = t('report.docTitle', { name: detail.name });
+    document.getElementById('group-report-print')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.setTimeout(() => {
+      window.print();
+      document.title = prev;
+    }, 180);
   };
   const inviteByEmail = async (ev) => {
     ev.preventDefault();
     const list = inviteEmails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
-    if (list.length === 0) { setE({ message: 'Enter at least one email.' }); return; }
+    if (list.length === 0) { setE({ message: t('errors.needEmail') }); return; }
     setInviteBusy(true);
     try {
       const r = await api.post(`/api/v1/groups/${id}/invites`, { emails: list });
       notifications.show({
-        title: 'Invites sent',
+        title: t('invite.sent'),
         message: `added: ${(r.added || []).join(', ') || '—'} · pending: ${(r.pending || []).join(', ') || '—'}`,
         color: 'teal',
       });
@@ -321,7 +423,7 @@ export function GroupDetail() {
   const addFromContact = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/members`, { user_ids: [uid] });
-      notifications.show({ title: `${name} added`, color: 'teal' });
+      notifications.show({ title: t('invite.memberAdded', { name }), color: 'teal' });
       setContacts((prev) => prev.filter((c) => c.user_id !== uid));
       load();
     } catch (err) { setE(err); }
@@ -334,8 +436,8 @@ export function GroupDetail() {
       setInviteLinkLive(next);
       await load();
       notifications.show({
-        title: 'Invite link rotated',
-        message: 'The old link no longer works.',
+        title: t('invite.rotated'),
+        message: t('invite.rotatedHint'),
         color: 'teal',
       });
       setE(null);
@@ -359,7 +461,7 @@ export function GroupDetail() {
       await api.patch(`/api/v1/groups/${id}`, { name: next });
       setRenameOpen(false);
       await load();
-      notifications.show({ title: 'Group renamed', color: 'teal' });
+      notifications.show({ title: t('groupDetail.groupRenamed'), color: 'teal' });
       setE(null);
     } catch (err) { setE(err); } finally { setRenaming(false); }
   };
@@ -377,7 +479,7 @@ export function GroupDetail() {
     [ledger],
   );
 
-  // Activity tab: transfers (actionable) + other updates, newest first.
+  // Activity tab: transfers (actionable) + other updates, {t('groupDetail.newestFirst')}.
   // Skip activity kind=payment to avoid duplicating payHist rows.
   const activityFeed = useMemo(() => {
     const payRows = (payHist.length > 0 ? payHist : payments).map((p) => ({
@@ -421,6 +523,26 @@ export function GroupDetail() {
     () => (summary || []).filter((x) => x.owe_cents > 0),
     [summary],
   );
+  // Group-level settlement status (not personal net).
+  const groupSettled = useMemo(() => {
+    if (plan) return (plan.transfers || []).length === 0;
+    if (summary) return summary.every((m) => (m.net_cents || 0) === 0);
+    return null;
+  }, [plan, summary]);
+  const groupStatusTone = groupSettled == null ? null : groupSettled ? 'settled' : 'open';
+  const groupStatusLabel = groupSettled == null
+    ? null
+    : groupSettled
+      ? t('settlement.statusSettled')
+      : t('settlement.statusOpen');
+  const groupStatusHint = groupSettled == null
+    ? undefined
+    : groupSettled
+      ? t('settlement.statusSettledHint')
+      : t('settlement.statusOpenHint', {
+        n: transfers.length || debtors.length || 0,
+        saved: plan?.explanation?.saved ?? '—',
+      });
 
   if (!detail) {
     return (
@@ -441,7 +563,7 @@ export function GroupDetail() {
   return (
     <Shell>
       <div className="gd-chrome">
-        <Anchor component={Link} to="/groups" size="sm" className="gd-back">← Groups</Anchor>
+        <Anchor component={Link} to="/groups" size="sm" className="gd-back no-print">{t('common.backToGroups')}</Anchor>
         <div
           className="gd-hero"
           style={{
@@ -453,10 +575,13 @@ export function GroupDetail() {
           <span className="gd-hero-scrim" aria-hidden />
           <div className="gd-hero-bar">
             <div className="gd-tags">
-              {detail.my_role === 'owner' && <span className="gd-tag is-owner">Owner</span>}
-              {detail.my_role === 'treasurer' && <span className="gd-tag">Treasurer</span>}
+              {detail.my_role === 'owner' && <span className="gd-tag is-owner">{t('common.owner')}</span>}
+              {detail.my_role === 'treasurer' && <span className="gd-tag">{t('common.treasurer')}</span>}
               <span className="gd-tag">
-                {members.length} {members.length === 1 ? 'person' : 'people'}
+                {t('groupDetail.membersCount', {
+                  count: members.length,
+                  unit: members.length === 1 ? t('common.person') : t('common.people'),
+                })}
               </span>
               <span className="gd-tag">{detail.currency}</span>
               {detail.mode && detail.mode !== 'shared' && (
@@ -466,14 +591,14 @@ export function GroupDetail() {
           </div>
           <div className="gd-hero-main">
             <div className="gd-title-row">
-              <Title order={2} className="gd-title" truncate>{detail.name}</Title>
+              <Title order={2} className="gd-title" lineClamp={1}>{detail.name}</Title>
               {detail.my_role === 'owner' && (
                 <ActionIcon
                   variant="subtle"
                   color="gray"
                   size="sm"
-                  title="Rename group"
-                  aria-label="Rename group"
+                  title={t('groupDetail.rename')}
+                  aria-label={t('groupDetail.rename')}
                   onClick={openRename}
                   className="gd-rename"
                 >
@@ -484,19 +609,26 @@ export function GroupDetail() {
                 variant="subtle"
                 color="gray"
                 size="sm"
-                title="Invite link"
-                aria-label="Invite link"
+                title={t('groupDetail.inviteLink')}
+                aria-label={t('groupDetail.inviteLink')}
                 onClick={() => setShareOpen(true)}
                 className="gd-rename"
               >
                 <GdActionIcon name="share" />
               </ActionIcon>
             </div>
-            {me && (
-              <div className="gd-net">
-                <Net v={me.net_cents} c={detail.currency} />
-              </div>
-            )}
+            <div className="gd-net">
+              {groupStatusTone && (
+                <span className={`net-chip is-${groupStatusTone}`} title={groupStatusHint}>
+                  {groupStatusLabel}
+                </span>
+              )}
+              {plan?.version != null && (
+                <span className="gd-settle-ver">
+                  {t('report.settlementVer', { version: plan.version })}
+                </span>
+              )}
+            </div>
           </div>
           {detail.budget && (
             <div className="gd-budget">
@@ -504,7 +636,11 @@ export function GroupDetail() {
                 <Text size="xs" c="dimmed">
                   Budget {fmt(detail.budget.spent_cents, detail.currency)} / {fmt(detail.budget.budget_cents, detail.currency)}
                   {' · '}
-                  {detail.budget.over ? 'over' : detail.budget.alert ? 'near limit' : 'on track'}
+                  {detail.budget.over
+                    ? t('groupDetail.budgetOver')
+                    : detail.budget.alert
+                      ? t('groupDetail.budgetNear')
+                      : t('groupDetail.budgetOnTrack')}
                 </Text>
                 <Text size="xs" c="dimmed">{detail.budget.pct}%</Text>
               </Group>
@@ -522,111 +658,122 @@ export function GroupDetail() {
         <Err e={e} />
       </div>
 
-      <Stack gap="md" mt="md">
-        <SettlementBox
-          groupId={id}
-          currency={detail.currency}
-          members={members}
-          onPay={(t) => { setPayPreset(t); setPayOpen(true); }}
-        />
-
+      <Stack gap="xl" mt="md">
         {isMobile ? (
           <div className="sticky-bar gd-actions is-calm">
-            <button type="button" className="gd-action-cta" onClick={() => setNewSheetOpen(true)}>
-              <GdActionIcon name="plus" />
-              <span>New expense / payment</span>
-            </button>
+            <div className="gd-action-direct">
+              <button type="button" className="gd-action-cta" onClick={() => setShowExp(true)}>
+                <GdActionIcon name="expense" />
+                <span>{t('groupDetail.addExpense')}</span>
+              </button>
+              <button type="button" className="gd-action-cta is-pay" onClick={() => { setPayPreset(null); setPayOpen(true); }}>
+                <GdActionIcon name="pay" />
+                <span>{t('groupDetail.recordPayment')}</span>
+              </button>
+            </div>
             <div className="gd-action-quiet">
               <button type="button" className="gd-action-ghost" onClick={() => openInvite('email')}>
                 <GdActionIcon name="invite" />
-                <span>Invite</span>
+                <span>{t('groupDetail.inviteMembers')}</span>
               </button>
-              <button type="button" className="gd-action-ghost" onClick={exportCsv}>
+              <button type="button" className="gd-action-ghost" onClick={exportPdf}>
                 <GdActionIcon name="export" />
-                <span>Export CSV</span>
+                <span>{t('groupDetail.exportPdf')}</span>
               </button>
             </div>
-            <details className="gd-action-danger">
-              <summary>Group settings ···</summary>
-              <div className="gd-action-danger-opts">
-                <button type="button" onClick={leave}>
-                  <GdActionIcon name="leave" />
-                  <span>Leave group</span>
+            <div className="gd-action-danger-opts is-direct">
+              <button type="button" onClick={leave}>
+                <GdActionIcon name="leave" />
+                <span>{t('groupDetail.leaveGroup')}</span>
+              </button>
+              {detail.my_role === 'owner' && (
+                <button type="button" onClick={delGroup}>
+                  <GdActionIcon name="trash" />
+                  <span>{t('groupDetail.deleteGroup')}</span>
                 </button>
-                {detail.my_role === 'owner' && (
-                  <button type="button" onClick={delGroup}>
-                    <GdActionIcon name="trash" />
-                    <span>Delete group</span>
-                    <span className="gd-action-owner">owner</span>
-                  </button>
-                )}
-              </div>
-            </details>
+              )}
+            </div>
           </div>
         ) : (
-          <div className="sticky-bar gd-actions">
-            <button type="button" className="gd-action-btn" onClick={() => { setPayPreset(null); setPayOpen(true); }}>
-              <GdActionIcon name="pay" />
-              <span>Record payment</span>
-            </button>
+          <div className="gd-actions">
             <button
               type="button"
-              className="gd-action-btn"
+              className="gd-action-btn is-expense"
               onClick={() => setShowExp(true)}
             >
               <GdActionIcon name="expense" />
-              <span>Expense</span>
+              <span>{t('groupDetail.addExpense')}</span>
             </button>
-            <button type="button" className="gd-action-btn" onClick={exportCsv}>
+            <button
+              type="button"
+              className="gd-action-btn is-pay"
+              onClick={() => { setPayPreset(null); setPayOpen(true); }}
+            >
+              <GdActionIcon name="pay" />
+              <span>{t('groupDetail.recordPayment')}</span>
+            </button>
+            <button type="button" className="gd-action-btn" onClick={exportPdf}>
               <GdActionIcon name="export" />
-              <span>Export CSV</span>
+              <span>{t('groupDetail.exportPdf')}</span>
             </button>
             <button type="button" className="gd-action-btn" onClick={() => openInvite('email')}>
               <GdActionIcon name="invite" />
-              <span>Invite</span>
+              <span>{t('groupDetail.inviteMembers')}</span>
             </button>
             <button type="button" className="gd-action-btn is-danger" onClick={leave}>
               <GdActionIcon name="leave" />
-              <span>Leave</span>
+              <span>{t('groupDetail.leaveGroup')}</span>
             </button>
             {detail.my_role === 'owner' && (
               <button type="button" className="gd-action-btn is-danger" onClick={delGroup}>
                 <GdActionIcon name="trash" />
-                <span>Delete</span>
+                <span>{t('groupDetail.delete')}</span>
               </button>
             )}
           </div>
         )}
         <div className="sticky-spacer" />
 
+        <ReportPanel
+          groupId={id}
+          detail={detail}
+          summary={summary}
+          embedded
+          onPay={(xfer) => { setPayPreset(xfer); setPayOpen(true); }}
+          categoryManager={(
+            <CategoryManager
+              categories={categories}
+              t={t}
+              onAdd={openAddCategory}
+              onEdit={openEditCategory}
+              onDelete={setCategoryDeleteTarget}
+            />
+          )}
+        />
+
         <Card withBorder shadow="sm" padding="md" radius="md" className="gd-tabs">
           <Tabs value={tab} onChange={(v) => {
             let nv = v ?? 'ledger';
             if (nv === 'payments') nv = 'activity';
+            if (nv === 'report') nv = 'ledger';
             setTab(nv);
             if (nv === 'activity') loadActivityFeed();
             if (nv === 'recurring' && rules.length === 0) loadRules();
           }}>
           <div className="tab-rail">
           <Tabs.List mb="sm">
-              <Tabs.Tab value="ledger">Expenses</Tabs.Tab>
-              <Tabs.Tab value="balances">Balances</Tabs.Tab>
-              <Tabs.Tab value="statement">Statement</Tabs.Tab>
-              <Tabs.Tab value="people">People({members.length})</Tabs.Tab>
-              <Tabs.Tab value="report">Report</Tabs.Tab>
-              <Tabs.Tab value="activity">Activity</Tabs.Tab>
-              <Tabs.Tab value="recurring">Recurring</Tabs.Tab>
+              <Tabs.Tab value="ledger">
+                {ledger?.total != null
+                  ? t('groupDetail.tabExpensesCount', { count: ledger.total })
+                  : t('groupDetail.tabExpenses')}
+              </Tabs.Tab>
+              <Tabs.Tab value="balances">{t('groupDetail.tabBalances')}</Tabs.Tab>
+              <Tabs.Tab value="statement">{t('groupDetail.tabStatement')}</Tabs.Tab>
+              <Tabs.Tab value="people">{t('groupDetail.tabPeople')} ({members.length})</Tabs.Tab>
+              <Tabs.Tab value="activity">{t('groupDetail.tabActivity')}</Tabs.Tab>
+              <Tabs.Tab value="recurring">{t('groupDetail.tabRecurring')}</Tabs.Tab>
           </Tabs.List>
           </div>
-
-            <Tabs.Panel value="report">
-              <ReportPanel
-                groupId={id}
-                detail={detail}
-                summary={summary}
-                embedded
-              />
-            </Tabs.Panel>
 
             <Tabs.Panel value="statement">
               <StatementPanel
@@ -638,73 +785,90 @@ export function GroupDetail() {
             </Tabs.Panel>
 
             <Tabs.Panel value="ledger">
-          <Group justify="space-between" mb="sm">
-            <Text size="sm" fw={600}>Expenses</Text>
-            <Group gap="xs">
-              {ledgerLoading && <Loader size="sm" />}
-              {ledger && <Text size="sm" c="dimmed">{ledger.total} total</Text>}
-            </Group>
-          </Group>
           <Box visibleFrom="sm">
-          <form onSubmit={(ev) => { ev.preventDefault(); loadLedger(); }}>
-            <Group gap="xs" mb="sm">
+          <form className="ledger-toolbar" onSubmit={(ev) => { ev.preventDefault(); loadLedger(); }}>
+            <div className="ledger-toolbar-main">
               <SegmentedControl
                 size="xs"
                 value={type}
                 onChange={setType}
                 data={[
-                  { value: 'all', label: 'All' },
-                  { value: 'expense', label: 'Expenses' },
-                  { value: 'payment', label: 'Payments' },
+                  { value: 'all', label: t('groupDetail.filterAll') },
+                  { value: 'expense', label: t('groupDetail.filterExpenses') },
+                  { value: 'payment', label: t('groupDetail.filterPayments') },
                 ]}
+              />
+              <TextInput
+                className="ledger-toolbar-search"
+                size="xs"
+                placeholder={t('groupDetail.searchItem')}
+                value={q}
+                onChange={(x) => setQ(x.target.value)}
               />
               <Select
                 size="xs"
-                placeholder="Filter by payer / party"
+                value={fSort}
+                onChange={setFSort}
+                data={[
+                  { value: 'newest', label: t('common.newest') },
+                  { value: 'oldest', label: t('common.oldest') },
+                ]}
+                className="ledger-toolbar-sort"
+              />
+              <Button size="xs" variant="default" type="submit" loading={ledgerLoading}>{t('groupDetail.go')}</Button>
+            </div>
+            <div className="ledger-toolbar-more">
+              <Select
+                size="xs"
+                placeholder={t('groupDetail.filterPayer')}
                 clearable
                 value={payer}
                 onChange={(v) => setPayer(v || '')}
                 data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
-                style={{ minWidth: 170 }}
               />
-              <TextInput
+              <Select
                 size="xs"
-                placeholder="Search item or payer"
-                value={q}
-                onChange={(x) => setQ(x.target.value)}
-                style={{ flex: 1 }}
+                placeholder={t('common.status')}
+                clearable
+                value={fStatus}
+                onChange={(v) => setFStatus(v || '')}
+                data={[
+                  { value: 'OPEN', label: t('groupDetail.statusOpen') },
+                  { value: 'LOCKED', label: t('groupDetail.statusLocked') },
+                ]}
               />
-              <Button size="xs" variant="default" onClick={loadLedger} loading={ledgerLoading}>Go</Button>
-            </Group>
-            <Group gap="xs" mb="sm">
-              <Select size="xs" placeholder="Status" clearable value={fStatus} onChange={(v) => setFStatus(v || '')} data={['OPEN', 'LOCKED']} style={{ width: 110 }} />
-              <Select size="xs" placeholder="Category" clearable value={fCat} onChange={(v) => setFCat(v || '')}
-                data={['food', 'transport', 'stay', 'activity', 'shopping', 'health', 'bills', 'other']} style={{ width: 130 }} />
-              <TextInput size="xs" placeholder="Min $" inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} style={{ width: 80 }} />
-              <TextInput size="xs" placeholder="Max $" inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} style={{ width: 80 }} />
-              <TextInput size="xs" type="date" value={fFrom} onChange={(x) => setFFrom(x.target.value)} style={{ width: 135 }} />
-              <TextInput size="xs" type="date" value={fTo} onChange={(x) => setFTo(x.target.value)} style={{ width: 135 }} />
-              <Select size="xs" value={fSort} onChange={setFSort} data={[{ value: 'newest', label: 'Newest' }, { value: 'oldest', label: 'Oldest' }]} style={{ width: 100 }} />
-            </Group>
+              <Select
+                size="xs"
+                placeholder={t('common.category')}
+                clearable
+                value={fCat}
+                onChange={(v) => setFCat(v || '')}
+                data={categorySelectData(categories, t)}
+              />
+              <TextInput size="xs" placeholder={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} />
+              <TextInput size="xs" placeholder={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} />
+              <TextInput size="xs" type="date" aria-label={t('common.from')} value={fFrom} onChange={(x) => setFFrom(x.target.value)} />
+              <TextInput size="xs" type="date" aria-label={t('common.to')} value={fTo} onChange={(x) => setFTo(x.target.value)} />
+            </div>
           </form>
           </Box>
           <Box hiddenFrom="sm">
             <Group gap="xs" mb="sm" wrap="nowrap">
               <TextInput
                 size="sm"
-                placeholder="Search expenses…"
+                placeholder={t('groupDetail.searchExpenses')}
                 value={q}
                 onChange={(x) => setQ(x.target.value)}
                 style={{ flex: 1 }}
-                aria-label="Search expenses"
+                aria-label={t('groupDetail.searchExpenses')}
               />
               <Indicator label={activeFilters > 0 ? activeFilters : ''} disabled={activeFilters === 0} size={16}>
                 <ActionIcon
                   size="lg"
                   variant="default"
                   onClick={() => setShowF(!showF)}
-                  title="Filters"
-                  aria-label={`Filters${activeFilters > 0 ? `, ${activeFilters} active` : ''}`}
+                  title={t('common.filters')}
+                  aria-label={activeFilters > 0 ? t('groupDetail.filtersActive', { count: activeFilters }) : t('common.filters')}
                   aria-expanded={showF}
                 >
                   ⧩
@@ -718,154 +882,202 @@ export function GroupDetail() {
                   value={type}
                   onChange={setType}
                   data={[
-                    { value: 'all', label: 'All' },
-                    { value: 'expense', label: 'Expenses' },
-                    { value: 'payment', label: 'Payments' },
+                    { value: 'all', label: t('groupDetail.filterAll') },
+                    { value: 'expense', label: t('groupDetail.filterExpenses') },
+                    { value: 'payment', label: t('groupDetail.filterPayments') },
                   ]}
                 />
-                <Select size="sm" label="Payer / party" placeholder="Anyone" clearable value={payer} onChange={(v) => setPayer(v || '')}
-                  data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
+                <Select
+                  size="sm"
+                  label={t('groupDetail.payerParty')}
+                  placeholder={t('common.anyone')}
+                  clearable
+                  value={payer}
+                  onChange={(v) => setPayer(v || '')}
+                  data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
+                />
                 <Group gap="xs" grow>
-                  <Select size="sm" label="Status" placeholder="Any" clearable value={fStatus} onChange={(v) => setFStatus(v || '')} data={['OPEN', 'LOCKED']} />
-                  <Select size="sm" label="Category" placeholder="Any" clearable value={fCat} onChange={(v) => setFCat(v || '')}
-                    data={['food', 'transport', 'stay', 'activity', 'shopping', 'health', 'bills', 'other']} />
+                  <Select
+                    size="sm"
+                    label={t('common.status')}
+                    placeholder={t('common.any')}
+                    clearable
+                    value={fStatus}
+                    onChange={(v) => setFStatus(v || '')}
+                    data={[
+                      { value: 'OPEN', label: t('groupDetail.statusOpen') },
+                      { value: 'LOCKED', label: t('groupDetail.statusLocked') },
+                    ]}
+                  />
+                  <Select
+                    size="sm"
+                    label={t('common.category')}
+                    placeholder={t('common.any')}
+                    clearable
+                    value={fCat}
+                    onChange={(v) => setFCat(v || '')}
+                    data={categorySelectData(categories, t)}
+                  />
                 </Group>
                 <Group gap="xs" grow>
-                  <TextInput size="sm" label="Min $" inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} />
-                  <TextInput size="sm" label="Max $" inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} />
+                  <TextInput size="sm" label={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} />
+                  <TextInput size="sm" label={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} />
                 </Group>
                 <Group gap="xs" grow>
-                  <TextInput size="sm" label="From" type="date" value={fFrom} onChange={(x) => setFFrom(x.target.value)} />
-                  <TextInput size="sm" label="To" type="date" value={fTo} onChange={(x) => setFTo(x.target.value)} />
+                  <TextInput size="sm" label={t('common.from')} type="date" value={fFrom} onChange={(x) => setFFrom(x.target.value)} />
+                  <TextInput size="sm" label={t('common.to')} type="date" value={fTo} onChange={(x) => setFTo(x.target.value)} />
                 </Group>
-                <Select size="sm" label="Sort" value={fSort} onChange={setFSort} data={[{ value: 'newest', label: 'Newest' }, { value: 'oldest', label: 'Oldest' }]} />
-                <Button size="sm" onClick={() => { setShowF(false); loadLedger(); }} loading={ledgerLoading}>Apply filters</Button>
+                <Select
+                  size="sm"
+                  label={t('common.sort')}
+                  value={fSort}
+                  onChange={setFSort}
+                  data={[
+                    { value: 'newest', label: t('common.newest') },
+                    { value: 'oldest', label: t('common.oldest') },
+                  ]}
+                />
+                <Button size="sm" onClick={() => { setShowF(false); loadLedger(); }} loading={ledgerLoading}>{t('common.apply')}</Button>
               </Stack>
             </Collapse>
           </Box>
           <Box hiddenFrom="sm">
-            <Stack gap="xs">
-              {(ledger?.items || []).map((t) => (
-                <Card key={t.id} withBorder radius="md" padding="sm" className="tap-card"
-                  tabIndex={t.kind === 'expense' ? 0 : undefined}
-                  role={t.kind === 'expense' ? 'link' : undefined}
-                  aria-label={t.kind === 'expense' ? `Open ${t.title}` : undefined}
-                  onClick={t.kind === 'expense' ? () => nav(`/groups/${id}/expenses/${t.id}`) : undefined}
-                  onKeyDown={t.kind === 'expense' ? (ev) => {
-                    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); nav(`/groups/${id}/expenses/${t.id}`); }
+            <div className="ledger-list">
+              {(ledger?.items || []).map((item) => (
+                <div
+                  key={item.id}
+                  className={`ledger-row${item.kind === 'expense' ? ' is-link' : ''}${item.reversed ? ' is-reversed' : ''}`}
+                  tabIndex={item.kind === 'expense' ? 0 : undefined}
+                  role={item.kind === 'expense' ? 'link' : undefined}
+                  aria-label={item.kind === 'expense' ? t('groupDetail.openItem', { title: item.title }) : undefined}
+                  onClick={item.kind === 'expense' ? () => nav(`/groups/${id}/expenses/${item.id}`) : undefined}
+                  onKeyDown={item.kind === 'expense' ? (ev) => {
+                    if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); nav(`/groups/${id}/expenses/${item.id}`); }
                   } : undefined}
                 >
-                  <Group justify="space-between" wrap="nowrap" gap="sm">
-                    <Avatar radius="md" size="md" style={{ background: tileFor(t)[1], flex: 'none' }}>
-                      {tileFor(t)[0]}
-                    </Avatar>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <Text size="sm" fw={600} truncate>
-                        {t.title}
-                        {t.has_image && <Text span size="sm"> 🧾</Text>}
-                        {t.reversed && <Text span size="xs" c="dimmed"> (reversed)</Text>}
-                      </Text>
-                      <Text size="xs" c="dimmed" truncate>
-                        {t.kind === 'expense'
-                          ? (t.payer_name || displayNameOf(members, t.payer_id))
-                          : `${t.from_name || t.from_user_id?.slice(0, 8)} → ${t.to_name || t.to_user_id?.slice(0, 8)}`}
-                      </Text>
+                  <Avatar className="ledger-thumb" radius="md" size={40} style={{ background: tileFor(item)[1] }}>
+                    {tileFor(item)[0]}
+                  </Avatar>
+                  <div className="ledger-copy">
+                    <span className="ledger-title">
+                      {item.title}
+                      {item.has_image ? ' 🧾' : ''}
+                      {item.reversed ? ` (${t('common.reversed')})` : ''}
+                    </span>
+                    <span className="ledger-meta">
+                      {item.kind === 'expense'
+                        ? [
+                            item.category ? categoryLabelForKey(item.category, categories, t) : null,
+                            item.payer_name || displayNameOf(members, item.payer_id),
+                          ].filter(Boolean).join(' · ')
+                        : `${item.from_name || item.from_user_id?.slice(0, 8)} → ${item.to_name || item.to_user_id?.slice(0, 8)}`}
+                    </span>
+                  </div>
+                  <div className="ledger-amounts">
+                    <span className="ledger-amount">{fmt(item.amount_cents, detail.currency)}</span>
+                    <span className="ledger-meta">
+                      {t('groupDetail.myShare')}{' '}
+                      {item.my_share_cents != null ? fmt(item.my_share_cents, detail.currency) : '—'}
+                    </span>
+                    <span className={`ledger-status is-${String(item.status || '').toLowerCase()}`}>
+                      {item.status === 'LOCKED' ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}
+                    </span>
+                  </div>
+                  {item.kind === 'expense' && (
+                    <div className="ledger-actions" onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
+                      <ActionIcon size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)}>⧉</ActionIcon>
+                      {canEditExpense(item) && (
+                        <ActionIcon size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
+                      )}
                     </div>
-                    <div style={{ textAlign: 'right', flex: 'none' }}>
-                      <Text size="sm" fw={600}>{fmt(t.amount_cents, detail.currency)}</Text>
-                      <Text size="xs" c="dimmed">my share {t.my_share_cents != null ? fmt(t.my_share_cents, detail.currency) : '—'}</Text>
-                    </div>
-                  </Group>
-                  <Group justify="space-between" mt={4}>
-                    <Badge size="sm" color={t.status === 'LOCKED' ? 'gray' : 'teal'} variant="light">
-                      {t.status}
-                    </Badge>
-                    {t.kind === 'expense' && (
-                      <Group gap={2} wrap="nowrap">
-                        <ActionIcon size="sm" variant="subtle" title="Copy expense" aria-label={`Copy ${t.title}`} onClick={(ev) => { ev.stopPropagation(); copyExpense(t); }}>⧉</ActionIcon>
-                        <ActionIcon size="sm" variant="subtle" title="Edit expense" aria-label={`Edit ${t.title}`} onClick={(ev) => { ev.stopPropagation(); editExpense(t); }}>✎</ActionIcon>
-                      </Group>
-                    )}
-                  </Group>
-                </Card>
+                  )}
+                </div>
               ))}
               {(ledger?.items || []).length > 0 && (
-                <Card withBorder radius="md" padding="sm">
-                  <Group justify="space-between">
-                    <Text size="sm" fw={600}>Total ({ledger.items.length})</Text>
-                    <Text size="sm" fw={600}>{fmt(totals.amount, detail.currency)} · mine {fmt(totals.mine, detail.currency)}</Text>
-                  </Group>
-                </Card>
+                <div className="ledger-row is-total">
+                  <div className="ledger-copy">
+                    <span className="ledger-title">{t('groupDetail.totalCount', { count: ledger.items.length })}</span>
+                  </div>
+                  <div className="ledger-amounts">
+                    <span className="ledger-amount">{fmt(totals.amount, detail.currency)}</span>
+                    <span className="ledger-meta">{t('groupDetail.mine')} {fmt(totals.mine, detail.currency)}</span>
+                  </div>
+                </div>
               )}
-            </Stack>
+            </div>
           </Box>
           <Box visibleFrom="sm">
-          <ScrollArea>
-          <Table striped highlightOnHover withTableBorder miw={640}>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Item</Table.Th>
-                <Table.Th>Payer / Parties</Table.Th>
-                <Table.Th>Amount</Table.Th>
-                <Table.Th>My share</Table.Th>
-                <Table.Th>Status</Table.Th>
-                <Table.Th></Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {ledger?.items.map((t) => (
-                <Table.Tr key={t.id}>
-                  <Table.Td>
-                    {t.kind === 'expense' ? (
-                      <Anchor component={Link} to={`/groups/${id}/expenses/${t.id}`}>{t.title}</Anchor>
+            <div className="ledger-list is-table">
+              <div className="ledger-row is-head" role="row">
+                <span>{t('groupDetail.colItem')}</span>
+                <span>{t('groupDetail.colCategory')}</span>
+                <span>{t('groupDetail.colParty')}</span>
+                <span className="is-num">{t('groupDetail.colAmount')}</span>
+                <span className="is-num">{t('groupDetail.colMyShare')}</span>
+                <span className="is-status">{t('groupDetail.colStatus')}</span>
+                <span className="is-actions" aria-hidden />
+              </div>
+              {(ledger?.items || []).map((item) => (
+                <div key={item.id} className={`ledger-row is-desk${item.reversed ? ' is-reversed' : ''}`} role="row">
+                  <span className="ledger-cell ledger-title">
+                    {item.kind === 'expense' ? (
+                      <Anchor component={Link} to={`/groups/${id}/expenses/${item.id}`}>{item.title}</Anchor>
                     ) : (
-                      t.title
+                      item.title
                     )}
-                    {t.has_image && <Text span size="sm"> 🧾</Text>}
-                    {t.reversed && <Text span size="xs" c="dimmed"> (reversed)</Text>}
-                  </Table.Td>
-                  <Table.Td>
-                    {t.kind === 'expense'
-                      ? (t.payer_name || displayNameOf(members, t.payer_id))
-                      : `${t.from_name || t.from_user_id?.slice(0, 8)} → ${t.to_name || t.to_user_id?.slice(0, 8)}`}
-                  </Table.Td>
-                  <Table.Td>{fmt(t.amount_cents, detail.currency)}</Table.Td>
-                  <Table.Td>{t.my_share_cents != null ? fmt(t.my_share_cents, detail.currency) : '—'}</Table.Td>
-                  <Table.Td>
-                    <Badge size="sm" color={t.status === 'LOCKED' ? 'gray' : 'teal'} variant="light">
-                      {t.status}
-                    </Badge>
-                  </Table.Td>
-                  <Table.Td>
-                    {t.kind === 'expense' && (
-                      <Group gap={2} wrap="nowrap">
-                        <ActionIcon size="sm" variant="subtle" title="Copy expense" aria-label={`Copy ${t.title}`} onClick={() => copyExpense(t)}>⧉</ActionIcon>
-                        <ActionIcon size="sm" variant="subtle" title="Edit expense" aria-label={`Edit ${t.title}`} onClick={() => editExpense(t)}>✎</ActionIcon>
-                      </Group>
-                    )}
-                  </Table.Td>
-                </Table.Tr>
+                    {item.has_image ? ' 🧾' : ''}
+                    {item.reversed ? ` (${t('common.reversed')})` : ''}
+                  </span>
+                  <span className="ledger-cell ledger-meta">
+                    {item.kind === 'expense' && item.category
+                      ? categoryLabelForKey(item.category, categories, t)
+                      : '—'}
+                  </span>
+                  <span className="ledger-cell ledger-meta">
+                    {item.kind === 'expense'
+                      ? (item.payer_name || displayNameOf(members, item.payer_id))
+                      : `${item.from_name || item.from_user_id?.slice(0, 8)} → ${item.to_name || item.to_user_id?.slice(0, 8)}`}
+                  </span>
+                  <span className="ledger-cell ledger-amount is-num">{fmt(item.amount_cents, detail.currency)}</span>
+                  <span className="ledger-cell ledger-meta is-num">
+                    {item.my_share_cents != null ? fmt(item.my_share_cents, detail.currency) : '—'}
+                  </span>
+                  <span className="ledger-cell is-status">
+                    <span className={`ledger-status is-${String(item.status || '').toLowerCase()}`}>
+                      {item.status === 'LOCKED' ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}
+                    </span>
+                  </span>
+                  <span className="ledger-cell ledger-actions is-actions">
+                    {item.kind === 'expense' ? (
+                      <>
+                        <ActionIcon size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)}>⧉</ActionIcon>
+                        {canEditExpense(item) && (
+                          <ActionIcon size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
+                        )}
+                      </>
+                    ) : null}
+                  </span>
+                </div>
               ))}
-            </Table.Tbody>
-            <Table.Tfoot>
-              <Table.Tr>
-                <Table.Td><Text size="sm" fw={600}>Total ({ledger?.items.length || 0} rows)</Text></Table.Td>
-                <Table.Td />
-                <Table.Td><Text size="sm" fw={600}>{fmt(totals.amount, detail.currency)}</Text></Table.Td>
-                <Table.Td><Text size="sm" fw={600}>{fmt(totals.mine, detail.currency)}</Text></Table.Td>
-                <Table.Td />
-                <Table.Td />
-              </Table.Tr>
-            </Table.Tfoot>
-          </Table>
-          </ScrollArea>
+              {(ledger?.items || []).length > 0 && (
+                <div className="ledger-row is-desk is-total" role="row">
+                  <span className="ledger-cell ledger-title">{t('groupDetail.totalRows', { count: ledger.items.length })}</span>
+                  <span className="ledger-cell" />
+                  <span className="ledger-cell" />
+                  <span className="ledger-cell ledger-amount is-num">{fmt(totals.amount, detail.currency)}</span>
+                  <span className="ledger-cell ledger-amount is-num">{fmt(totals.mine, detail.currency)}</span>
+                  <span className="ledger-cell is-status" />
+                  <span className="ledger-cell is-actions" />
+                </div>
+              )}
+            </div>
           </Box>
             </Tabs.Panel>
 
             <Tabs.Panel value="balances">
-              <Text size="sm" fw={600} mb="sm">Who owes</Text>
+              <Text size="sm" fw={600} mb="sm">{t('groupDetail.whoOwes')}</Text>
               {debtors.length === 0 && transfers.length === 0 && (
-                <Text c="dimmed" size="sm">All settled — nobody owes anything.</Text>
+                <Text c="dimmed" size="sm">{t('groupDetail.allSettledNobody')}</Text>
               )}
               <Stack gap="sm">
                 {byDebtor.map(([from, list]) => (
@@ -875,14 +1087,14 @@ export function GroupDetail() {
                       <div style={{ flex: 1 }}>
                         <Group gap="xs">
                           <Text size="sm" fw={600}>{displayNameOf(members, from)} owes</Text>
-                          <Anchor size="xs" c="dimmed" onClick={() => nudge(from, displayNameOf(members, from))}>Nudge</Anchor>
+                          <Anchor size="xs" c="dimmed" onClick={() => nudge(from, displayNameOf(members, from))}>{t('groupDetail.nudge')}</Anchor>
                         </Group>
-                        {list.map((t, i) => (
+                        {list.map((item, i) => (
                           <Group key={i} gap="xs" mt={2}>
                             <Text size="sm">
-                              → {displayNameOf(members, t.to_user_id)} <b>{fmt(t.amount_cents, detail.currency)}</b>
+                              → {displayNameOf(members, item.to_user_id)} <b>{fmt(item.amount_cents, detail.currency)}</b>
                             </Text>
-                            <Button size="xs" variant="light" onClick={() => { setPayPreset(t); setPayOpen(true); }}>Pay</Button>
+                            <Button size="xs" variant="light" onClick={() => { setPayPreset(item); setPayOpen(true); }}>{t('groupDetail.pay')}</Button>
                           </Group>
                         ))}
                       </div>
@@ -893,7 +1105,7 @@ export function GroupDetail() {
                   <Card key={m.user_id} withBorder radius="md" padding="sm">
                     <Group gap="xs">
                       <Text size="sm"><b>{m.display_name}</b> owes <b>{fmt(m.owe_cents, detail.currency)}</b></Text>
-                      <Anchor size="xs" c="dimmed" onClick={() => nudge(m.user_id, m.display_name)}>Nudge</Anchor>
+                      <Anchor size="xs" c="dimmed" onClick={() => nudge(m.user_id, m.display_name)}>{t('groupDetail.nudge')}</Anchor>
                     </Group>
                   </Card>
                 ))}
@@ -904,23 +1116,26 @@ export function GroupDetail() {
               <Group justify="space-between" mb="sm" wrap="wrap">
                 <div>
                   <Text size="sm" fw={600}>Activity</Text>
-                  <Text size="xs" c="dimmed">Transfers & updates · newest first</Text>
+                  <Text size="xs" c="dimmed">{t('groupDetail.transfersUpdates')} · {t('groupDetail.newestFirst')}</Text>
                 </div>
-                <Button size="xs" variant="subtle" onClick={loadActivityFeed} loading={activityLoading}>Refresh</Button>
+                <Button size="xs" variant="subtle" onClick={loadActivityFeed} loading={activityLoading}>{t('common.refresh')}</Button>
               </Group>
               {activityLoading && activityFeed.length === 0 && (
                 <Stack gap="xs"><Skeleton height={52} radius="md" /><Skeleton height={52} radius="md" /></Stack>
               )}
               {!activityLoading && activityFeed.length === 0 && (
-                <Text size="sm" c="dimmed">Nothing yet — record a payment or expense to see it here.</Text>
+                <Text size="sm" c="dimmed">{t('groupDetail.activityEmpty')}</Text>
               )}
               {activityFeed.length > 0 && (
                 <div className="activity-list">
                   {activityFeed.length > ACTIVITY_PAGE_SIZE && (
                     <div className="activity-pager">
                       <span className="activity-pager-range">
-                        {(activityPageSafe - 1) * ACTIVITY_PAGE_SIZE + 1}–
-                        {Math.min(activityPageSafe * ACTIVITY_PAGE_SIZE, activityFeed.length)} of {activityFeed.length}
+                        {t('activity.range', {
+                          from: (activityPageSafe - 1) * ACTIVITY_PAGE_SIZE + 1,
+                          to: Math.min(activityPageSafe * ACTIVITY_PAGE_SIZE, activityFeed.length),
+                          total: activityFeed.length,
+                        })}
                       </span>
                       <div className="activity-pager-controls">
                         <button
@@ -929,7 +1144,7 @@ export function GroupDetail() {
                           disabled={activityPageSafe <= 1}
                           onClick={() => setActivityPage((p) => Math.max(1, p - 1))}
                         >
-                          Prev
+                          {t('common.prev')}
                         </button>
                         <div className="activity-pager-pages">
                           {Array.from({ length: activityPageCount }, (_, i) => i + 1)
@@ -960,7 +1175,7 @@ export function GroupDetail() {
                           disabled={activityPageSafe >= activityPageCount}
                           onClick={() => setActivityPage((p) => Math.min(activityPageCount, p + 1))}
                         >
-                          Next
+                          {t('common.next')}
                         </button>
                       </div>
                     </div>
@@ -987,10 +1202,10 @@ export function GroupDetail() {
                           {!p.reversed && String(p.status).toUpperCase() === 'OPEN' && (
                             isMobile ? (
                               <RowMenu label={`Actions for transfer ${fmt(p.amount_cents, detail.currency)}`}>
-                                <Menu.Item onClick={() => reversePay(p.id)}>Reverse</Menu.Item>
+                                <Menu.Item onClick={() => reversePay(p.id)}>{t('groupDetail.reverse')}</Menu.Item>
                               </RowMenu>
                             ) : (
-                              <Button size="xs" variant="subtle" onClick={() => reversePay(p.id)}>Reverse</Button>
+                              <Button size="xs" variant="subtle" onClick={() => reversePay(p.id)}>{t('groupDetail.reverse')}</Button>
                             )
                           )}
                         </div>
@@ -1013,8 +1228,8 @@ export function GroupDetail() {
 
             <Tabs.Panel value="recurring">
               <Group justify="space-between" mb="sm">
-                <Text size="sm" fw={600}>Recurring bills</Text>
-                <Button size="xs" variant="subtle" onClick={loadRules}>Refresh</Button>
+                <Text size="sm" fw={600}>{t('groupDetail.recurringBills')}</Text>
+                <Button size="xs" variant="subtle" onClick={loadRules}>{t('common.refresh')}</Button>
               </Group>
               <RecurringForm groupId={id} members={members} onDone={loadRules} />
               <Stack gap="xs" mt="sm">
@@ -1034,7 +1249,7 @@ export function GroupDetail() {
                     </Group>
                   </Card>
                 ))}
-                {rules.length === 0 && <Text size="sm" c="dimmed">No rules — add rent, wifi, subscriptions.</Text>}
+                {rules.length === 0 && <Text size="sm" c="dimmed">{t('groupDetail.noRecurring')}</Text>}
               </Stack>
             </Tabs.Panel>
 
@@ -1042,9 +1257,15 @@ export function GroupDetail() {
               <div className="gd-people">
                 {members.map((m) => {
                   const pastel = pastelFor(m.display_name || m.username);
-                  const roleLabel = m.role === 'owner' ? 'Owner' : m.role === 'treasurer' ? 'Treasurer' : 'Member';
+                  const roleLabel = m.role === 'owner'
+                    ? t('common.owner')
+                    : m.role === 'treasurer'
+                      ? t('common.treasurer')
+                      : t('common.member');
                   const roleClass = m.role === 'owner' ? 'is-owner' : m.role === 'treasurer' ? 'is-treasurer' : 'is-member';
                   const canAct = detail.mode === 'event' || detail.my_role === 'owner';
+                  const depositLabel = m.deposit_paid ? t('groupDetail.unmarkDeposit') : t('groupDetail.markDeposit');
+                  const treasurerLabel = m.role === 'treasurer' ? t('groupDetail.removeTreasurer') : t('groupDetail.makeTreasurer');
                   return (
                     <div key={m.user_id} className="gd-person">
                       <span
@@ -1060,7 +1281,7 @@ export function GroupDetail() {
                           <span className={`gd-person-tag ${roleClass}`}>{roleLabel}</span>
                           {detail.mode === 'event' && (
                             <span className={`gd-person-tag ${m.deposit_paid ? 'is-deposit' : 'is-deposit-due'}`}>
-                              {m.deposit_paid ? 'Deposit paid' : 'Deposit due'}
+                              {m.deposit_paid ? t('groupDetail.depositPaid') : t('groupDetail.depositDue')}
                             </span>
                           )}
                         </div>
@@ -1069,15 +1290,11 @@ export function GroupDetail() {
                       {canAct && (
                         <div className="gd-person-actions">
                           {detail.mode === 'event' && (
-                            <Tooltip
-                              label={m.deposit_paid ? 'Unmark deposit' : 'Mark deposit paid'}
-                              withArrow
-                              openDelay={200}
-                            >
+                            <Tooltip label={depositLabel} withArrow openDelay={200}>
                               <button
                                 type="button"
                                 className={`gd-person-action${m.deposit_paid ? ' is-on' : ''}`}
-                                aria-label={m.deposit_paid ? 'Unmark deposit' : 'Mark deposit paid'}
+                                aria-label={depositLabel}
                                 onClick={() => setDeposit(m.user_id, !m.deposit_paid)}
                               >
                                 <GdActionIcon name={m.deposit_paid ? 'deposit-on' : 'deposit'} />
@@ -1085,15 +1302,11 @@ export function GroupDetail() {
                             </Tooltip>
                           )}
                           {detail.my_role === 'owner' && m.role !== 'owner' && (
-                            <Tooltip
-                              label={m.role === 'treasurer' ? 'Remove treasurer' : 'Make treasurer'}
-                              withArrow
-                              openDelay={200}
-                            >
+                            <Tooltip label={treasurerLabel} withArrow openDelay={200}>
                               <button
                                 type="button"
                                 className={`gd-person-action${m.role === 'treasurer' ? ' is-on' : ''}`}
-                                aria-label={m.role === 'treasurer' ? 'Remove treasurer' : 'Make treasurer'}
+                                aria-label={treasurerLabel}
                                 onClick={() => setRole(m.user_id, m.role === 'treasurer' ? 'member' : 'treasurer')}
                               >
                                 <GdActionIcon name="treasurer" />
@@ -1101,11 +1314,11 @@ export function GroupDetail() {
                             </Tooltip>
                           )}
                           {detail.my_role === 'owner' && m.role !== 'owner' && (
-                            <Tooltip label="Remove" withArrow openDelay={200}>
+                            <Tooltip label={t('common.remove')} withArrow openDelay={200}>
                               <button
                                 type="button"
                                 className="gd-person-action is-danger"
-                                aria-label={`Remove ${m.display_name}`}
+                                aria-label={t('groupDetail.removeNamed', { name: m.display_name })}
                                 onClick={() => remove(m.user_id, m.display_name)}
                               >
                                 <GdActionIcon name="trash" />
@@ -1124,40 +1337,12 @@ export function GroupDetail() {
       </Stack>
 
       <Modal
-        opened={newSheetOpen}
-        onClose={() => setNewSheetOpen(false)}
-        title="+ New"
-        centered={!isMobile}
-        fullScreen={false}
-        size="sm"
-        styles={isMobile ? { content: { marginTop: 'auto', marginBottom: 0, borderRadius: '16px 16px 0 0' } } : undefined}
-      >
-        <Stack gap="sm">
-          <Button
-            size="md"
-            fullWidth
-            onClick={() => { setNewSheetOpen(false); setShowExp(true); }}
-          >
-            🧾&nbsp; New expense
-          </Button>
-          <Button
-            size="md"
-            fullWidth
-            variant="light"
-            onClick={() => { setNewSheetOpen(false); setPayPreset(null); setPayOpen(true); }}
-          >
-            💸&nbsp; Record payment
-          </Button>
-        </Stack>
-      </Modal>
-
-      <Modal
         opened={showExp}
         onClose={() => { setShowExp(false); setCopyFrom(null); }}
         closeOnClickOutside={false}
         title={(
           <span className="wizard-title-name">
-            {copyFrom ? 'Copy expense' : 'New expense'}
+            {copyFrom ? t('groupDetail.copyExpense') : t('groupDetail.newExpense')}
           </span>
         )}
         classNames={{
@@ -1183,10 +1368,40 @@ export function GroupDetail() {
       </Modal>
 
       <Modal
+        opened={editOpen}
+        onClose={closeEdit}
+        closeOnClickOutside={false}
+        title={<span className="wizard-title-name">{t('groupDetail.editExpense')}</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={560}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+        fullScreen={isMobile}
+      >
+        {editExisting && (
+          <ExpenseForm
+            key={editExisting.expense_id}
+            groupId={id}
+            members={members}
+            existing={editExisting}
+            currency={detail.currency}
+            onDone={() => { closeEdit(); load(); loadLedger(); loadSummary(); }}
+          />
+        )}
+      </Modal>
+
+      <Modal
         opened={payOpen}
         onClose={() => setPayOpen(false)}
         closeOnClickOutside={false}
-        title={<span className="wizard-title-name">Record payment</span>}
+        title={<span className="wizard-title-name">{t('groupDetail.recordPayment')}</span>}
         classNames={{
           content: 'wizard-modal-content',
           header: 'wizard-modal-header',
@@ -1223,7 +1438,7 @@ export function GroupDetail() {
         opened={shareOpen}
         onClose={() => setShareOpen(false)}
         closeOnClickOutside={false}
-        title={<span className="wizard-title-name">Invite link</span>}
+        title={<span className="wizard-title-name">{t('groupDetail.inviteLink')}</span>}
         classNames={{
           content: 'wizard-modal-content',
           header: 'wizard-modal-header',
@@ -1247,7 +1462,7 @@ export function GroupDetail() {
               <CopyButton value={detail.invite_link}>
                 {({ copied, copy }) => (
                   <Button className="wizard-primary" fullWidth onClick={copy}>
-                    {copied ? 'Link copied' : 'Copy invite link'}
+                    {copied ? t('invite.linkCopied') : t('wizard.copyInviteLink')}
                   </Button>
                 )}
               </CopyButton>
@@ -1264,7 +1479,7 @@ export function GroupDetail() {
         opened={removeOpen}
         onClose={() => !removeBusy && setRemoveOpen(false)}
         closeOnClickOutside={!removeBusy}
-        title={<span className="wizard-title-name">Remove member</span>}
+        title={<span className="wizard-title-name">{t('groupDetail.removeMember')}</span>}
         classNames={{
           content: 'wizard-modal-content',
           header: 'wizard-modal-header',
@@ -1297,9 +1512,9 @@ export function GroupDetail() {
         opened={leaveOpen}
         onClose={() => !leaveBusy && setLeaveOpen(false)}
         closeOnClickOutside={!leaveBusy}
-        title={<span className="wizard-title-name">Leave group</span>}
+        title={<span className="wizard-title-name">{t('groupDetail.leaveGroup')}</span>}
         classNames={{
-          content: 'wizard-modal-content',
+          content: 'wizard-modal-content group-danger-confirm-modal',
           header: 'wizard-modal-header',
           body: 'wizard-modal-body',
           title: 'wizard-modal-title',
@@ -1331,9 +1546,9 @@ export function GroupDetail() {
         opened={deleteOpen}
         onClose={() => !deleteBusy && setDeleteOpen(false)}
         closeOnClickOutside={!deleteBusy}
-        title={<span className="wizard-title-name">Delete group</span>}
+        title={<span className="wizard-title-name">{t('groupDetail.deleteGroup')}</span>}
         classNames={{
-          content: 'wizard-modal-content',
+          content: 'wizard-modal-content group-danger-confirm-modal',
           header: 'wizard-modal-header',
           body: 'wizard-modal-body',
           title: 'wizard-modal-title',
@@ -1371,9 +1586,9 @@ export function GroupDetail() {
           setE(null);
         }}
         closeOnClickOutside={false}
-        title={<span className="wizard-title-name">Invite</span>}
+        title={<span className="wizard-title-name">{t('invite.title')}</span>}
         classNames={{
-          content: 'wizard-modal-content',
+          content: 'wizard-modal-content invite-modal-content',
           header: 'wizard-modal-header',
           body: 'wizard-modal-body',
           title: 'wizard-modal-title',
@@ -1383,36 +1598,36 @@ export function GroupDetail() {
         radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile}
       >
-        <div className="wizard-form">
+        <div className="wizard-form invite-dialog">
           <Tabs
             value={inviteTab}
             onChange={(v) => setInviteTab(v || 'email')}
             className="invite-tabs"
+            color="teal"
           >
             <Tabs.List grow>
-              <Tabs.Tab value="email">By email</Tabs.Tab>
-              <Tabs.Tab value="contacts">From contacts</Tabs.Tab>
-              <Tabs.Tab value="link">Invite link</Tabs.Tab>
+              <Tabs.Tab value="email">{t('invite.byEmail')}</Tabs.Tab>
+              <Tabs.Tab value="contacts">{t('invite.fromContacts')}</Tabs.Tab>
+              <Tabs.Tab value="link">{t('invite.inviteLink')}</Tabs.Tab>
             </Tabs.List>
 
             <Tabs.Panel value="email">
               <form className="wizard-form" onSubmit={inviteByEmail}>
                 <div>
                   <Textarea
-                    placeholder="a@example.com, b@example.com"
+                    placeholder={t('wizard.emailsPh')}
                     minRows={4}
                     value={inviteEmails}
                     onChange={(x) => setInviteEmails(x.target.value)}
-                    aria-label="Emails"
+                    aria-label={t('invite.emails')}
                   />
                   <Text size="xs" c="dimmed" mt={6}>
-                    Separate with commas, spaces or new lines
+                    {t('invite.emailsHint')}
                   </Text>
                 </div>
                 <Button className="wizard-primary" fullWidth type="submit" loading={inviteBusy}>
-                  Send invites
+                  {t('invite.sendInvites')}
                 </Button>
               </form>
             </Tabs.Panel>
@@ -1421,14 +1636,14 @@ export function GroupDetail() {
               <form className="wizard-form" onSubmit={searchContacts}>
                 <Group gap="xs" align="flex-end" wrap="nowrap">
                   <TextInput
-                    label="Search contacts"
-                    placeholder="Name, username or email"
+                    label={t('wizard.searchContacts')}
+                    placeholder={t('wizard.searchPh')}
                     value={contactQ}
                     onChange={(x) => setContactQ(x.target.value)}
                     style={{ flex: 1 }}
                   />
                   <Button className="wizard-search" type="submit" variant="default" loading={contactBusy}>
-                    Search
+                    {t('common.search')}
                   </Button>
                 </Group>
                 <Stack gap={8}>
@@ -1458,15 +1673,15 @@ export function GroupDetail() {
                         className="wizard-chip"
                         onClick={() => addFromContact(c.user_id, c.display_name)}
                       >
-                        Add
+                        {t('common.add')}
                       </button>
                     </div>
                   ))}
                   {!contactBusy && contacts.length === 0 && contactQ.trim() !== '' && (
-                    <Text size="sm" c="dimmed">No contacts matched.</Text>
+                    <Text size="sm" c="dimmed">{t('invite.noContacts')}</Text>
                   )}
                   {!contactBusy && contacts.length === 0 && contactQ.trim() === '' && (
-                    <Text size="sm" c="dimmed">Search your contacts to add them.</Text>
+                    <Text size="sm" c="dimmed">{t('invite.searchYourContacts')}</Text>
                   )}
                 </Stack>
               </form>
@@ -1476,15 +1691,15 @@ export function GroupDetail() {
               <div className="wizard-form">
                 {inviteLinkLive || detail.invite_link ? (
                   <>
-                    <Text className="confirm-dialog-text" style={{ padding: 0 }}>
-                      Anyone with this link can join the group. Rotating creates a new link and the old one stops working.
+                    <Text className="invite-link-hint">
+                      {t('invite.linkBody')}
                     </Text>
                     <Group gap="xs" align="flex-end" wrap="nowrap">
                       <TextInput
                         readOnly
                         value={inviteLinkLive || detail.invite_link}
                         style={{ flex: 1 }}
-                        aria-label="Invite link"
+                        aria-label={t('invite.inviteLink')}
                       />
                       {detail.my_role === 'owner' && (
                         <Button
@@ -1493,21 +1708,21 @@ export function GroupDetail() {
                           loading={rotateBusy}
                           onClick={rotateInviteLink}
                         >
-                          Rotate
+                          {t('invite.rotate')}
                         </Button>
                       )}
                     </Group>
                     <CopyButton value={inviteLinkLive || detail.invite_link}>
                       {({ copied, copy }) => (
                         <Button className="wizard-primary" fullWidth onClick={copy}>
-                          {copied ? 'Link copied' : 'Copy invite link'}
+                          {copied ? t('invite.linkCopied') : t('wizard.copyInviteLink')}
                         </Button>
                       )}
                     </CopyButton>
                   </>
                 ) : (
-                  <Text className="confirm-dialog-text" style={{ padding: 0 }}>
-                    Only the owner or treasurer can share an invite link.
+                  <Text className="invite-link-hint">
+                    {t('invite.ownerOnlyLink')}
                   </Text>
                 )}
               </div>
@@ -1517,11 +1732,77 @@ export function GroupDetail() {
         </div>
       </Modal>
 
-      <Modal opened={renameOpen} onClose={() => setRenameOpen(false)} title="Rename group" centered size="sm">
+      <Modal
+        opened={categoryModalOpen}
+        onClose={() => !catBusy && setCategoryModalOpen(false)}
+        closeOnClickOutside={!catBusy}
+        title={<span className="wizard-title-name">{t(categoryTarget ? 'groupDetail.categoryRename' : 'groupDetail.categoryAdd')}</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={440}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+      >
+        <form className="wizard-form" onSubmit={saveCategory}>
+          <TextInput
+            label={t('groupDetail.categoryName')}
+            placeholder={t('forms.expense.addCategoryPh')}
+            autoFocus
+            required
+            value={categoryName}
+            onChange={(x) => setCategoryName(x.target.value)}
+          />
+          <Button className="wizard-primary" fullWidth type="submit" loading={catBusy} disabled={!categoryName.trim()}>
+            {t(categoryTarget ? 'common.saveChanges' : 'groupDetail.categoryAdd')}
+          </Button>
+          <Err e={e} />
+        </form>
+      </Modal>
+
+      <Modal
+        opened={!!categoryDeleteTarget}
+        onClose={() => !catBusy && setCategoryDeleteTarget(null)}
+        closeOnClickOutside={!catBusy}
+        title={<span className="wizard-title-name">{t('groupDetail.categoryDelete')}</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={420}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+      >
+        <div className="wizard-form confirm-dialog">
+          <Text className="confirm-dialog-text">
+            {t('groupDetail.categoryDeleteBody', { name: categoryLabel(categoryDeleteTarget, t) })}
+          </Text>
+          <Group gap="sm" grow>
+            <Button className="wizard-back" onClick={() => setCategoryDeleteTarget(null)} disabled={catBusy}>
+              {t('common.cancel')}
+            </Button>
+            <Button className="wizard-primary is-danger" loading={catBusy} onClick={confirmDeleteCategory}>
+              {t('common.delete')}
+            </Button>
+          </Group>
+          <Err e={e} />
+        </div>
+      </Modal>
+
+      <Modal opened={renameOpen} onClose={() => setRenameOpen(false)} title={t('groupDetail.rename')} centered size="sm">
         <form onSubmit={saveRename}>
           <Stack gap="sm">
             <TextInput
-              label="Group name"
+              label={t('wizard.groupName')}
               required
               autoFocus
               value={renName}
@@ -1529,8 +1810,8 @@ export function GroupDetail() {
               data-autofocus
             />
             <Group justify="flex-end" gap="xs">
-              <Button variant="default" onClick={() => setRenameOpen(false)}>Cancel</Button>
-              <Button type="submit" loading={renaming}>Save</Button>
+              <Button variant="default" onClick={() => setRenameOpen(false)}>{t('common.cancel')}</Button>
+              <Button type="submit" loading={renaming}>{t('groupDetail.renameSave')}</Button>
             </Group>
             <Err e={e} />
           </Stack>
@@ -1538,6 +1819,50 @@ export function GroupDetail() {
       </Modal>
 
     </Shell>
+  );
+}
+
+export function CategoryManager({ categories, t, onAdd, onEdit, onDelete }) {
+  return (
+    <section className="category-manager" aria-label={t('groupDetail.tabCategories')}>
+      <Group justify="space-between" mb="sm" wrap="wrap">
+        <div>
+          <Text size="sm" fw={700}>{t('groupDetail.tabCategories')}</Text>
+          <Text size="xs" c="dimmed">{t('groupDetail.categoriesHint')}</Text>
+        </div>
+        <button type="button" className="gd-action-btn settings-add-btn" onClick={onAdd}>
+          <GdActionIcon name="plus" />
+          <span>{t('groupDetail.categoryAdd')}</span>
+        </button>
+      </Group>
+      <div className="settings-list category-manager-list">
+        {categories.map((category) => (
+          <div key={category.category_id} className="settings-row">
+            <div className="settings-row-body">
+              <Text className="settings-row-title">{categoryLabel(category, t)}</Text>
+              <Text className="settings-row-sub">
+                {category.is_default ? t('groupDetail.categoryDefault') : category.key}
+              </Text>
+            </div>
+            <div className="settings-row-actions">
+              <Tooltip label={t('common.edit')} withArrow openDelay={200}>
+                <button type="button" className="gd-person-action" aria-label={`${t('common.edit')} ${categoryLabel(category, t)}`} onClick={() => onEdit(category)}>
+                  <GdActionIcon name="edit" />
+                </button>
+              </Tooltip>
+              {!category.is_default && (
+                <Tooltip label={t('common.delete')} withArrow openDelay={200}>
+                  <button type="button" className="gd-person-action is-danger" aria-label={`${t('common.delete')} ${categoryLabel(category, t)}`} onClick={() => onDelete(category)}>
+                    <GdActionIcon name="trash" />
+                  </button>
+                </Tooltip>
+              )}
+            </div>
+          </div>
+        ))}
+        {categories.length === 0 && <Text size="sm" c="dimmed">{t('groupDetail.noCategories')}</Text>}
+      </div>
+    </section>
   );
 }
 
@@ -1556,6 +1881,14 @@ function GdActionIcon({ name }) {
       <svg {...common}>
         <path d="M8 7h8M8 11h8M8 15h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         <path d="M6 3.5h12A2.5 2.5 0 0 1 20.5 6v14.2l-2.8-1.6-2.7 1.6-2.8-1.6-2.7 1.6-2.8-1.6-2.7 1.6V6A2.5 2.5 0 0 1 6 3.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (name === 'edit') {
+    return (
+      <svg {...common} width={17} height={17}>
+        <path d="M4.5 19.5h4.1L19.2 8.9a2.1 2.1 0 0 0 0-3l-1.1-1.1a2.1 2.1 0 0 0-3 0L4.5 15.4v4.1Z" stroke="currentColor" strokeWidth="1.75" strokeLinejoin="round" />
+        <path d="M13.4 6.6 17.4 10.6" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
       </svg>
     );
   }
@@ -1646,6 +1979,7 @@ function GdActionIcon({ name }) {
 }
 
 function RecurringForm({ groupId, members, onDone }) {
+  const t = useT();
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [payer, setPayer] = useState(members[0]?.user_id || '');
@@ -1667,10 +2001,10 @@ function RecurringForm({ groupId, members, onDone }) {
   return (
     <form onSubmit={go}>
       <Group gap="xs" align="flex-end">
-        <TextInput label="Title" required placeholder="Rent" value={title} onChange={(x) => setTitle(x.target.value)} style={{ flex: 2 }} />
+        <TextInput label={t('groupDetail.recurringTitle')} required placeholder={t('groupDetail.rentPh')} value={title} onChange={(x) => setTitle(x.target.value)} style={{ flex: 2 }} />
         <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} style={{ flex: 1 }} />
-        <Select label="Payer" value={payer} onChange={setPayer} data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} style={{ flex: 2 }} />
-        <Select label="Every" value={freq} onChange={setFreq} data={['weekly', 'monthly']} style={{ width: 110 }} />
+        <Select label={t('groupDetail.recurringPayer')} value={payer} onChange={setPayer} data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} style={{ flex: 2 }} />
+        <Select label={t('groupDetail.every')} value={freq} onChange={setFreq} data={['weekly', 'monthly']} style={{ width: 110 }} />
         <Button type="submit" loading={busy}>Add</Button>
       </Group>
       <Err e={e} />
