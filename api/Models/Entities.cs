@@ -44,3 +44,15 @@ public sealed class GroupMember
     public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
     public bool DepositPaid { get; set; } // event-mode fee tracking
 }
+
+/// <summary>Per-group expense category. Defaults: food, stay, transport, other.</summary>
+public sealed class GroupCategory
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid GroupId { get; set; }
+    public string Key { get; set; } = ""; // stable slug stored on Expense.Category
+    public string Name { get; set; } = ""; // display label
+    public int SortOrder { get; set; }
+    public bool IsDefault { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}

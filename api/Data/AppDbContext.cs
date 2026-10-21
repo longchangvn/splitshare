@@ -8,6 +8,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<User> Users => Set<User>();
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
+    public DbSet<GroupCategory> GroupCategories => Set<GroupCategory>();
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<ExpenseSplit> ExpenseSplits => Set<ExpenseSplit>();
     public DbSet<ExpenseImage> ExpenseImages => Set<ExpenseImage>();
@@ -53,6 +54,14 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         b.Entity<GroupMember>(e =>
         {
             e.HasKey(x => new { x.GroupId, x.UserId });
+        });
+        b.Entity<GroupCategory>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.GroupId, x.Key }).IsUnique();
+            e.HasIndex(x => x.GroupId);
+            e.Property(x => x.Key).HasMaxLength(32);
+            e.Property(x => x.Name).HasMaxLength(40);
         });
         b.Entity<Expense>(e =>
         {

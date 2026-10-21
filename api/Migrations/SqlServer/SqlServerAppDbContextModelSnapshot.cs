@@ -325,6 +325,45 @@ namespace SplitShare.Api.Migrations.SqlServer
                     b.ToTable("Groups", "splitshare");
                 });
 
+
+            modelBuilder.Entity("SplitShare.Api.Models.GroupCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("GroupId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("GroupCategories", "splitshare");
+                });
+
             modelBuilder.Entity("SplitShare.Api.Models.GroupMember", b =>
                 {
                     b.Property<Guid>("GroupId")

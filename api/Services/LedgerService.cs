@@ -179,7 +179,8 @@ public sealed class LedgerService(AppDbContext db)
     public sealed record LedgerItem(string Kind, Guid Id, string Title, DateTime CreatedAt,
         long AmountCents, Guid? PayerId, string? PayerName, Guid? FromUserId, string? FromName,
         Guid? ToUserId, string? ToName,
-        long MyShareCents, string Status, bool HasImage, bool Reversed);
+        long MyShareCents, string Status, bool HasImage, bool Reversed, string? Category = null,
+        Guid? CreatedBy = null);
 
     public sealed record OweTo(Guid ToUserId, string ToName, long AmountCents);
     public sealed record OwedFrom(Guid FromUserId, string FromName, long AmountCents);
@@ -187,7 +188,7 @@ public sealed class LedgerService(AppDbContext db)
         List<OweTo> Owes, List<OwedFrom> OwedToMe, int SettlementVersion);
     public sealed record GroupRow(Guid GroupId, string Name, string Currency, long NetCents,
         bool Delinquent, DateTime? OldestUnsettledAt, DateTime CreatedAt,
-        string? MyRole, int MemberCount);
+        string? MyRole, int MemberCount, long SpentCents, bool NeedsSettlement = false);
     public sealed record CurrencyTotals(long OweCents, long OwedCents);
     public sealed record AllView(List<GroupRow> Groups, Dictionary<string, CurrencyTotals> Totals);
     public sealed record MemberSummary(Guid UserId, string DisplayName,
@@ -283,7 +284,8 @@ public sealed class LedgerService(AppDbContext db)
                     "expense", e.Id, e.Title, e.CreatedAt, e.AmountCents,
                     e.PayerId, NameOf(names, e.PayerId), null, null, null, null,
                     e.Splits.FirstOrDefault(s => s.UserId == requesterId)?.ShareCents ?? 0L,
-                    e.Status.ToString().ToUpperInvariant(), e.Images.Count > 0, false)));
+                    e.Status.ToString().ToUpperInvariant(), e.Images.Count > 0, false, e.Category,
+                    e.CreatedBy)));
             }
         }
         if (f.Type is "all" or "payment")
@@ -314,7 +316,7 @@ public sealed class LedgerService(AppDbContext db)
                     p.ToUserId, NameOf(names, p.ToUserId),
                     p.ToUserId == requesterId ? p.AmountCents
                         : p.FromUserId == requesterId ? -p.AmountCents : 0L,
-                    p.Status.ToString().ToUpperInvariant(), false, p.ReversedAt is not null)));
+                    p.Status.ToString().ToUpperInvariant(), false, p.ReversedAt is not null, null)));
             }
         }
         var ordered = f.Sort == "created_at"
@@ -361,6 +363,11 @@ public sealed class LedgerService(AppDbContext db)
             .GroupBy(m => m.GroupId)
             .Select(g => new { GroupId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.GroupId, x => x.Count);
+        var spentByGroup = await db.Expenses
+            .Where(e => groupIds.Contains(e.GroupId) && e.DeletedAt == null)
+            .GroupBy(e => e.GroupId)
+            .Select(g => new { GroupId = g.Key, Spent = g.Sum(e => e.AmountCents) })
+            .ToDictionaryAsync(x => x.GroupId, x => x.Spent);
         var groups = await db.Groups.Where(g => groupIds.Contains(g.Id) && g.DeletedAt == null).ToListAsync();
         var rows = new List<GroupRow>();
         var totals = new Dictionary<string, CurrencyTotals>();
@@ -369,17 +376,20 @@ public sealed class LedgerService(AppDbContext db)
             var snapshot = await ComputeNetsAsync(g.Id);
             if (snapshot is null) continue;
             var net = snapshot.Nets.TryGetValue(userId, out var n) ? n : 0L;
+            var needsSettlement = snapshot.Nets.Values.Any(v => v != 0);
             var oldest = await db.Expenses
                 .Where(e => e.GroupId == g.Id && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
                 .Select(e => (DateTime?)e.CreatedAt).MinAsync()
                 ?? await db.Payments
                     .Where(p => p.GroupId == g.Id && p.Status == ExpenseStatus.Open && p.ReversedAt == null)
                     .Select(p => (DateTime?)p.CreatedAt).MinAsync();
-            var delinquent = net != 0 && oldest is not null && DateTime.UtcNow - oldest > TimeSpan.FromDays(30);
+            var delinquent = needsSettlement && oldest is not null && DateTime.UtcNow - oldest > TimeSpan.FromDays(30);
             myRoles.TryGetValue(g.Id, out var myRole);
             memberCounts.TryGetValue(g.Id, out var memberCount);
-            rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent, net != 0 ? oldest : null, g.CreatedAt,
-                myRole, memberCount));
+            spentByGroup.TryGetValue(g.Id, out var spentCents);
+            rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent,
+                needsSettlement ? oldest : null, g.CreatedAt,
+                myRole, memberCount, spentCents, needsSettlement));
             totals.TryGetValue(g.Currency, out var t);
             totals[g.Currency] = net < 0
                 ? new CurrencyTotals(t?.OweCents - net ?? -net, t?.OwedCents ?? 0)

@@ -23,8 +23,9 @@ public sealed class GroupTests
             }).Build();
         var auth = new AuthService(db, new TokenService(config),
             new StubEmailSender(NullLogger<StubEmailSender>.Instance), new LedgerService(db));
-        return (db, auth, new GroupService(db, new LedgerService(db),
-            new StubEmailSender(NullLogger<StubEmailSender>.Instance), config));
+        var ledger = new LedgerService(db);
+        return (db, auth, new GroupService(db, ledger,
+            new StubEmailSender(NullLogger<StubEmailSender>.Instance), config, new CategoryService(db)));
     }
 
     private static async Task<User> Reg(AuthService auth, string name)
