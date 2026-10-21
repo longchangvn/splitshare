@@ -14,14 +14,10 @@ name: CD Web — Azure Static Web Apps
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: "Deployment target (stage deploys to SWA 'splitshare-stage', created if missing)"
-        required: true
-        type: choice
-        default: main
-        options:
-          - main
-          - stage
+        environment:
+          description: "Select deployment environment"
+          required: true
+          type: environment
 # Same group as cd-api.yml so the two never mutate Azure concurrently.
 concurrency:
   group: deploy-azure-main
@@ -36,10 +32,7 @@ permissions:
 env:
   RG: splitshare
   CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
-  SWA_NAME: ${{ inputs.target == 'stage' && 'splitshare-stage' || vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
-  # Both targets share one API container app, so each needs its own CORS
-  # slot — stage must never overwrite main's origin (index 0).
-  CORS_KEY: ${{ inputs.target == 'stage' && 'Cors__AllowedOrigins__1' || 'Cors__AllowedOrigins__0' }}
+  SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
   LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southcentralus' }}
   # Microsoft.Web/staticSites is only available in a handful of regions
   # (centralus, eastus2, westus2, westeurope, eastasia on this subscription)
@@ -48,7 +41,7 @@ env:
 
 jobs:
   deploy-web:
-    name: Build & deploy Web (${{ inputs.target }})
+    name: Build & deploy Web
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -128,12 +121,12 @@ jobs:
           # changed (an update would otherwise spawn a needless revision).
           WANT="https://$SWA_HOST"
           CUR=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
-            --query "properties.template.containers[0].env[?name=='$CORS_KEY'].value | [0]" \
+            --query "properties.template.containers[0].env[?name=='Cors__AllowedOrigins__0'].value | [0]" \
             -o tsv 2>/dev/null || true)
           if [ "$CUR" != "$WANT" ]; then
             attempt=0
             until az containerapp update --name "$CA_NAME" --resource-group "$RG" \
-              --set-env-vars "$CORS_KEY=$WANT" --output none; do
+              --set-env-vars "Cors__AllowedOrigins__0=$WANT" --output none; do
               attempt=$((attempt + 1))
               if [ "$attempt" -ge 3 ]; then
                 echo "::error::Failed to allow origin $WANT on '$CA_NAME'."
@@ -243,11 +236,3 @@ jobs:
           fi
           echo "CORS OK: API allows $origin"
           echo "Deploy complete: web=$SWA_URL api=$API_URL"
-          echo "::notice title=Web URL (${{ inputs.target }})::$SWA_URL"
-          {
-            echo "### Web deployed (${{ inputs.target }})"
-            echo ""
-            echo "- Static Web App: \`$SWA_NAME\`"
-            echo "- Web URL: $SWA_URL"
-            echo "- API URL: $API_URL"
-          } >> "$GITHUB_STEP_SUMMARY"
