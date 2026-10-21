@@ -10,6 +10,12 @@ name: CD Web — Azure Static Web Apps
 #
 # Every push/merge is gated by the build-only "CI Web" workflow instead; this
 # CD workflow is what turns a green commit into a deployment.
+#
+# Label: vars.SPLITSHARE_SWA_NAME (e.g. `stage`, `test`) of the selected
+# environment picks the SWA `splitshare-<label>` (or `splitshare` without it)
+# and the API revision whose CORS origin is set to that SWA. VITE_API_BASE
+# comes from vars.SPLITSHARE_BASE_API_URL of the selected environment (e.g.
+# https://<app>---<label>.<env-domain> for a labelled revision).
 
 on:
   workflow_dispatch:
@@ -32,7 +38,6 @@ permissions:
 env:
   RG: splitshare
   CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
-  SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
   LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southcentralus' }}
   # Microsoft.Web/staticSites is only available in a handful of regions
   # (centralus, eastus2, westus2, westeurope, eastasia on this subscription)
@@ -42,8 +47,15 @@ env:
 jobs:
   deploy-web:
     name: Build & deploy Web
+    # Binds the selected GitHub environment so its vars/secrets are exposed.
+    environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Job-level so environment-scoped vars resolve.
+    env:
+      LABEL: ${{ vars.SPLITSHARE_SWA_NAME }}
+      SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME && format('splitshare-{0}', vars.SPLITSHARE_SWA_NAME) || 'splitshare' }}
+      API_URL: ${{ vars.SPLITSHARE_BASE_API_URL }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,21 +121,57 @@ jobs:
           echo "SWA: https://$SWA_HOST"
 
           echo "=== 2/3 API origin + CORS ==="
-          API_FQDN=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
-            --query properties.configuration.ingress.fqdn -o tsv 2>/dev/null || true)
-          if [ -z "$API_FQDN" ] || [ "$API_FQDN" = "None" ]; then
+          if [[ ! "$API_URL" =~ ^https?://[^/]+ ]]; then
+            echo "::error::vars.SPLITSHARE_BASE_API_URL='${API_URL:-<empty>}' must be set to the API origin (e.g. https://api-container---stage.<env-domain>) on the selected environment."
+            exit 1
+          fi
+          API_URL="${API_URL%/}"
+          echo "API: $API_URL"
+          az containerapp show --name "$CA_NAME" --resource-group "$RG" --output json > /tmp/ca.json 2>/dev/null || echo '{}' > /tmp/ca.json
+          if [ "$(jq -r '.properties.configuration.ingress.fqdn // ""' /tmp/ca.json)" = "" ]; then
             echo "::error::Container app '$CA_NAME' not found or has no ingress. Run the 'CD API' workflow first (fresh setup: run CD API, then CD Web)."
             exit 1
           fi
-          echo "API: https://$API_FQDN"
+          MODE=$(jq -r '.properties.configuration.activeRevisionsMode // "Single"' /tmp/ca.json)
+          # Revision serving this deployment: the one holding the label, or
+          # the one taking the main traffic when there is no label.
+          TARGET_REV=$(jq -r --arg label "$LABEL" '.properties.latestRevisionName as $l
+            | [(.properties.configuration.ingress.traffic // [])[]
+               | select(if $label == "" then (.weight // 0) > 0 else .label == $label end)
+               | (if .latestRevision == true then $l else .revisionName end)]
+            | .[0] // ""' /tmp/ca.json)
+          if [ -n "$LABEL" ] && [ -z "$TARGET_REV" ]; then
+            echo "::error::No revision labelled '$LABEL' on '$CA_NAME'. Run the 'CD API' workflow with this environment first."
+            exit 1
+          fi
+          echo "CORS target revision: ${TARGET_REV:-<latest>}"
           # The SPA calls the API cross-origin — allow this SWA origin on the
           # API. Only touches the container app when the value actually
           # changed (an update would otherwise spawn a needless revision).
           WANT="https://$SWA_HOST"
-          CUR=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
-            --query "properties.template.containers[0].env[?name=='Cors__AllowedOrigins__0'].value | [0]" \
-            -o tsv 2>/dev/null || true)
-          if [ "$CUR" != "$WANT" ]; then
+          CUR=""
+          if [ -n "$TARGET_REV" ]; then
+            CUR=$(az containerapp revision show --name "$CA_NAME" --resource-group "$RG" --revision "$TARGET_REV" \
+              --query "properties.template.containers[0].env[?name=='Cors__AllowedOrigins__0'].value | [0]" \
+              -o tsv 2>/dev/null || true)
+          fi
+          if [ "$CUR" != "$WANT" ] && [ "${MODE,,}" = "multiple" ]; then
+            # Env vars live on the revision: copy the target revision with the
+            # new origin, then move the label / main traffic onto the copy.
+            SUFFIX="${LABEL:-main}-cors-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            NEW_REV="$CA_NAME--$SUFFIX"
+            az containerapp revision copy --name "$CA_NAME" --resource-group "$RG" \
+              --from-revision "$TARGET_REV" --revision-suffix "$SUFFIX" \
+              --set-env-vars "Cors__AllowedOrigins__0=$WANT" --output none
+            if [ -n "$LABEL" ]; then
+              az containerapp revision label add --name "$CA_NAME" --resource-group "$RG" \
+                --label "$LABEL" --revision "$NEW_REV" --yes --output none
+            else
+              az containerapp ingress traffic set --name "$CA_NAME" --resource-group "$RG" \
+                --revision-weight "$NEW_REV=100" "$TARGET_REV=0" --output none
+            fi
+            echo "Allowed origin $WANT on the API (revision $NEW_REV)."
+          elif [ "$CUR" != "$WANT" ]; then
             attempt=0
             until az containerapp update --name "$CA_NAME" --resource-group "$RG" \
               --set-env-vars "Cors__AllowedOrigins__0=$WANT" --output none; do
@@ -141,7 +189,7 @@ jobs:
           fi
 
           {
-            echo "api_fqdn=$API_FQDN"
+            echo "api_url=$API_URL"
             echo "swa_host=$SWA_HOST"
             echo "swa_token=$SWA_TOKEN"
           } >> "$GITHUB_OUTPUT"
@@ -156,7 +204,7 @@ jobs:
       - name: Build web
         working-directory: web
         env:
-          VITE_API_BASE: https://${{ steps.infra.outputs.api_fqdn }}
+          VITE_API_BASE: ${{ steps.infra.outputs.api_url }}
           VITE_GOOGLE_CLIENT_ID: ${{ secrets.SPLITSHARE_GOOGLE_CLIENT_ID }}
           # Public OneSignal app id (embedded in the bundle; not a secret).
           VITE_ONESIGNAL_APP_ID: ${{ vars.SPLITSHARE_ONESIGNAL_APP_ID }}
@@ -193,7 +241,7 @@ jobs:
       - name: Smoke test web + CORS
         env:
           SWA_URL: https://${{ steps.infra.outputs.swa_host }}
-          API_URL: https://${{ steps.infra.outputs.api_fqdn }}
+          API_URL: ${{ steps.infra.outputs.api_url }}
         run: |
           set -euo pipefail
           echo "Checking web: $SWA_URL"
