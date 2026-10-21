@@ -84,6 +84,9 @@ jobs:
           GH_ASPNETCORE_ENVIRONMENT: ${{ vars.ASPNETCORE_ENVIRONMENT || 'Production' }}
           GH_UPLOADS__PATH: ${{ vars.UPLOADS__PATH || '/data/uploads' }}
           GH_AUTH__GOOGLECLIENTID: ${{ vars.AUTH__GOOGLECLIENTID }}
+          # Kept out of the run script: any ${{ }} inside it makes the whole
+          # script one expression, which exceeds GitHub's 21000-char limit.
+          WEB_BASE_VAR: ${{ vars.SPLITSHARE_WEB_BASE_URL }}
         run: |
           set -euo pipefail
 
@@ -324,7 +327,7 @@ jobs:
 
           # App__BaseUrl drives invite/share links (App:BaseUrl, web origin).
           # Repo var wins (custom domains); else the SWA default hostname.
-          WEB_BASE="${{ vars.SPLITSHARE_WEB_BASE_URL }}"
+          WEB_BASE="${WEB_BASE_VAR:-}"
           if [ -z "$WEB_BASE" ] && [ -n "${SWA_HOST:-}" ] && [ "$SWA_HOST" != "None" ]; then
             WEB_BASE="https://$SWA_HOST"
           fi
