@@ -12,6 +12,13 @@ name: CD API — Azure Container Apps
 # CORS: if the Static Web App already exists, its origin is allowed on the
 # API (best effort). The "CD Web" workflow is the one that guarantees it
 # after the SWA is created.
+#
+# Label: when the selected environment sets vars.SPLITSHARE_SWA_NAME (e.g.
+# `stage`, `test`), the new revision is deployed with that revision label and
+# 0% traffic — reachable at https://<app>---<label>.<env-domain> — while the
+# main traffic stays on the current revision. Without the var the new revision
+# takes 100% of the traffic (main deploy). The SWA name follows the same
+# label: `splitshare` or `splitshare-<label>`.
 
 on:
   workflow_dispatch:
@@ -32,7 +39,6 @@ permissions:
 env:
   RG: splitshare
   CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
-  SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME || 'splitshare' }}
   LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southcentralus' }}
   REG_URL_VAR: ${{ vars.SPLITSHARE_REGISTRY_URL }}
 
@@ -45,6 +51,10 @@ jobs:
     environment: ${{ inputs.environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Job-level so environment-scoped vars resolve.
+    env:
+      LABEL: ${{ vars.SPLITSHARE_SWA_NAME }}
+      SWA_NAME: ${{ vars.SPLITSHARE_SWA_NAME && format('splitshare-{0}', vars.SPLITSHARE_SWA_NAME) || 'splitshare' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -201,15 +211,69 @@ jobs:
             fi
           fi
 
+          echo "=== Revision label: ${LABEL:-<none, main>} ==="
+          if [ -n "$LABEL" ] && ! [[ "$LABEL" =~ ^[a-z][a-z0-9-]*[a-z0-9]$ ]]; then
+            echo "::error::vars.SPLITSHARE_SWA_NAME='$LABEL' is not a valid revision label (lowercase letters, digits, '-'; start with a letter)."
+            exit 1
+          fi
+          CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
+          SUFFIX="${LABEL:-main}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          NEW_REV="$CA_NAME--$SUFFIX"
+          APP_EXISTS=""
+          MULTI=""
+          MAIN_REV=""
+          # Template the new revision starts from (env vars are per revision):
+          # the revision currently holding the label, else the main revision.
+          echo '{}' > /tmp/base-template.json
+          # Fetch via REST with the SAME api-version as the PUT below: the CLI's
+          # GET uses a newer api-version whose response contains configuration
+          # fields (identitySettings, runtime) that 2024-03-01 rejects on write.
+          if az rest --method get --url "$CA_URL" --output json > /tmp/ca-before.json 2>/dev/null; then
+            APP_EXISTS=1
+            jq '.properties.template // {}' /tmp/ca-before.json > /tmp/base-template.json
+            MODE=$(jq -r '.properties.configuration.activeRevisionsMode // "Single"' /tmp/ca-before.json)
+            if [ -n "$LABEL" ] || [ "${MODE,,}" = "multiple" ]; then
+              MULTI=1
+              rev_for() {
+                jq -r --arg label "$1" '.properties.latestRevisionName as $l
+                  | [(.properties.configuration.ingress.traffic // [])[]
+                     | select(if $label == "" then (.weight // 0) > 0 else .label == $label end)
+                     | (if .latestRevision == true then $l else .revisionName end)]
+                  | .[0] // ""' /tmp/ca-before.json
+              }
+              MAIN_REV=$(rev_for "")
+              BASE_REV="$MAIN_REV"
+              LABEL_REV=""
+              [ -n "$LABEL" ] && LABEL_REV=$(rev_for "$LABEL")
+              [ -n "$LABEL_REV" ] && BASE_REV="$LABEL_REV"
+              echo "Main revision: ${MAIN_REV:-<none>}; base revision: ${BASE_REV:-<none>}; new revision: $NEW_REV"
+              if [ -n "$BASE_REV" ]; then
+                az rest --method get \
+                  --url "https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME/revisions/$BASE_REV?api-version=2024-03-01" \
+                  --query properties.template --output json > /tmp/base-template.json
+              fi
+              if [ -n "$LABEL" ] && [ -z "$LABEL_REV" ]; then
+                # First deploy of this label: don't inherit the main revision's
+                # env (DB connection, keys, origins) — start from GitHub values.
+                echo "No revision labelled '$LABEL' yet — starting with a clean env."
+                jq '.containers[0].env = []' /tmp/base-template.json > /tmp/base-template.tmp
+                mv /tmp/base-template.tmp /tmp/base-template.json
+              fi
+            fi
+          elif [ -n "$LABEL" ]; then
+            MULTI=1
+          fi
+          base_env() {
+            jq -r --arg n "$1" '[(.containers[0].env // [])[] | select(.name == $n) | .value] | .[0] // ""' /tmp/base-template.json
+          }
+
           echo "=== 5/7 JWT key ==="
           # Production refuses to boot without a >=32 char key. Prefer the
           # GitHub secret; otherwise reuse what's already configured on the
           # app (so sessions survive); otherwise generate one and persist it.
           JWT_KEY="$JWT_KEY_SECRET"
           if [ -z "$JWT_KEY" ]; then
-            EXISTING=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
-              --query "properties.template.containers[0].env[?name=='Jwt__Key'].value | [0]" \
-              -o tsv 2>/dev/null || true)
+            EXISTING=$(base_env Jwt__Key)
             if [ -n "${EXISTING:-}" ] && [ "$EXISTING" != "null" ] && [ "${#EXISTING}" -ge 32 ] \
               && [ "$EXISTING" != "dev-only-insecure-key-change-in-prod-0123456789" ]; then
               JWT_KEY="$EXISTING"
@@ -232,9 +296,7 @@ jobs:
           # a re-run without the secret set doesn't silently disable Google login.
           GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID_SECRET"
           if [ -z "$GOOGLE_CLIENT_ID" ]; then
-            EXISTING_GCID=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
-              --query "properties.template.containers[0].env[?name=='Auth__GoogleClientId'].value | [0]" \
-              -o tsv 2>/dev/null || true)
+            EXISTING_GCID=$(base_env Auth__GoogleClientId)
             if [ -n "${EXISTING_GCID:-}" ] && [ "$EXISTING_GCID" != "null" ]; then
               GOOGLE_CLIENT_ID="$EXISTING_GCID"
               echo "Reusing the Auth__GoogleClientId already configured on '$CA_NAME'."
@@ -274,8 +336,7 @@ jobs:
 
           # Generic env sync: forward all allowlisted GitHub env vars/secrets to the
           # container app, but only if not already configured there (existing values win).
-          EXISTING_NAMES=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
-            --query "properties.template.containers[0].env[].name" -o tsv 2>/dev/null || true)
+          EXISTING_NAMES=$(jq -r '(.containers[0].env // [])[].name' /tmp/base-template.json)
           ENV_SYNC_NAMES=()
           ENV_SYNC_VALUES=()
           env_sync_add() {
@@ -313,19 +374,20 @@ jobs:
             env_sync_add "$name" "${!src:-}" "$is_secret"
           done
 
-          CA_URL="https://management.azure.com/subscriptions/$SUB_ID/resourceGroups/$RG/providers/Microsoft.App/containerApps/$CA_NAME?api-version=2024-03-01"
-          if az containerapp show --name "$CA_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+          if [ -n "$APP_EXISTS" ]; then
             echo "Container app exists — updating image, env vars, ingress and registry in place."
-            # Fetch via REST with the SAME api-version as the PUT below: the CLI's
-            # GET uses a newer api-version whose response contains configuration
-            # fields (identitySettings, runtime) that 2024-03-01 rejects on write.
-            az rest --method get --url "$CA_URL" --output json > /tmp/ca-before.json
             jq \
               --arg image "$IMAGE" \
               --arg server "$REG_SERVER" \
               --arg user "$ACR_USER" \
               --arg pass "$ACR_PASS" \
               --arg base "$WEB_BASE" \
+              --arg multi "$MULTI" \
+              --arg label "$LABEL" \
+              --arg suffix "$SUFFIX" \
+              --arg newrev "$NEW_REV" \
+              --arg mainrev "$MAIN_REV" \
+              --slurpfile tpl /tmp/base-template.json \
               --argjson env_sync_names "$(printf '%s\n' "${ENV_SYNC_NAMES[@]+"${ENV_SYNC_NAMES[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
               --argjson env_sync_values "$(printf '%s\n' "${ENV_SYNC_VALUES[@]+"${ENV_SYNC_VALUES[@]}"}" | jq -R . | jq -s 'map(select(. != ""))')" \
               '
@@ -340,6 +402,11 @@ jobs:
                   .properties.configuration.runtime)
               | .properties.configuration = (.properties.configuration // {})
               | .properties.template = (.properties.template // {})
+              | (if $multi == "1" then
+                  .properties.template = $tpl[0]
+                  | .properties.template.revisionSuffix = $suffix
+                  | .properties.configuration.activeRevisionsMode = "Multiple"
+                else . end)
               | .properties.template.containers[0].image = $image
               | .properties.template.containers[0].env = (
                   # Preserve every existing env var except the ones env-sync will
@@ -356,6 +423,22 @@ jobs:
                 )
               | .properties.configuration.ingress = ((.properties.configuration.ingress // {})
                   * {external: true, targetPort: 8080, transport: "http", allowInsecure: false})
+              # Multiple mode: pin traffic to revision names. Label deploy keeps
+              # the main weights and moves the label to the new revision (0%);
+              # main deploy sends 100% to the new revision and keeps labels.
+              | (if $multi == "1" then
+                  .properties.configuration.ingress.traffic = (
+                    ((.properties.configuration.ingress.traffic // [])
+                      | map(if .latestRevision == true
+                              then (del(.latestRevision) | .revisionName = $mainrev) else . end)
+                      | map(select((.revisionName // "") != ""))
+                      | map(if $label != "" and .label == $label then del(.label) else . end)
+                      | map(if $label == "" then .weight = 0 else . end)
+                      | map(select((.weight // 0) > 0 or .label != null)))
+                    + [{revisionName: $newrev,
+                        weight: (if $label == "" or $mainrev == "" then 100 else 0 end)}
+                       + (if $label == "" then {} else {label: $label} end)])
+                else . end)
               # ARM GET never returns secret values, so any secret carried over
               # (notably the auto-generated registry secret from az containerapp
               # create, named "<sanitized-server>-<username>") would be written
@@ -390,6 +473,10 @@ jobs:
             if [ -n "$WEB_BASE" ]; then
               ENV_ARGS+=("App__BaseUrl=$WEB_BASE")
             fi
+            REV_ARGS=()
+            if [ -n "$LABEL" ]; then
+              REV_ARGS=(--revisions-mode multiple --revision-suffix "$SUFFIX")
+            fi
             az containerapp create \
               --name "$CA_NAME" --resource-group "$RG" \
               --environment "$ENV_ID" \
@@ -400,14 +487,24 @@ jobs:
               --ingress external --target-port 8080 --transport http \
               --min-replicas 0 --max-replicas 3 \
               --env-vars "${ENV_ARGS[@]}" \
+              "${REV_ARGS[@]+"${REV_ARGS[@]}"}" \
               --output none
+            if [ -n "$LABEL" ]; then
+              az containerapp revision label add --name "$CA_NAME" --resource-group "$RG" \
+                --label "$LABEL" --revision "$NEW_REV" --yes --output none
+            fi
           fi
 
-          API_FQDN=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+          APP_FQDN=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
             --query properties.configuration.ingress.fqdn -o tsv)
-          if [ -z "$API_FQDN" ] || [ "$API_FQDN" = "None" ]; then
+          if [ -z "$APP_FQDN" ] || [ "$APP_FQDN" = "None" ]; then
             echo "::error::Container app '$CA_NAME' has no ingress FQDN."
             exit 1
+          fi
+          # Label URL: <app>---<label>.<env-domain> (app FQDN is <app>.<env-domain>).
+          API_FQDN="$APP_FQDN"
+          if [ -n "$LABEL" ]; then
+            API_FQDN="$CA_NAME---$LABEL.${APP_FQDN#*.}"
           fi
           echo "API: https://$API_FQDN"
 
