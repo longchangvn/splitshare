@@ -136,6 +136,20 @@ public static class GroupEndpoints
             ToResult(await cats.DeleteAsync(Me(p), id, cid)));
     }
 
+    /// <summary>Anonymous surface: preview of an invite token for the /g/:token
+    /// landing page (token possession authorizes; name only, no member details).</summary>
+    public static void MapPublic(RouteGroupBuilder v1)
+    {
+        v1.MapGet("/invites/{token}", async (string token, AppDbContext db) =>
+        {
+            var g = await db.Groups.FirstOrDefaultAsync(x => x.InviteToken == token && x.DeletedAt == null);
+            if (g is null)
+                return ApiResults.Error("INVITE_ROTATED", "Invite invalid or rotated.", 410);
+            var memberCount = await db.GroupMembers.CountAsync(m => m.GroupId == g.Id);
+            return Results.Ok(new { name = g.Name, currency = g.Currency, member_count = memberCount });
+        });
+    }
+
     public sealed record CategoryDto(string Name);
 
     public sealed record CreateGroupDto(string Name, string? Currency, List<Guid>? MemberIds, List<string>? InviteEmails);
