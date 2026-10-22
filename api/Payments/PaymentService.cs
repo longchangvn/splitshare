@@ -12,7 +12,8 @@ public sealed record PaymentOp(bool Ok, string? ErrorCode, string? Error, object
 public sealed record PaymentRecorded(Payment Payment, bool FullySettled, int SettlementVersion);
 public sealed record PaymentReversed(Payment Payment, int SettlementVersion);
 
-public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatabaseProvider? provider = null, Notifications.GroupNotifier? notifier = null)
+public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatabaseProvider? provider = null,
+    Notifications.GroupNotifier? notifier = null, Groups.GroupStatusPolicy? statusPolicy = null)
 {
     private static readonly HashSet<string> Methods =
         new(StringComparer.OrdinalIgnoreCase) { "cash", "transfer", "other" };
@@ -39,6 +40,8 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
         if (g is null || g.DeletedAt is not null) return new(false, "NOT_FOUND", "Group not found.");
         var role = (await db.GroupMembers.FindAsync(groupId, actorId))?.Role;
         if (role is null) return new(false, "FORBIDDEN", "Not a group member.");
+        var write = await (statusPolicy ?? new Groups.GroupStatusPolicy(db)).CheckWriteAsync(groupId, actorId);
+        if (!write.Allowed) return new(false, write.ErrorCode, write.Error);
         if (from == to) return new(false, "VALIDATION", "Payer and payee must differ.");
         if (!Methods.Contains(method)) return new(false, "VALIDATION", "method must be cash|transfer|other.");
         if (note is not null && note.Length > 280) return new(false, "VALIDATION", "Note max 280 chars.");
@@ -119,6 +122,8 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
         if (g is null || g.DeletedAt is not null) return new(false, "NOT_FOUND", "Group not found.");
         if ((await db.GroupMembers.FindAsync(p.GroupId, actorId))?.Role is not ("owner" or "treasurer"))
             return new(false, "FORBIDDEN", "Owner or treasurer only.");
+        var write = await (statusPolicy ?? new Groups.GroupStatusPolicy(db)).CheckWriteAsync(p.GroupId, actorId);
+        if (!write.Allowed) return new(false, write.ErrorCode, write.Error);
         if (DateTime.UtcNow - p.CreatedAt > TimeSpan.FromHours(24))
             return new(false, "VALIDATION", "Reversal window (24h) expired; record a counter-payment.");
         if (await db.Expenses.AnyAsync(e => e.GroupId == p.GroupId && e.Status == ExpenseStatus.Locked)

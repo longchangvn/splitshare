@@ -146,16 +146,16 @@ export function Dashboard() {
           <div className="dash-card-top">
             <div>
               <div className="dash-kicker">{t('net.youOweShort')}</div>
-              {!data && !e && <Skeleton height={36} mt={8} radius="md" />}
+              {!data && !e && <MoneyShimmer />}
               {data && (
                 <div className="dash-value">{fmt(oweCents, oweCurrency)}</div>
               )}
               <div className="dash-delta">
-                {!data ? '…' : totals.length > 1
+                {!data && e ? '—' : data && (totals.length > 1
                   ? t('dashboard.multiCurrency', { count: totals.length })
                   : oweCents > 0
                     ? t(oweGroups === 1 ? 'dashboard.oweInGroupsOne' : 'dashboard.oweInGroups', { count: oweGroups })
-                    : t('net.nothingOutstanding')}
+                    : t('net.nothingOutstanding'))}
               </div>
             </div>
             <span className="dash-stat-icon" aria-hidden><StatIconOwe /></span>
@@ -166,16 +166,16 @@ export function Dashboard() {
           <div className="dash-card-top">
             <div>
               <div className="dash-kicker">{t('net.owedToYou')}</div>
-              {!data && !e && <Skeleton height={36} mt={8} radius="md" />}
+              {!data && !e && <MoneyShimmer />}
               {data && (
                 <div className="dash-value">{fmt(owedCents, owedCurrency)}</div>
               )}
               <div className="dash-delta">
-                {!data ? '…' : totals.length > 1
+                {!data && e ? '—' : data && (totals.length > 1
                   ? t('dashboard.neverSummed')
                   : owedCents > 0
                     ? t(owedGroups === 1 ? 'dashboard.owedInGroupsOne' : 'dashboard.owedInGroups', { count: owedGroups })
-                    : t('net.allClear')}
+                    : t('net.allClear'))}
               </div>
             </div>
             <span className="dash-stat-icon" aria-hidden><StatIconOwed /></span>
@@ -390,6 +390,7 @@ function GroupTile({ group, onOpen }) {
   const pastel = pastelFor(group.name);
   const members = Number(group.member_count) || 0;
   const isOwner = group.my_role === 'owner';
+  const lifecycle = group.status || 'opening';
   const spentCents = Number(group.spent_cents) || 0;
   return (
     <button
@@ -409,6 +410,7 @@ function GroupTile({ group, onOpen }) {
         <span className="group-hero-top">
           <span className="group-meta">
             {isOwner && <span className="group-owner">{t('common.owner')}</span>}
+            <span className={`group-lifecycle is-${lifecycle}`}>{t(`groupStatus.${lifecycle}`)}</span>
             <span className="group-members">
               {t('groupDetail.membersCount', {
                 count: members,
@@ -622,6 +624,15 @@ function ActivityFeed({ groups, ready }) {
         )}
       </div>
     </>
+  );
+}
+
+function MoneyShimmer() {
+  return (
+    <span className="dash-money-loading" aria-label="Loading balance">
+      <span className="dash-value-shimmer" />
+      <span className="dash-delta-shimmer" />
+    </span>
   );
 }
 

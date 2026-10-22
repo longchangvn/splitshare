@@ -14,6 +14,7 @@ public static class GroupEndpoints
         {
             "NOT_FOUND" => 404,
             "FORBIDDEN" => 403,
+            "GROUP_READ_ONLY" => 403,
             "GROUP_FULL" => 403,
             "INVITE_ROTATED" => 410,
             "HAS_OPEN_BALANCE" => 422,
@@ -40,6 +41,7 @@ public static class GroupEndpoints
             group_id = g.Id,
             name = g.Name,
             currency = g.Currency,
+            status = g.Status,
             created_at = g.CreatedAt,
             my_role = myRole,
             mode = g.Mode,
@@ -68,7 +70,7 @@ public static class GroupEndpoints
             var me = Me(p);
             var ids = await db.GroupMembers.Where(m => m.UserId == me).Select(m => m.GroupId).ToListAsync();
             var groups = await db.Groups.Where(g => ids.Contains(g.Id) && g.DeletedAt == null)
-                .Select(g => new { group_id = g.Id, name = g.Name, currency = g.Currency }).ToListAsync();
+                .Select(g => new { group_id = g.Id, name = g.Name, currency = g.Currency, status = g.Status }).ToListAsync();
             return Results.Ok(groups);
         });
 
@@ -85,6 +87,9 @@ public static class GroupEndpoints
 
         api.MapPatch("/groups/{id:guid}/settings", async (Guid id, SettingsDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.UpdateSettingsAsync(Me(p), id, d.Budget, d.BudgetAlertPct, d.Mode, d.FlatFee)));
+
+        api.MapPatch("/groups/{id:guid}/status", async (Guid id, GroupStatusDto d, ClaimsPrincipal p, GroupService svc) =>
+            ToResult(await svc.UpdateStatusAsync(Me(p), id, d.Status)));
 
         api.MapPost("/groups/from-template", async (TemplateDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.FromTemplateAsync(Me(p), d.Name, d.Currency, d.Template, d.Budget, d.FlatFee)));
@@ -155,6 +160,7 @@ public static class GroupEndpoints
     public sealed record CreateGroupDto(string Name, string? Currency, List<Guid>? MemberIds, List<string>? InviteEmails);
     public sealed record RenameGroupDto(string Name);
     public sealed record SettingsDto(decimal? Budget, int? BudgetAlertPct, string? Mode, decimal? FlatFee);
+    public sealed record GroupStatusDto(string? Status);
     public sealed record TemplateDto(string Name, string? Currency, string Template, decimal? Budget, decimal? FlatFee);
     public sealed record RoleDto(string Role);
     public sealed record DepositDto(bool Paid);

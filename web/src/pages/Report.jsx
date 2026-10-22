@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Anchor, Avatar, Box, Button, Table, Text } from '@mantine/core';
+import { Anchor, Box, Button, Table, Text } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
 import { BrandMark, Shell } from '../components/Shell.jsx';
-import { displayNameOf, initialsOf } from '../components/Net.jsx';
-import { MoneyDonut, PaidShareBars, chartColorFor } from '../components/MoneyCharts.jsx';
+import { displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
+import { MoneyDonut, PaidShareBars, chartColorsFor } from '../components/MoneyCharts.jsx';
 import { SettlementBox } from '../components/SettlementBox.jsx';
 import { useT } from '../prefs.jsx';
 
@@ -68,20 +68,20 @@ function ReportDecor() {
   );
 }
 
-function ReportDocFooter({ detail, pageNo, totalPages, t }) {
+function ReportPageHeader({ detail, pageNo, totalPages, t }) {
   return (
-    <footer className="report-doc-sheet-foot">
-      <div className="report-doc-sheet-foot-brand">
+    <header className="report-doc-page-banner">
+      <div className="report-doc-page-brand">
         <BrandMark size={16} />
         <span>{t('report.brand')}</span>
       </div>
-      <div className="report-doc-sheet-foot-meta">
-        <span>{detail.name}</span>
-        <span className="report-doc-sheet-foot-page">
+      <div className="report-doc-page-context">
+        <span className="report-doc-page-group">{detail.name}</span>
+        <span className="report-doc-page-num">
           {t('report.pageOf', { current: pageNo, total: totalPages })}
         </span>
       </div>
-    </footer>
+    </header>
   );
 }
 
@@ -122,6 +122,7 @@ function ReportPrintDoc({
     })
     .sort((a, b) => b.value - a.value);
   const categoryTotal = categoryRows.reduce((a, r) => a + r.value, 0);
+  const categoryColors = chartColorsFor(categoryRows.map((row) => row.key), 'category');
 
   const sheets = [
     {
@@ -146,6 +147,7 @@ function ReportPrintDoc({
                   emptyLabel={t('report.noCategoriesYet')}
                   size={168}
                   hideLegend
+                  colorMode="category"
                 />
               </div>
               <table className="report-doc-table">
@@ -162,7 +164,7 @@ function ReportPrintDoc({
                     return (
                       <tr key={row.key}>
                         <td>
-                          <span className="report-doc-cat-swatch" style={{ background: chartColorFor(row.key) }} aria-hidden />
+                          <span className="report-doc-cat-swatch" style={{ background: categoryColors.get(row.key) }} aria-hidden />
                           {row.label}
                           <span className="report-doc-cat-count">
                             {' '}
@@ -328,8 +330,8 @@ function ReportPrintDoc({
   const avgPaid = memberCount > 0 ? Math.round(totalSpend / memberCount) : 0;
 
   const coverHeader = (
-    <div className={`report-cover is-${settled ? 'settled' : 'open'}`}>
-      <header className="report-cover-top">
+    <div className={`report-cover report-cover-bento is-${settled ? 'settled' : 'open'}`}>
+      <header className="report-cover-top report-cover-bento-card is-identity">
         <div className="report-cover-top-copy">
           <div className="report-cover-brand">
             <BrandMark size={14} />
@@ -368,7 +370,7 @@ function ReportPrintDoc({
         <ReportDecor />
       </header>
 
-      <section className="report-doc-block is-metrics">
+      <section className="report-doc-block is-metrics report-cover-bento-card is-metrics-card">
         <h2 className="report-doc-block-title">{t('report.keyMetrics')}</h2>
         <table className="report-doc-table is-metrics">
           <thead>
@@ -417,8 +419,8 @@ function ReportPrintDoc({
         </table>
       </section>
 
-      <div className="report-doc-split">
-        <section className="report-doc-block">
+      <div className="report-doc-split report-cover-bento-pair">
+        <section className="report-doc-block report-cover-bento-card">
           <h2 className="report-doc-block-title">{t('report.keyHighlights')}</h2>
           {topCats.length === 0 ? (
             <p className="report-doc-empty">{t('report.noCategories')}</p>
@@ -428,7 +430,7 @@ function ReportPrintDoc({
                 const pct = categoryTotal > 0 ? Math.round((row.value / categoryTotal) * 100) : 0;
                 return (
                   <div key={row.key} className="report-doc-highlight">
-                    <div className="report-doc-ring" style={{ '--pct': pct }}>
+                    <div className="report-doc-ring" style={{ '--pct': pct, '--ring-color': categoryColors.get(row.key) }}>
                       <span className="report-doc-ring-hole"><b>{pct}%</b></span>
                     </div>
                     <p className="report-doc-highlight-label">
@@ -445,7 +447,7 @@ function ReportPrintDoc({
           </p>
         </section>
 
-        <section className="report-doc-block">
+        <section className="report-doc-block report-cover-bento-card">
           <h2 className="report-doc-block-title">{t('report.settlement')}</h2>
           {transfers.length === 0 ? (
             <div className="report-doc-settle-empty">
@@ -486,26 +488,13 @@ function ReportPrintDoc({
             key={sheet.id}
             className={`report-doc-sheet${i > 0 ? ' report-doc-page' : ''}${isCover ? ' is-cover' : ''}`}
           >
+            <ReportPageHeader detail={detail} pageNo={pageNo} totalPages={totalPages} t={t} />
             {isCover ? (
-              <>
-                {coverHeader}
-                <ReportDocFooter detail={detail} pageNo={pageNo} totalPages={totalPages} t={t} />
-              </>
+              coverHeader
             ) : (
               <>
-                <div className="report-doc-page-banner">
-                  <div className="report-doc-page-banner-brand">
-                    <BrandMark size={14} />
-                    <span className="report-doc-page-kicker">{detail.name}</span>
-                  </div>
-                  <div className="report-doc-page-context">
-                    <span className="report-doc-page-eyebrow">{t('report.brand')}</span>
-                    <span className="report-doc-page-num">{t('report.tripReport')}</span>
-                  </div>
-                </div>
                 <PrintPageHead title={sheet.title} hint={sheet.hint} />
                 <div className="report-doc-sheet-body">{sheet.body}</div>
-                <ReportDocFooter detail={detail} pageNo={pageNo} totalPages={totalPages} t={t} />
               </>
             )}
           </section>
@@ -520,6 +509,7 @@ export function ReportPanel({
   groupId,
   detail: detailProp = null,
   summary: summaryProp = null,
+  plan: planProp = null,
   embedded = false,
   onPay = null,
   categoryManager = null,
@@ -527,7 +517,7 @@ export function ReportPanel({
   const { user } = useAuth();
   const [detail, setDetail] = useState(detailProp);
   const [summary, setSummary] = useState(summaryProp);
-  const [plan, setPlan] = useState(null);
+  const [plan, setPlan] = useState(planProp);
   const [breakdown, setBreakdown] = useState([]);
   const [ledgerItems, setLedgerItems] = useState([]);
   const [generatedAt] = useState(() => new Date().toISOString());
@@ -536,6 +526,7 @@ export function ReportPanel({
 
   useEffect(() => { setDetail(detailProp); }, [detailProp]);
   useEffect(() => { setSummary(summaryProp); }, [summaryProp]);
+  useEffect(() => { setPlan(planProp); }, [planProp]);
 
   useEffect(() => {
     if (!groupId) return;
@@ -545,7 +536,7 @@ export function ReportPanel({
     Promise.all([
       needDetail ? api.get(`/api/v1/groups/${groupId}`) : Promise.resolve(detailProp),
       needSummary ? api.get(`/api/v1/groups/${groupId}/summary`) : Promise.resolve(summaryProp),
-      api.get(`/api/v1/groups/${groupId}/settlement`).catch(() => null),
+      planProp ? Promise.resolve(planProp) : api.get(`/api/v1/groups/${groupId}/settlement`).catch(() => null),
       api.get(`/api/v1/groups/${groupId}/breakdown`).catch(() => []),
       api.get(`/api/v1/groups/${groupId}/ledger?limit=100&sort=created_at`).catch(() => ({ items: [] })),
     ]).then(([d, s, p, b, ledger]) => {
@@ -587,6 +578,7 @@ export function ReportPanel({
     })
     .sort((a, b) => b.value - a.value);
   const categoryTotal = breakdown.reduce((a, b) => a + b.paid_cents, 0);
+  const categoryColors = chartColorsFor(categoryRows.map((row) => row.key), 'category');
   const reporterName = user?.display_name || user?.username || '';
 
   const runPrint = () => {
@@ -644,7 +636,8 @@ export function ReportPanel({
           )}
         </div>
 
-        <section className="report-card">
+        {(plan?.transfers || []).length > 0 && (
+          <section className="report-card">
           <div className="report-settle-head">
             <h3 className="report-card-title">{t('report.settlement')}</h3>
             {(plan?.transfers || []).length > 0 && (
@@ -690,7 +683,8 @@ export function ReportPanel({
           <Text size="xs" c="dimmed" mt="sm" className="report-settle-meta">
             {t('report.generated', { when: new Date().toLocaleString() })}
           </Text>
-        </section>
+          </section>
+        )}
 
         <div className="report-charts-row">
           <section className="report-card">
@@ -699,11 +693,11 @@ export function ReportPanel({
           </section>
           <section className="report-card">
             <h3 className="report-card-title">{t('report.whoPaid')}</h3>
-            <MoneyDonut rows={paidRows} valueKey="total_paid_cents" currency={c} emptyLabel={t('report.noPayments')} />
+            <MoneyDonut rows={paidRows} valueKey="total_paid_cents" currency={c} emptyLabel={t('report.noPayments')} colorMode="member" />
           </section>
           <section className="report-card">
             <h3 className="report-card-title">{t('report.whoOwesShare')}</h3>
-            <MoneyDonut rows={shareRows} valueKey="total_share_cents" currency={c} emptyLabel={t('report.noShares')} />
+            <MoneyDonut rows={shareRows} valueKey="total_share_cents" currency={c} emptyLabel={t('report.noShares')} colorMode="member" />
           </section>
         </div>
 
@@ -713,27 +707,28 @@ export function ReportPanel({
             <div className="report-person-list">
               {rows.map((m) => {
                 const tone = netTone(m.net_cents);
-                const color = chartColorFor(m.user_id);
+                const pastel = pastelFor(m.display_name);
                 return (
                   <div key={m.user_id} className="report-person">
-                    <div className="report-person-top">
+                    <div className="report-person-main">
                       <div className="report-member">
-                        <Avatar
-                          className="report-member-avatar"
-                          radius="xl"
-                          size={28}
-                          style={{ background: color, color: '#fff' }}
+                        <span
+                          className="report-person-avatar"
+                          style={{ '--rp-from': pastel.from, '--rp-to': pastel.to }}
+                          aria-hidden
                         >
                           {initialsOf(m.display_name)}
-                        </Avatar>
-                        <Text size="sm" fw={700}>{m.display_name}</Text>
+                        </span>
+                        <div className="report-person-body">
+                          <span className="report-member-name">{m.display_name}</span>
+                          <div className="report-person-meta">
+                            <span>{t('report.paid')} <b>{fmt(m.total_paid_cents, c)}</b></span>
+                            <span>{t('report.share')} <b>{fmt(m.total_share_cents, c)}</b></span>
+                          </div>
+                        </div>
                       </div>
-                      <span className={`report-net is-${tone}`}>{netLabel(m.net_cents, c, t('common.settled'))}</span>
                     </div>
-                    <div className="report-person-meta">
-                      <span>{t('report.paid')} <b>{fmt(m.total_paid_cents, c)}</b></span>
-                      <span>{t('report.share')} <b>{fmt(m.total_share_cents, c)}</b></span>
-                    </div>
+                    <span className={`report-net is-${tone}`}>{netLabel(m.net_cents, c, t('common.settled'))}</span>
                   </div>
                 );
               })}
@@ -752,19 +747,18 @@ export function ReportPanel({
               <Table.Tbody>
                 {rows.map((m) => {
                   const tone = netTone(m.net_cents);
-                  const color = chartColorFor(m.user_id);
+                  const pastel = pastelFor(m.display_name);
                   return (
                     <Table.Tr key={m.user_id}>
                       <Table.Td>
                         <div className="report-member">
-                          <Avatar
-                            className="report-member-avatar"
-                            radius="xl"
-                            size={30}
-                            style={{ background: color, color: '#fff' }}
+                          <span
+                            className="report-person-avatar is-table"
+                            style={{ '--rp-from': pastel.from, '--rp-to': pastel.to }}
+                            aria-hidden
                           >
                             {initialsOf(m.display_name)}
-                          </Avatar>
+                          </span>
                           <span className="report-member-name">{m.display_name}</span>
                         </div>
                       </Table.Td>
@@ -793,6 +787,7 @@ export function ReportPanel({
                   emptyLabel={t('report.noCategoriesYet')}
                   hideLegend
                   size={180}
+                  colorMode="category"
                 />
               </div>
               <div className="report-cat-panel" role="list">
@@ -800,7 +795,7 @@ export function ReportPanel({
                   const pct = categoryTotal > 0 ? Math.round((row.value / categoryTotal) * 100) : 0;
                   return (
                     <div key={row.key} className="report-cat-row" role="listitem">
-                      <span className="report-cat-swatch" style={{ background: chartColorFor(row.key) }} aria-hidden />
+                      <span className="report-cat-swatch" style={{ background: categoryColors.get(row.key) }} aria-hidden />
                       <div className="report-cat-copy">
                         <div className="report-cat-head">
                           <span className="report-cat-name">{row.label}</span>
@@ -809,7 +804,7 @@ export function ReportPanel({
                           </span>
                         </div>
                         <div className="report-cat-track" aria-hidden>
-                          <span className="report-cat-fill" style={{ width: `${pct}%`, background: chartColorFor(row.key) }} />
+                          <span className="report-cat-fill" style={{ width: `${pct}%`, background: categoryColors.get(row.key) }} />
                         </div>
                       </div>
                       <div className="report-cat-nums">

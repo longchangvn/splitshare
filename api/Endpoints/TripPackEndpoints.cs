@@ -43,13 +43,16 @@ public static class TripPackEndpoints
         });
 
         api.MapPost("/expenses/{id:guid}/comments", async (Guid id, CommentDto d, ClaimsPrincipal p,
-            AppDbContext db, ExpenseService svc) =>
+            AppDbContext db, ExpenseService svc, Groups.GroupStatusPolicy policy) =>
         {
             var detail = await svc.GetDetailAsync(Me(p), id);
             if (!detail.Ok)
                 return detail.ErrorCode == "FORBIDDEN"
                     ? ApiResults.Error("FORBIDDEN", "Not a group member.", 403)
                     : ApiResults.Error("NOT_FOUND", "Expense not found.", 404);
+            var expense = await db.Expenses.FindAsync(id);
+            var write = await policy.CheckWriteAsync(expense!.GroupId, Me(p));
+            if (!write.Allowed) return ApiResults.Error(write.ErrorCode!, write.Error!, write.ErrorCode == "NOT_FOUND" ? 404 : 403);
             if (string.IsNullOrWhiteSpace(d.Body) || d.Body.Trim().Length > 1000)
                 return ApiResults.Error("VALIDATION", "body 1-1000 chars required.", 422);
             var c = new Models.ExpenseComment { ExpenseId = id, AuthorId = Me(p), Body = d.Body.Trim() };
@@ -59,7 +62,7 @@ public static class TripPackEndpoints
                 new { comment_id = c.Id, body = c.Body, created_at = c.CreatedAt });
         });
 
-        api.MapDelete("/comments/{id:guid}", async (Guid id, ClaimsPrincipal p, AppDbContext db) =>
+        api.MapDelete("/comments/{id:guid}", async (Guid id, ClaimsPrincipal p, AppDbContext db, Groups.GroupStatusPolicy policy) =>
         {
             var c = await db.ExpenseComments.FindAsync(id);
             if (c is null) return ApiResults.Error("NOT_FOUND", "Comment not found.", 404);
@@ -68,6 +71,8 @@ public static class TripPackEndpoints
             var role = (await db.GroupMembers.FindAsync(e.GroupId, Me(p)))?.Role;
             if (c.AuthorId != Me(p) && role != "owner")
                 return ApiResults.Error("FORBIDDEN", "Author or owner only.", 403);
+            var write = await policy.CheckWriteAsync(e.GroupId, Me(p));
+            if (!write.Allowed) return ApiResults.Error(write.ErrorCode!, write.Error!, write.ErrorCode == "NOT_FOUND" ? 404 : 403);
             db.ExpenseComments.Remove(c);
             await db.SaveChangesAsync();
             return Results.Ok(new { status = "deleted" });
@@ -75,11 +80,13 @@ public static class TripPackEndpoints
 
         // ---- Nudges ----
         api.MapPost("/groups/{id:guid}/nudges", async (Guid id, NudgeDto d, ClaimsPrincipal p,
-            AppDbContext db, LedgerService ledger, Groups.GroupService svc, IEmailSender mail) =>
+            AppDbContext db, LedgerService ledger, Groups.GroupService svc, IEmailSender mail, Groups.GroupStatusPolicy policy) =>
         {
             var me = Me(p);
             if (await svc.RoleAsync(id, me) is null)
                 return ApiResults.Error("FORBIDDEN", "Not a group member.", 403);
+            var write = await policy.CheckWriteAsync(id, me);
+            if (!write.Allowed) return ApiResults.Error(write.ErrorCode!, write.Error!, write.ErrorCode == "NOT_FOUND" ? 404 : 403);
             var snapshot = await ledger.ComputeNetsAsync(id);
             if (snapshot is null) return ApiResults.Error("NOT_FOUND", "Group not found.", 404);
             var targets = (d.UserIds ?? []).Distinct().ToList();

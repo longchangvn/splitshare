@@ -30,7 +30,8 @@ public sealed record ExpenseOptions(
     bool OnlyPresent = false);
 
 public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileStore files,
-    Groups.CategoryService categories, Auth.IEmailSender? email = null)
+    Groups.CategoryService categories, Auth.IEmailSender? email = null,
+    Groups.GroupStatusPolicy? statusPolicy = null)
 {
     public const long MaxAmountCents = 100_000_000; // 1,000,000.00
     public const long MaxImageBytes = 10 * 1024 * 1024;
@@ -50,6 +51,9 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
 
     private async Task<GroupMember?> MemberAsync(Guid groupId, Guid userId)
         => await db.GroupMembers.FindAsync(groupId, userId);
+
+    private Task<Groups.GroupWriteDecision> CheckGroupWriteAsync(Guid groupId, Guid actorId)
+        => (statusPolicy ?? new Groups.GroupStatusPolicy(db)).CheckWriteAsync(groupId, actorId);
 
     private async Task<List<Guid>> ArchivedNonMembersAsync(Guid groupId, IEnumerable<Guid> ids)
     {
@@ -89,6 +93,11 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         if (g is null || g.DeletedAt is not null) return new(false, "NOT_FOUND", "Group not found.");
         var role = (await MemberAsync(groupId, actorId))?.Role;
         if (role is null) return new(false, "FORBIDDEN", "Not a group member.");
+        if (needWriter)
+        {
+            var write = await CheckGroupWriteAsync(groupId, actorId);
+            if (!write.Allowed) return new(false, write.ErrorCode, write.Error);
+        }
         Expense? e = null;
         if (expenseId is not null)
         {
@@ -187,7 +196,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         ExpenseOptions? opts = null)
     {
         opts ??= new ExpenseOptions();
-        var guard = await GuardAsync(groupId, actorId, null, needWriter: false);
+        var guard = await GuardAsync(groupId, actorId, null, needWriter: true);
         if (!guard.Ok) return guard;
         var group = ((GuardData)guard.Data!).Group;
         if (string.IsNullOrWhiteSpace(title) || title.Trim().Length > 100)

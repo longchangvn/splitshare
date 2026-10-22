@@ -16,6 +16,9 @@ public sealed class RecurringService(AppDbContext db, ExpenseService expenses)
 
     public async Task<int> MaterializeDueAsync(Guid groupId)
     {
+        var group = await db.Groups.FindAsync(groupId);
+        if (group is null || group.DeletedAt is not null || group.Status != "opening")
+            return 0;
         var now = DateTime.UtcNow;
         var rules = await db.RecurringRules
             .Where(r => r.GroupId == groupId && r.Active && r.NextRunAt <= now).ToListAsync();

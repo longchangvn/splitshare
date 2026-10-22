@@ -4,7 +4,6 @@ import {
   Anchor, Badge, Button, Card, Code, Group, Image, List, Modal, Stack,
   Text, TextInput, Title,
 } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
@@ -23,7 +22,6 @@ export function ExpenseDetail() {
   const { id, eid } = useParams();
   const nav = useNavigate();
   const location = useLocation();
-  const isMobile = useMediaQuery('(max-width: 36em)');
   const [d, setD] = useState(null);
   const [members, setMembers] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -178,7 +176,6 @@ export function ExpenseDetail() {
         radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile}
       >
         <ExpenseForm
           key={x.expense_id}

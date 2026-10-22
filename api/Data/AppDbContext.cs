@@ -49,6 +49,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Name).HasMaxLength(50);
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.Mode).HasMaxLength(16);
+            e.Property(x => x.Status).HasMaxLength(16).HasDefaultValue("opening");
             e.HasMany(x => x.Members).WithOne().HasForeignKey(m => m.GroupId);
         });
         b.Entity<GroupMember>(e =>

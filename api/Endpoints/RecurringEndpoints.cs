@@ -12,6 +12,12 @@ public static class RecurringEndpoints
 {
     private static Guid Me(ClaimsPrincipal p) => AuthEndpoints.CurrentUserId(p)!.Value;
 
+    private static async Task<IResult?> WriteGuardAsync(Groups.GroupStatusPolicy policy, Guid groupId, Guid actorId)
+    {
+        var write = await policy.CheckWriteAsync(groupId, actorId);
+        return write.Allowed ? null : ApiResults.Error(write.ErrorCode!, write.Error!, write.ErrorCode == "NOT_FOUND" ? 404 : 403);
+    }
+
     public static async Task Materialize(Guid groupId, RecurringService recurring)
     {
         try { await recurring.MaterializeDueAsync(groupId); }
@@ -43,11 +49,12 @@ public static class RecurringEndpoints
         });
 
         api.MapPost("/groups/{id:guid}/recurring", async (Guid id, RuleDto d, ClaimsPrincipal p,
-            AppDbContext db, Groups.GroupService svc) =>
+            AppDbContext db, Groups.GroupService svc, Groups.GroupStatusPolicy policy) =>
         {
             var me = Me(p);
             var role = await svc.RoleAsync(id, me);
             if (role is not ("owner" or "treasurer")) return ApiResults.Error("FORBIDDEN", "Owner or treasurer only.", 403);
+            if (await WriteGuardAsync(policy, id, me) is { } denied) return denied;
             if (string.IsNullOrWhiteSpace(d.Title) || d.Title.Trim().Length > 100)
                 return ApiResults.Validation("Title 1-100 chars required.");
             var (cents, amtErr) = Expenses.ExpenseService.ParseAmount(d.Amount);
@@ -76,10 +83,12 @@ public static class RecurringEndpoints
         });
 
         api.MapPatch("/groups/{id:guid}/recurring/{rid:guid}", async (Guid id, Guid rid, RulePatchDto d,
-            ClaimsPrincipal p, AppDbContext db, Groups.GroupService svc) =>
+            ClaimsPrincipal p, AppDbContext db, Groups.GroupService svc, Groups.GroupStatusPolicy policy) =>
         {
-            var role = await svc.RoleAsync(id, Me(p));
+            var me = Me(p);
+            var role = await svc.RoleAsync(id, me);
             if (role is not ("owner" or "treasurer")) return ApiResults.Error("FORBIDDEN", "Owner or treasurer only.", 403);
+            if (await WriteGuardAsync(policy, id, me) is { } denied) return denied;
             var r = await db.RecurringRules.FirstOrDefaultAsync(x => x.Id == rid && x.GroupId == id);
             if (r is null) return ApiResults.Error("NOT_FOUND", "Rule not found.", 404);
             if (d.Active is not null) r.Active = d.Active.Value;
@@ -99,10 +108,12 @@ public static class RecurringEndpoints
         });
 
         api.MapDelete("/groups/{id:guid}/recurring/{rid:guid}", async (Guid id, Guid rid,
-            ClaimsPrincipal p, AppDbContext db, Groups.GroupService svc) =>
+            ClaimsPrincipal p, AppDbContext db, Groups.GroupService svc, Groups.GroupStatusPolicy policy) =>
         {
-            var role = await svc.RoleAsync(id, Me(p));
+            var me = Me(p);
+            var role = await svc.RoleAsync(id, me);
             if (role is not ("owner" or "treasurer")) return ApiResults.Error("FORBIDDEN", "Owner or treasurer only.", 403);
+            if (await WriteGuardAsync(policy, id, me) is { } denied) return denied;
             var r = await db.RecurringRules.FirstOrDefaultAsync(x => x.Id == rid && x.GroupId == id);
             if (r is null) return ApiResults.Error("NOT_FOUND", "Rule not found.", 404);
             db.RecurringRules.Remove(r);
