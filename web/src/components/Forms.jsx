@@ -4,7 +4,7 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
-import { Err } from '../auth.jsx';
+import { Err, useAuth } from '../auth.jsx';
 import { displayNameOf } from './Net.jsx';
 
 const splitVal = (s, type) => {
@@ -36,9 +36,16 @@ const equalPercent = (n) => {
 // Expense create/edit with live split preview + un-settle confirm (tasks 8.2/8.3).
 // copyFrom: detail.expense payload to prefill a copy (task 4.1); images carried on save (4.2).
 export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, currency = '' }) {
+  const { user } = useAuth();
+  const meId = user?.user_id || '';
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const activeIds = new Set(members.map((m) => m.user_id));
+  // Payer options always show the display name (username only as last resort).
+  const payerData = members.map((m) => ({
+    value: m.user_id,
+    label: m.display_name || m.username || String(m.user_id).slice(0, 8),
+  }));
 
   const initSel = () => {
     if (existing) return existing.splits.map((s) => s.user_id);
@@ -70,6 +77,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const [payer, setPayer] = useState(() => {
     const p = source?.payer_id;
     if (p && activeIds.has(p)) return p;
+    // Default to me (copy falls back to me when the original payer left).
+    if (meId && activeIds.has(meId)) return meId;
     return members[0]?.user_id || '';
   });
   const [type, setType] = useState(source?.split_type || 'EQUAL');
@@ -98,6 +107,14 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     label: g.label, amount: (g.share_cents / 100).toFixed(2), covered_by: g.covered_by,
   })));
   const [onlyPresent, setOnlyPresent] = useState(false);
+
+  // Members (and/or the session user) can land after mount — backfill the payer
+  // with me, else the first member, so the field is never stuck empty.
+  useEffect(() => {
+    if (payer || activeIds.size === 0) return;
+    setPayer(activeIds.has(meId) ? meId : members[0]?.user_id || '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payer, meId, members]);
 
   const dropped = copyFrom
     ? copyFrom.splits.map((s) => s.user_id).filter((id) => !activeIds.has(id))
@@ -387,7 +404,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           label="Payer"
           value={payer || null}
           onChange={(v) => setPayer(v || '')}
-          data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
+          data={payerData}
           comboboxProps={{ withinPortal: true }}
         />
       </section>
@@ -431,7 +448,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
                 value={g.covered_by}
                 style={{ flex: 2 }}
                 onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
-                data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
+                data={payerData}
                 comboboxProps={{ withinPortal: true }}
               />
               <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((_, j) => j !== i))}>X</Button>

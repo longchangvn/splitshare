@@ -8,6 +8,7 @@ import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView } from 
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { api, newIdempotencyKey, fmt, displayNameOf, expenseIdOf } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import { colors } from '../theme';
 import { SpinButton, ErrText } from '../ui';
 import { queueOrSend } from '../offline/queue';
@@ -23,7 +24,11 @@ const equalPercent = (n) => {
 
 export default function AddExpenseScreen({ route, navigation }) {
   const { id: groupId, expenseId, copyFrom } = route.params || {};
+  const { user } = useAuth();
+  const meId = user?.user_id || '';
   const existing = null; // create mode; edit lives in ExpenseDetail
+  // Payer/participant rows always show the display name (username only as last resort).
+  const nameOf = (m) => m.display_name || m.username || String(m.user_id).slice(0, 8);
   const [members, setMembers] = useState([]);
   const [currency, setCurrency] = useState('USD');
   const [title, setTitle] = useState(copyFrom ? `Copy of ${copyFrom.title}` : '');
@@ -56,7 +61,12 @@ export default function AddExpenseScreen({ route, navigation }) {
         const m = g.group?.members || g.members || [];
         setMembers(m);
         setCurrency(g.group?.currency || g.currency || 'USD');
-        if (!payer && m[0]) setPayer(copyFrom?.payer_id && m.some((x) => x.user_id === copyFrom.payer_id) ? copyFrom.payer_id : m[0].user_id);
+        // Payer: copy's original (if still active) → me → first member.
+        if (!payer && m.length) {
+          const copyPayer = copyFrom?.payer_id && m.some((x) => x.user_id === copyFrom.payer_id) ? copyFrom.payer_id : '';
+          const mine = meId && m.some((x) => x.user_id === meId) ? meId : '';
+          setPayer(copyPayer || mine || m[0].user_id);
+        }
         if (sel.length === 0 && m.length) {
           const kept = (copyFrom?.splits || []).map((x) => x.user_id).filter((uid) => m.some((x) => x.user_id === uid));
           setSel(kept.length ? kept : m.map((x) => x.user_id));
@@ -214,7 +224,7 @@ export default function AddExpenseScreen({ route, navigation }) {
         <View style={s.chips}>
           {members.map((m) => (
             <Pressable key={m.user_id} style={[s.chip, payer === m.user_id && s.chipOn]} onPress={() => setPayer(m.user_id)}>
-              <Text style={s.chipT}>{m.display_name}</Text>
+              <Text style={s.chipT}>{nameOf(m)}</Text>
             </Pressable>
           ))}
         </View>
@@ -235,7 +245,7 @@ export default function AddExpenseScreen({ route, navigation }) {
         {members.map((m) => (
           <View key={m.user_id} style={s.prow}>
             <Pressable style={{ flex: 1 }} onPress={() => toggle(m.user_id)}>
-              <Text>{sel.includes(m.user_id) ? '☑' : '☐'} {m.display_name}</Text>
+              <Text>{sel.includes(m.user_id) ? '☑' : '☐'} {nameOf(m)}</Text>
             </Pressable>
             {split !== 'EQUAL' && sel.includes(m.user_id) && (
               <TextInput
