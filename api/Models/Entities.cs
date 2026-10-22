@@ -32,6 +32,7 @@ public sealed class Group
     public long? BudgetCents { get; set; }
     public int BudgetAlertPct { get; set; } = 80;
     public string Mode { get; set; } = "shared"; // shared|trip|event
+    public string Status { get; set; } = "opening"; // opening|locked|closed
     public long? FlatFeeCents { get; set; } // event mode per-head fee
     public string? ShareToken { get; set; } // public read-only page, rotated on demand
 }

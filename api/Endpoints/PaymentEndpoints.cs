@@ -78,7 +78,7 @@ public static class PaymentEndpoints
         });
 
         api.MapPost("/payments/{id:guid}/proof", async (Guid id, HttpRequest req,
-            ClaimsPrincipal p, AppDbContext db, Expenses.IFileStore store) =>
+            ClaimsPrincipal p, AppDbContext db, Expenses.IFileStore store, Groups.GroupStatusPolicy policy) =>
         {
             if (!req.HasFormContentType) return ApiResults.Error("VALIDATION", "multipart/form-data required.", 422);
             var pay = await db.Payments.FindAsync(id);
@@ -86,6 +86,8 @@ public static class PaymentEndpoints
             var role = (await db.GroupMembers.FindAsync(pay.GroupId, Me(p)))?.Role;
             if (Me(p) != pay.FromUserId && Me(p) != pay.ToUserId && role is not ("owner" or "treasurer"))
                 return ApiResults.Error("FORBIDDEN", "Only parties, owner or treasurer.", 403);
+            var write = await policy.CheckWriteAsync(pay.GroupId, Me(p));
+            if (!write.Allowed) return ApiResults.Error(write.ErrorCode!, write.Error!, write.ErrorCode == "NOT_FOUND" ? 404 : 403);
             var form = await req.ReadFormAsync();
             var f = form.Files.FirstOrDefault();
             if (f is null) return ApiResults.Error("VALIDATION", "No file uploaded.", 422);

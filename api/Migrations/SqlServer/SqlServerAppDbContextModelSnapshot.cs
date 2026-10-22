@@ -317,6 +317,12 @@ namespace SplitShare.Api.Migrations.SqlServer
                     b.Property<string>("ShareToken")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasDefaultValue("opening")
+                        .HasColumnType("nvarchar(16)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("InviteToken")

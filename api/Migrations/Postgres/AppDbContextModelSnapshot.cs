@@ -317,6 +317,12 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.Property<string>("ShareToken")
                         .HasColumnType("text");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasDefaultValue("opening")
+                        .HasColumnType("character varying(16)");
+
                     b.HasKey("Id");
 
                     b.HasIndex("InviteToken")
