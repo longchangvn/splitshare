@@ -5,9 +5,57 @@ const PALETTE = [
   '#2dd4bf', '#38bdf8', '#fb7185', '#a78bfa', '#fbbf24',
   '#4ade80', '#60a5fa', '#f472b6', '#34d399', '#22d3ee',
 ];
+const MEMBER_PALETTE = [
+  '#2dd4bf', '#38bdf8', '#fbbf24', '#a78bfa', '#fb7185',
+  '#4ade80', '#60a5fa', '#f472b6', '#34d399', '#22d3ee',
+];
+const CATEGORY_COLORS = {
+  activity: '#4ade80',
+  food: '#fbbf24',
+  health: '#fb7185',
+  other: '#a78bfa',
+  shopping: '#f472b6',
+  stay: '#22d3ee',
+  transport: '#60a5fa',
+};
+const CATEGORY_PALETTE = ['#22d3ee', '#fbbf24', '#4ade80', '#a78bfa', '#fb7185', '#60a5fa', '#2dd4bf', '#f472b6'];
 
 function colorAt(i) {
   return PALETTE[i % PALETTE.length];
+}
+
+function memberColorAt(i) {
+  return MEMBER_PALETTE[i % MEMBER_PALETTE.length];
+}
+
+export function chartColorsFor(keys, colorMode = 'key') {
+  const uniqueKeys = [...new Set((keys || []).map((key) => String(key)))].sort();
+  if (colorMode === 'key') {
+    return new Map(uniqueKeys.map((key) => [key, chartColorFor(key)]));
+  }
+
+  if (colorMode === 'member') {
+    return new Map(uniqueKeys.map((key, i) => [key, memberColorAt(i)]));
+  }
+
+  const colors = new Map();
+  const used = new Set();
+  uniqueKeys.forEach((key) => {
+    if (CATEGORY_COLORS[key]) {
+      colors.set(key, CATEGORY_COLORS[key]);
+      used.add(CATEGORY_COLORS[key]);
+    }
+  });
+  let colorIndex = 0;
+  uniqueKeys.forEach((key) => {
+    if (colors.has(key)) return;
+    while (used.has(CATEGORY_PALETTE[colorIndex % CATEGORY_PALETTE.length])) colorIndex += 1;
+    const color = CATEGORY_PALETTE[colorIndex % CATEGORY_PALETTE.length];
+    colors.set(key, color);
+    used.add(color);
+    colorIndex += 1;
+  });
+  return colors;
 }
 
 /** Stable chart color for a member / category key (matches donut legend). */
@@ -20,21 +68,28 @@ export function chartColorFor(key) {
 
 /** Donut distribution for a single metric (paid or share). */
 export function MoneyDonut({
-  rows, valueKey, currency, emptyLabel, hideLegend = false, size = 168,
+  rows, valueKey, currency, emptyLabel, hideLegend = false, size = 168, colorMode = 'key',
 }) {
   const t = useT();
   const empty = emptyLabel ?? t('charts.noData');
-  const data = (rows || [])
+  const keyedRows = (rows || [])
     .map((r, i) => {
       const key = r.key || r.user_id || i;
       return {
         key,
         label: r.label || r.display_name || '—',
         value: Math.max(0, Number(r[valueKey] ?? r.value) || 0),
-        color: chartColorFor(key),
       };
-    })
-    .filter((r) => r.value > 0);
+    });
+  const seriesColors = colorMode === 'key'
+    ? null
+    : chartColorsFor(keyedRows.map((row) => row.key), colorMode);
+  const data = keyedRows
+    .filter((row) => row.value > 0)
+    .map((row) => ({
+      ...row,
+      color: seriesColors?.get(String(row.key)) || chartColorFor(row.key),
+    }));
   const total = data.reduce((a, r) => a + r.value, 0);
   if (total <= 0) {
     return (

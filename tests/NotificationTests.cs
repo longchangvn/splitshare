@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SplitShare.Api.Auth;
 using SplitShare.Api.Data;
 using SplitShare.Api.Expenses;
+using SplitShare.Api.Groups;
 using SplitShare.Api.Models;
 using SplitShare.Api.Notifications;
 using SplitShare.Api.Payments;
@@ -44,7 +45,7 @@ public sealed class NotificationTests
         var push = new RecordingNotificationProvider();
         var notifier = new GroupNotifier(db, push, config, NullLogger<GroupNotifier>.Instance);
         return (db, auth,
-            new ExpenseService(db, ledger, new FakeStore(), null, notifier),
+            new ExpenseService(db, ledger, new FakeStore(), new CategoryService(db)),
             new PaymentService(db, ledger, null, notifier),
             push);
     }

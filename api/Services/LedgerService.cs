@@ -188,7 +188,8 @@ public sealed class LedgerService(AppDbContext db)
         List<OweTo> Owes, List<OwedFrom> OwedToMe, int SettlementVersion);
     public sealed record GroupRow(Guid GroupId, string Name, string Currency, long NetCents,
         bool Delinquent, DateTime? OldestUnsettledAt, DateTime CreatedAt,
-        string? MyRole, int MemberCount, long SpentCents, bool NeedsSettlement = false);
+        string? MyRole, int MemberCount, long SpentCents, bool NeedsSettlement = false,
+        string Status = "opening");
     public sealed record CurrencyTotals(long OweCents, long OwedCents);
     public sealed record AllView(List<GroupRow> Groups, Dictionary<string, CurrencyTotals> Totals);
     public sealed record MemberSummary(Guid UserId, string DisplayName,
@@ -389,7 +390,7 @@ public sealed class LedgerService(AppDbContext db)
             spentByGroup.TryGetValue(g.Id, out var spentCents);
             rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent,
                 needsSettlement ? oldest : null, g.CreatedAt,
-                myRole, memberCount, spentCents, needsSettlement));
+                myRole, memberCount, spentCents, needsSettlement, g.Status));
             totals.TryGetValue(g.Currency, out var t);
             totals[g.Currency] = net < 0
                 ? new CurrencyTotals(t?.OweCents - net ?? -net, t?.OwedCents ?? 0)

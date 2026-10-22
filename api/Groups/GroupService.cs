@@ -18,7 +18,7 @@ public sealed record NewInviteLink(string InviteLink);
 public sealed record StatusResult(string Status);
 
 public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSender email,
-    IConfiguration config, CategoryService categories)
+    IConfiguration config, CategoryService categories, GroupStatusPolicy statusPolicy)
 {
     public const int MaxMembers = 50;
     public const int MaxGroupsPerUser = 200;
@@ -44,7 +44,36 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         var role = await RoleAsync(groupId, userId);
         if (role is null) return new(false, "FORBIDDEN", "Not a group member.");
         if (ownerOnly && role != "owner") return new(false, "FORBIDDEN", "Owner only.");
+        var write = await statusPolicy.CheckWriteAsync(groupId, userId);
+        if (!write.Allowed)
+            return new(false, write.ErrorCode, write.Error);
         return new(true, null, null, g);
+    }
+
+    public static string? ValidateStatus(string status)
+        => status is "opening" or "locked" or "closed"
+            ? null
+            : "status must be opening|locked|closed.";
+
+    /// <summary>
+    /// The owner can transition a group between its lifecycle states. This is the
+    /// sole write that remains available while a group is closed.
+    /// </summary>
+    public async Task<GroupOp> UpdateStatusAsync(Guid actorId, Guid groupId, string? status)
+    {
+        var g = await db.Groups.FindAsync(groupId);
+        if (g is null || g.DeletedAt is not null)
+            return new(false, "NOT_FOUND", "Group not found.");
+        if (await RoleAsync(groupId, actorId) != "owner")
+            return new(false, "FORBIDDEN", "Owner only.");
+
+        var next = (status ?? "").Trim().ToLowerInvariant();
+        if (ValidateStatus(next) is { } error)
+            return new(false, "VALIDATION", error);
+
+        g.Status = next;
+        await db.SaveChangesAsync();
+        return new(true, null, null, new StatusResult(next));
     }
 
     public async Task<GroupOp> CreateAsync(Guid creatorId, string name, string? currency,
@@ -148,6 +177,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
     {
         var g = await db.Groups.FirstOrDefaultAsync(x => x.InviteToken == token && x.DeletedAt == null);
         if (g is null) return new(false, "INVITE_ROTATED", "Invite invalid or rotated.");
+        if (g.Status != "opening") return new(false, "GROUP_READ_ONLY", "This group is read-only.");
         var user = await db.Users.FindAsync(userId);
         if (user is null) return new(false, "UNAUTH", "Not authenticated.");
         // Invite-token possession is the authorization: the link never expires
@@ -182,6 +212,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         {
             var g = await db.Groups.FindAsync(p.GroupId);
             if (g is null || g.DeletedAt is not null) continue;
+            if (g.Status != "opening") continue;
             if (await db.GroupMembers.FindAsync(g.Id, userId) is not null)
             {
                 p.ConsumedAt = DateTime.UtcNow;

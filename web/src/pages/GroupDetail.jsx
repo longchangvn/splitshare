@@ -37,6 +37,13 @@ function tileFor(t) {
   return hit;
 }
 
+export function formatGroupCreatedAt(createdAt, label, locale) {
+  if (!createdAt) return null;
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${label} · ${date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })}`;
+}
+
 export function GroupDetail() {
   const t = useT();
   const { user } = useAuth();
@@ -86,6 +93,9 @@ export function GroupDetail() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [leaveBusy, setLeaveBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusConfirmOpen, setStatusConfirmOpen] = useState(false);
+  const [pendingGroupStatus, setPendingGroupStatus] = useState(null);
   const [removeOpen, setRemoveOpen] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState(null);
@@ -236,6 +246,11 @@ export function GroupDetail() {
   }, [q]);
 
   const members = detail?.members || [];
+  const groupLifecycle = detail?.status || 'opening';
+  const canWriteGroup = groupLifecycle === 'opening'
+    || (groupLifecycle === 'locked' && detail?.my_role === 'owner');
+  const lifecycleLabel = t(`groupStatus.${groupLifecycle}`);
+  const groupCreatedSubtitle = formatGroupCreatedAt(detail?.created_at, t('report.createdOn'));
 
   const remove = (uid, name) => {
     setRemoveTarget({ uid, name });
@@ -290,6 +305,7 @@ export function GroupDetail() {
   // Creator, owner, or treasurer can edit OPEN expenses (matches API GuardAsync).
   const canEditExpense = (item) => {
     if (!item || item.kind !== 'expense') return false;
+    if (!canWriteGroup) return false;
     if (String(item.status || '').toUpperCase() === 'LOCKED') return false;
     const role = detail?.my_role;
     if (role === 'owner' || role === 'treasurer') return true;
@@ -465,6 +481,25 @@ export function GroupDetail() {
       setE(null);
     } catch (err) { setE(err); } finally { setRenaming(false); }
   };
+  const requestGroupStatusChange = (next) => {
+    if (!next || next === groupLifecycle) return;
+    setPendingGroupStatus(next);
+    setStatusConfirmOpen(true);
+    setE(null);
+  };
+  const updateGroupStatus = async () => {
+    const next = pendingGroupStatus;
+    if (!next || next === groupLifecycle) return;
+    setStatusBusy(true);
+    setE(null);
+    try {
+      await api.patch(`/api/v1/groups/${id}/status`, { status: next });
+      await load();
+      setStatusConfirmOpen(false);
+      setPendingGroupStatus(null);
+      notifications.show({ message: t('groupStatus.updated'), color: 'teal' });
+    } catch (err) { setE(err); } finally { setStatusBusy(false); }
+  };
   // Ledger totals over the loaded page.
   const totals = useMemo(() => {
     const items = ledger?.items || [];
@@ -617,12 +652,14 @@ export function GroupDetail() {
                 <GdActionIcon name="share" />
               </ActionIcon>
             </div>
+            {groupCreatedSubtitle && <Text className="gd-created-subtitle" size="xs">{groupCreatedSubtitle}</Text>}
             <div className="gd-net">
               {groupStatusTone && (
                 <span className={`net-chip is-${groupStatusTone}`} title={groupStatusHint}>
                   {groupStatusLabel}
                 </span>
               )}
+              <span className={`gd-lifecycle is-${groupLifecycle}`}>{lifecycleLabel}</span>
               {plan?.version != null && (
                 <span className="gd-settle-ver">
                   {t('report.settlementVer', { version: plan.version })}
@@ -630,6 +667,27 @@ export function GroupDetail() {
               )}
             </div>
           </div>
+          {detail.my_role === 'owner' && (
+            <div className="gd-lifecycle-control">
+              <div className="gd-lifecycle-picker">
+                <Select
+                  aria-label={t('groupStatus.label')}
+                  classNames={{ option: 'group-status-option' }}
+                  data={[
+                    { value: 'opening', label: t('groupStatus.opening') },
+                    { value: 'locked', label: t('groupStatus.locked') },
+                    { value: 'closed', label: t('groupStatus.closed') },
+                  ]}
+                  value={groupLifecycle}
+                  onChange={requestGroupStatusChange}
+                  disabled={statusBusy}
+                  size="sm"
+                  allowDeselect={false}
+                  withCheckIcon={false}
+                />
+              </div>
+            </div>
+          )}
           {detail.budget && (
             <div className="gd-budget">
               <Group justify="space-between" gap="xs">
@@ -662,11 +720,11 @@ export function GroupDetail() {
         {isMobile ? (
           <div className="sticky-bar gd-actions is-calm">
             <div className="gd-action-direct">
-              <button type="button" className="gd-action-cta" onClick={() => setShowExp(true)}>
+              <button type="button" className="gd-action-cta" onClick={() => setShowExp(true)} disabled={!canWriteGroup}>
                 <GdActionIcon name="expense" />
                 <span>{t('groupDetail.addExpense')}</span>
               </button>
-              <button type="button" className="gd-action-cta is-pay" onClick={() => { setPayPreset(null); setPayOpen(true); }}>
+              <button type="button" className="gd-action-cta is-pay" onClick={() => { setPayPreset(null); setPayOpen(true); }} disabled={!canWriteGroup}>
                 <GdActionIcon name="pay" />
                 <span>{t('groupDetail.recordPayment')}</span>
               </button>
@@ -699,7 +757,7 @@ export function GroupDetail() {
             <button
               type="button"
               className="gd-action-btn is-expense"
-              onClick={() => setShowExp(true)}
+              onClick={() => setShowExp(true)} disabled={!canWriteGroup}
             >
               <GdActionIcon name="expense" />
               <span>{t('groupDetail.addExpense')}</span>
@@ -707,7 +765,7 @@ export function GroupDetail() {
             <button
               type="button"
               className="gd-action-btn is-pay"
-              onClick={() => { setPayPreset(null); setPayOpen(true); }}
+              onClick={() => { setPayPreset(null); setPayOpen(true); }} disabled={!canWriteGroup}
             >
               <GdActionIcon name="pay" />
               <span>{t('groupDetail.recordPayment')}</span>
@@ -985,9 +1043,9 @@ export function GroupDetail() {
                   </div>
                   {item.kind === 'expense' && (
                     <div className="ledger-actions" onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
-                      <ActionIcon size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)}>⧉</ActionIcon>
+                      <ActionIcon className="ledger-action-btn is-copy" size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)} disabled={!canWriteGroup}>⧉</ActionIcon>
                       {canEditExpense(item) && (
-                        <ActionIcon size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
+                        <ActionIcon className="ledger-action-btn is-edit" size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
                       )}
                     </div>
                   )}
@@ -1050,9 +1108,9 @@ export function GroupDetail() {
                   <span className="ledger-cell ledger-actions is-actions">
                     {item.kind === 'expense' ? (
                       <>
-                        <ActionIcon size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)}>⧉</ActionIcon>
+                        <ActionIcon className="ledger-action-btn is-copy" size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)} disabled={!canWriteGroup}>⧉</ActionIcon>
                         {canEditExpense(item) && (
-                          <ActionIcon size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
+                          <ActionIcon className="ledger-action-btn is-edit" size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
                         )}
                       </>
                     ) : null}
@@ -1076,10 +1134,19 @@ export function GroupDetail() {
 
             <Tabs.Panel value="balances">
               <Text size="sm" fw={600} mb="sm">{t('groupDetail.whoOwes')}</Text>
-              {debtors.length === 0 && transfers.length === 0 && (
-                <Text c="dimmed" size="sm">{t('groupDetail.allSettledNobody')}</Text>
-              )}
-              <Stack gap="sm">
+              <BalancesPanel
+                byDebtor={byDebtor}
+                debtors={debtors}
+                members={members}
+                currency={detail.currency}
+                t={t}
+                onNudge={nudge}
+                onPay={(item) => { setPayPreset(item); setPayOpen(true); }}
+              />
+              <Stack visibleFrom="sm" gap="sm">
+                {debtors.length === 0 && transfers.length === 0 && (
+                  <Text c="dimmed" size="sm">{t('groupDetail.allSettledNobody')}</Text>
+                )}
                 {byDebtor.map(([from, list]) => (
                   <Card key={from} withBorder radius="md" padding="sm">
                     <Group gap="sm" wrap="nowrap">
@@ -1227,12 +1294,27 @@ export function GroupDetail() {
             </Tabs.Panel>
 
             <Tabs.Panel value="recurring">
-              <Group justify="space-between" mb="sm">
+              <div className="recurring-panel-head">
                 <Text size="sm" fw={600}>{t('groupDetail.recurringBills')}</Text>
                 <Button size="xs" variant="subtle" onClick={loadRules}>{t('common.refresh')}</Button>
-              </Group>
-              <RecurringForm groupId={id} members={members} onDone={loadRules} />
-              <Stack gap="xs" mt="sm">
+              </div>
+              <RecurringForm groupId={id} members={members} currency={detail.currency} t={t} onDone={loadRules} />
+              <Box hiddenFrom="sm">
+                <RecurringRuleList
+                  rules={rules}
+                  currency={detail.currency}
+                  onToggle={async (r) => {
+                    await api.patch(`/api/v1/groups/${id}/recurring/${r.rule_id}`, { active: !r.active });
+                    loadRules();
+                  }}
+                  onDelete={async (r) => {
+                    await api.del(`/api/v1/groups/${id}/recurring/${r.rule_id}`);
+                    loadRules();
+                  }}
+                  t={t}
+                />
+              </Box>
+              <Stack visibleFrom="sm" gap="xs" mt="sm">
                 {rules.map((r) => (
                   <Card key={r.rule_id} withBorder radius="md" padding="sm">
                     <Group justify="space-between" wrap="nowrap">
@@ -1278,7 +1360,6 @@ export function GroupDetail() {
                       <div className="gd-person-body">
                         <div className="gd-person-top">
                           <Text className="gd-person-name" truncate>{m.display_name}</Text>
-                          <span className={`gd-person-tag ${roleClass}`}>{roleLabel}</span>
                           {detail.mode === 'event' && (
                             <span className={`gd-person-tag ${m.deposit_paid ? 'is-deposit' : 'is-deposit-due'}`}>
                               {m.deposit_paid ? t('groupDetail.depositPaid') : t('groupDetail.depositDue')}
@@ -1287,6 +1368,7 @@ export function GroupDetail() {
                         </div>
                         <Text className="gd-person-handle" truncate>@{m.username}</Text>
                       </div>
+                      <span className={`gd-person-tag gd-person-role ${roleClass}`}>{roleLabel}</span>
                       {canAct && (
                         <div className="gd-person-actions">
                           {detail.mode === 'event' && (
@@ -1356,7 +1438,6 @@ export function GroupDetail() {
         radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile}
       >
         <ExpenseForm
           groupId={id}
@@ -1383,7 +1464,6 @@ export function GroupDetail() {
         radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile}
       >
         {editExisting && (
           <ExpenseForm
@@ -1413,7 +1493,6 @@ export function GroupDetail() {
         radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile}
       >
         <PaymentForm
           groupId={id}
@@ -1450,7 +1529,6 @@ export function GroupDetail() {
         radius={24}
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
-        fullScreen={isMobile}
       >
         <div className="wizard-form confirm-dialog">
           {detail.invite_link ? (
@@ -1472,6 +1550,62 @@ export function GroupDetail() {
               Only the owner or treasurer can share an invite link.
             </Text>
           )}
+        </div>
+      </Modal>
+
+      <Modal
+        opened={statusConfirmOpen}
+        onClose={() => {
+          if (statusBusy) return;
+          setStatusConfirmOpen(false);
+          setPendingGroupStatus(null);
+        }}
+        closeOnClickOutside={!statusBusy}
+        title={<span className="wizard-title-name">{t('groupStatus.confirmTitle')}</span>}
+        classNames={{
+          content: 'wizard-modal-content',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body',
+          title: 'wizard-modal-title',
+        }}
+        centered
+        size={420}
+        radius={24}
+        padding={0}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
+      >
+        <div className="wizard-form confirm-dialog group-status-confirm">
+          {pendingGroupStatus && (
+            <>
+              <div className={`group-status-confirm-next is-${pendingGroupStatus}`}>
+                <span aria-hidden />
+                <strong>{t(`groupStatus.${pendingGroupStatus}`)}</strong>
+              </div>
+              <Text className="confirm-dialog-text">
+                {t('groupStatus.confirmBody', {
+                  from: lifecycleLabel,
+                  to: t(`groupStatus.${pendingGroupStatus}`),
+                })}
+              </Text>
+              <Text size="sm" c="dimmed">{t(`groupStatus.${pendingGroupStatus}Hint`)}</Text>
+            </>
+          )}
+          <Group gap="sm" grow>
+            <Button
+              className="wizard-back"
+              onClick={() => {
+                setStatusConfirmOpen(false);
+                setPendingGroupStatus(null);
+              }}
+              disabled={statusBusy}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button className="wizard-primary" loading={statusBusy} onClick={updateGroupStatus}>
+              {t('groupStatus.confirmAction')}
+            </Button>
+          </Group>
+          <Err e={e} />
         </div>
       </Modal>
 
@@ -1825,14 +1959,14 @@ export function GroupDetail() {
 export function CategoryManager({ categories, t, onAdd, onEdit, onDelete }) {
   return (
     <section className="category-manager" aria-label={t('groupDetail.tabCategories')}>
-      <Group justify="space-between" mb="sm" wrap="wrap">
-        <div>
+      <Group className="category-manager-head" justify="space-between" mb="sm" wrap="nowrap">
+        <div className="category-manager-copy">
           <Text size="sm" fw={700}>{t('groupDetail.tabCategories')}</Text>
           <Text size="xs" c="dimmed">{t('groupDetail.categoriesHint')}</Text>
         </div>
-        <button type="button" className="gd-action-btn settings-add-btn" onClick={onAdd}>
+        <button type="button" className="gd-action-btn settings-add-btn category-manager-add" aria-label={t('groupDetail.categoryAdd')} onClick={onAdd}>
           <GdActionIcon name="plus" />
-          <span>{t('groupDetail.categoryAdd')}</span>
+          <span className="category-manager-add-label">{t('groupDetail.categoryAdd')}</span>
         </button>
       </Group>
       <div className="settings-list category-manager-list">
@@ -1845,17 +1979,19 @@ export function CategoryManager({ categories, t, onAdd, onEdit, onDelete }) {
               </Text>
             </div>
             <div className="settings-row-actions">
-              <Tooltip label={t('common.edit')} withArrow openDelay={200}>
-                <button type="button" className="gd-person-action" aria-label={`${t('common.edit')} ${categoryLabel(category, t)}`} onClick={() => onEdit(category)}>
-                  <GdActionIcon name="edit" />
-                </button>
-              </Tooltip>
               {!category.is_default && (
-                <Tooltip label={t('common.delete')} withArrow openDelay={200}>
-                  <button type="button" className="gd-person-action is-danger" aria-label={`${t('common.delete')} ${categoryLabel(category, t)}`} onClick={() => onDelete(category)}>
-                    <GdActionIcon name="trash" />
-                  </button>
-                </Tooltip>
+                <>
+                  <Tooltip label={t('common.edit')} withArrow openDelay={200}>
+                    <button type="button" className="gd-person-action" aria-label={`${t('common.edit')} ${categoryLabel(category, t)}`} onClick={() => onEdit(category)}>
+                      <GdActionIcon name="edit" />
+                    </button>
+                  </Tooltip>
+                  <Tooltip label={t('common.delete')} withArrow openDelay={200}>
+                    <button type="button" className="gd-person-action is-danger" aria-label={`${t('common.delete')} ${categoryLabel(category, t)}`} onClick={() => onDelete(category)}>
+                      <GdActionIcon name="trash" />
+                    </button>
+                  </Tooltip>
+                </>
               )}
             </div>
           </div>
@@ -1978,12 +2114,81 @@ function GdActionIcon({ name }) {
   );
 }
 
-function RecurringForm({ groupId, members, onDone }) {
-  const t = useT();
+export function BalancesPanel({ byDebtor = [], debtors = [], members = [], currency = '', t, onNudge, onPay }) {
+  const hasBalances = byDebtor.length > 0 || debtors.length > 0;
+
+  return (
+    <Box hiddenFrom="sm">
+      {!hasBalances ? (
+        <Text c="dimmed" size="sm">{t('groupDetail.allSettledNobody')}</Text>
+      ) : (
+        <div className="balance-mobile-list">
+          {byDebtor.map(([from, transfers]) => {
+            const name = displayNameOf(members, from);
+            return (
+              <div key={from} className="balance-mobile-debtor">
+                <div className="balance-mobile-debtor-head">
+                  <Avatar className="balance-mobile-avatar" radius="xl" size="sm">{initialsOf(name)}</Avatar>
+                  <span className="balance-mobile-name">{name} owes</span>
+                  <button type="button" className="balance-mobile-nudge" onClick={() => onNudge(from, name)}>{t('groupDetail.nudge')}</button>
+                </div>
+                <div className="balance-mobile-transfers">
+                  {transfers.map((item, i) => (
+                    <div key={i} className="balance-mobile-transfer">
+                      <span className="balance-mobile-route">→ {displayNameOf(members, item.to_user_id)}</span>
+                      <span className="balance-mobile-amount">{fmt(item.amount_cents, currency)}</span>
+                      <button type="button" className="balance-mobile-pay" onClick={() => onPay(item)}>{t('groupDetail.pay')}</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {byDebtor.length === 0 && debtors.map((member) => {
+            const name = member.display_name || displayNameOf(members, member.user_id);
+            return (
+              <div key={member.user_id} className="balance-mobile-debtor">
+                <div className="balance-mobile-debtor-head">
+                  <Avatar className="balance-mobile-avatar" radius="xl" size="sm">{initialsOf(name)}</Avatar>
+                  <span className="balance-mobile-name">{name} owes</span>
+                  <span className="balance-mobile-amount">{fmt(member.owe_cents, currency)}</span>
+                  <button type="button" className="balance-mobile-nudge" onClick={() => onNudge(member.user_id, name)}>{t('groupDetail.nudge')}</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Box>
+  );
+}
+
+const RECURRING_CURRENCY_SYMBOLS = { USD: '$', EUR: '€', GBP: '£', VND: '₫' };
+
+export function formatRecurringAmount(value, currency = 'USD') {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const number = Number(raw);
+  if (!Number.isFinite(number)) return '';
+  const amount = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(number);
+  const code = String(currency || 'USD').toUpperCase();
+  return RECURRING_CURRENCY_SYMBOLS[code] ? `${RECURRING_CURRENCY_SYMBOLS[code]}${amount}` : `${code} ${amount}`;
+}
+
+function normalizeRecurringAmount(value) {
+  const [whole = '', ...fraction] = String(value).replace(/[^0-9.]/g, '').split('.');
+  return fraction.length > 0 ? `${whole}.${fraction.join('')}` : whole;
+}
+
+export function RecurringForm({ groupId, members, currency = 'USD', t, onDone }) {
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [payer, setPayer] = useState(members[0]?.user_id || '');
   const [freq, setFreq] = useState('monthly');
+  const [amountFocused, setAmountFocused] = useState(false);
   const [e, setE] = useState(null);
   const [busy, setBusy] = useState(false);
   const go = async (ev) => {
@@ -1999,15 +2204,54 @@ function RecurringForm({ groupId, members, onDone }) {
     } catch (err) { setE(err); } finally { setBusy(false); }
   };
   return (
-    <form onSubmit={go}>
-      <Group gap="xs" align="flex-end">
-        <TextInput label={t('groupDetail.recurringTitle')} required placeholder={t('groupDetail.rentPh')} value={title} onChange={(x) => setTitle(x.target.value)} style={{ flex: 2 }} />
-        <TextInput label="Amount" required inputMode="decimal" value={amount} onChange={(x) => setAmount(x.target.value)} style={{ flex: 1 }} />
-        <Select label={t('groupDetail.recurringPayer')} value={payer} onChange={setPayer} data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} style={{ flex: 2 }} />
-        <Select label={t('groupDetail.every')} value={freq} onChange={setFreq} data={['weekly', 'monthly']} style={{ width: 110 }} />
-        <Button type="submit" loading={busy}>Add</Button>
-      </Group>
-      <Err e={e} />
+    <form className="recurring-form" onSubmit={go}>
+      <TextInput className="recurring-form-title" label={t('groupDetail.recurringTitle')} required placeholder={t('groupDetail.rentPh')} value={title} onChange={(x) => setTitle(x.target.value)} />
+      <TextInput
+        className="recurring-form-amount"
+        label="Amount"
+        required
+        inputMode="decimal"
+        placeholder="0.00"
+        value={amountFocused ? amount : formatRecurringAmount(amount, currency)}
+        onFocus={() => setAmountFocused(true)}
+        onBlur={() => setAmountFocused(false)}
+        onChange={(x) => setAmount(normalizeRecurringAmount(x.target.value))}
+      />
+      <Select className="recurring-form-payer" label={t('groupDetail.recurringPayer')} value={payer} onChange={setPayer} data={members.map((m) => ({ value: m.user_id, label: m.display_name }))} />
+      <Select className="recurring-form-frequency" label={t('groupDetail.every')} value={freq} onChange={setFreq} data={['weekly', 'monthly']} />
+      <Button className="recurring-form-submit" type="submit" loading={busy}>Add</Button>
+      {e && <Err e={e} />}
     </form>
+  );
+}
+
+export function RecurringRuleList({ rules = [], currency = '', t, onToggle, onDelete }) {
+
+  if (rules.length === 0) {
+    return <Text className="recurring-rule-empty" size="sm" c="dimmed">{t('groupDetail.noRecurring')}</Text>;
+  }
+
+  return (
+    <div className="recurring-rule-list">
+      {rules.map((r) => (
+        <div key={r.rule_id} className="recurring-rule-row">
+          <div className="recurring-rule-copy">
+            <div className="recurring-rule-title-line">
+              <Text className="recurring-rule-title" size="sm" fw={700} truncate>{r.title}</Text>
+              <span className="recurring-rule-frequency">{r.frequency}</span>
+            </div>
+            <span className="recurring-rule-next">Next run {new Date(r.next_run_at).toLocaleDateString()}</span>
+          </div>
+          <div className="recurring-rule-side">
+            <span className="recurring-rule-amount">{fmt(r.amount_cents, currency)}</span>
+            <span className={`recurring-rule-status ${r.active ? 'is-active' : 'is-paused'}`}>{r.active ? 'Active' : 'Paused'}</span>
+            <div className="recurring-rule-actions">
+              <Button size="xs" variant="subtle" onClick={() => onToggle(r)}>{r.active ? 'Pause' : 'Resume'}</Button>
+              <Button size="xs" variant="subtle" color="red" onClick={() => onDelete(r)}>Delete</Button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

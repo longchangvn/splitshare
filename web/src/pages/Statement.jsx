@@ -1,10 +1,43 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Anchor, Box, Card, Group, Select, Stack, Table, Text, Title, ScrollArea } from '@mantine/core';
+import { Anchor, Box, Card, Select, Stack, Table, Text, Title, ScrollArea } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { useT } from '../prefs.jsx';
+
+export function StatementMobileList({ entries = [], closingCents, currency = '' }) {
+  return (
+    <div className="statement-mobile-list">
+      {entries.map((r, i) => {
+        const at = new Date(r.entry.at);
+        const kind = String(r.entry.kind || '');
+        return (
+          <div className="statement-mobile-entry" key={i}>
+            <div className="statement-mobile-entry-copy">
+              <Text className="statement-mobile-entry-title" size="sm" fw={700} truncate>{r.entry.title}</Text>
+              <div className="statement-mobile-entry-meta">
+                <span className={`statement-mobile-entry-kind is-${kind.replaceAll('_', '-')}`}>{kind.replaceAll('_', ' ')}</span>
+                <span className="statement-mobile-entry-date">{at.toLocaleDateString()}</span>
+                <span className="statement-mobile-entry-time">{at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              </div>
+            </div>
+            <div className="statement-mobile-entry-values">
+              <span className="statement-mobile-entry-amount">{fmt(r.entry.amount_cents, currency)}</span>
+              <span className="statement-mobile-entry-running">→ {fmt(r.running_cents, currency)}</span>
+            </div>
+          </div>
+        );
+      })}
+      {typeof closingCents === 'number' && (
+        <div className="statement-mobile-closing">
+          <Text size="sm" fw={700}>Closing net</Text>
+          <Text size="sm" fw={800}>{fmt(closingCents, currency)}</Text>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function StatementPanel({ groupId, members = [], currency = '', embedded = false }) {
   const t = useT();
@@ -36,49 +69,38 @@ export function StatementPanel({ groupId, members = [], currency = '', embedded 
         data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
       />
       <Box hiddenFrom="sm">
-        <Stack gap="xs">
-          {(stmt?.entries || []).map((r, i) => (
-            <Card key={i} withBorder radius="md" padding="sm">
-              <Group justify="space-between" wrap="nowrap">
-                <div style={{ minWidth: 0 }}>
-                  <Text size="sm" fw={600} truncate>{r.entry.title}</Text>
-                  <Text size="xs" c="dimmed">{r.entry.kind} · {new Date(r.entry.at).toLocaleDateString()}</Text>
-                </div>
-                <div style={{ textAlign: 'right', flex: 'none' }}>
-                  <Text size="sm">{fmt(r.entry.amount_cents, currency)}</Text>
-                  <Text size="xs" c="dimmed">→ {fmt(r.running_cents, currency)}</Text>
-                </div>
-              </Group>
-            </Card>
-          ))}
-          {stmt && (
-            <Card withBorder radius="md" padding="sm">
-              <Group justify="space-between">
-                <Text size="sm" fw={600}>Closing net</Text>
-                <Text size="sm" fw={600}>{fmt(stmt.closing_cents, currency)}</Text>
-              </Group>
-            </Card>
-          )}
-        </Stack>
+        <StatementMobileList
+          entries={stmt?.entries || []}
+          closingCents={stmt?.closing_cents}
+          currency={currency}
+        />
       </Box>
       <Box visibleFrom="sm">
         <ScrollArea>
-          <Table striped highlightOnHover withTableBorder miw={520}>
+          <Table className="statement-table" miw={520}>
             <Table.Thead>
               <Table.Tr><Table.Th>Date</Table.Th><Table.Th>Event</Table.Th><Table.Th>Amount</Table.Th><Table.Th>Running</Table.Th></Table.Tr>
             </Table.Thead>
             <Table.Tbody>
-              {(stmt?.entries || []).map((r, i) => (
-                <Table.Tr key={i}>
-                  <Table.Td>{new Date(r.entry.at).toLocaleDateString()}</Table.Td>
-                  <Table.Td>{r.entry.kind}: {r.entry.title}</Table.Td>
-                  <Table.Td>{fmt(r.entry.amount_cents, currency)}</Table.Td>
-                  <Table.Td>{fmt(r.running_cents, currency)}</Table.Td>
-                </Table.Tr>
-              ))}
+              {(stmt?.entries || []).map((r, i) => {
+                const kind = String(r.entry.kind || '');
+                return (
+                  <Table.Tr key={i}>
+                    <Table.Td className="statement-table-date">{new Date(r.entry.at).toLocaleDateString()}</Table.Td>
+                    <Table.Td>
+                      <div className="statement-table-event">
+                        <span className={`statement-table-kind is-${kind.replaceAll('_', '-')}`}>{kind.replaceAll('_', ' ')}</span>
+                        <span className="statement-table-title">{r.entry.title}</span>
+                      </div>
+                    </Table.Td>
+                    <Table.Td className="statement-table-amount">{fmt(r.entry.amount_cents, currency)}</Table.Td>
+                    <Table.Td className="statement-table-running">{fmt(r.running_cents, currency)}</Table.Td>
+                  </Table.Tr>
+                );
+              })}
             </Table.Tbody>
             <Table.Tfoot>
-              <Table.Tr>
+              <Table.Tr className="statement-table-closing">
                 <Table.Td colSpan={3}><Text size="sm" fw={600}>Closing net</Text></Table.Td>
                 <Table.Td><Text size="sm" fw={600}>{stmt ? fmt(stmt.closing_cents, currency) : '—'}</Text></Table.Td>
               </Table.Tr>

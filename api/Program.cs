@@ -53,6 +53,7 @@ builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<GroupService>();
+builder.Services.AddScoped<GroupStatusPolicy>();
 builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<ExpenseService>();
 builder.Services.AddScoped<PaymentService>();

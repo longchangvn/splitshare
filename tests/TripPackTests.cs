@@ -23,8 +23,8 @@ public sealed class TripPackTests
         var ledger = new LedgerService(db);
         var mail = new StubEmailSender(NullLogger<StubEmailSender>.Instance);
         var auth = new AuthService(db, new TokenService(config), mail, ledger);
-        var cats = new Groups.CategoryService(db);
-        var groups = new GroupService(db, ledger, mail, config, cats);
+        var cats = new CategoryService(db);
+        var groups = new GroupService(db, ledger, mail, config, cats, new GroupStatusPolicy(db));
         var exp = new ExpenseService(db, ledger, new FakeStore(), cats, mail);
         return (db, auth, exp, groups, new PaymentService(db, ledger), ledger, new RecurringService(db, exp));
     }

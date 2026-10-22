@@ -25,7 +25,7 @@ public sealed class GroupTests
             new StubEmailSender(NullLogger<StubEmailSender>.Instance), new LedgerService(db));
         var ledger = new LedgerService(db);
         return (db, auth, new GroupService(db, ledger,
-            new StubEmailSender(NullLogger<StubEmailSender>.Instance), config, new CategoryService(db)));
+            new StubEmailSender(NullLogger<StubEmailSender>.Instance), config, new CategoryService(db), new GroupStatusPolicy(db)));
     }
 
     private static async Task<User> Reg(AuthService auth, string name)
@@ -59,6 +59,44 @@ public sealed class GroupTests
         Assert.Equal("VALIDATION", ghost.ErrorCode);
         var added = await groups.AddMembersAsync(a.Id, gid, [b.Id]);
         Assert.True(added.Ok);
+    }
+
+    [Fact]
+    public async Task Status_OnlyOwnerCanTransition_AndClosedBlocksOtherWrites()
+    {
+        var (db, auth, groups) = Setup();
+        var owner = await Reg(auth, "status-owner");
+        var member = await Reg(auth, "status-member");
+        var created = await groups.CreateAsync(owner.Id, "Status group", "USD", [member.Id], []);
+        var groupId = ((GroupCreated)created.Data!).Group.Id;
+
+        var forbidden = await groups.UpdateStatusAsync(member.Id, groupId, "locked");
+        Assert.Equal("FORBIDDEN", forbidden.ErrorCode);
+        Assert.True((await groups.UpdateStatusAsync(owner.Id, groupId, "closed")).Ok);
+
+        var blocked = await groups.AddMembersAsync(owner.Id, groupId, []);
+        Assert.Equal("GROUP_READ_ONLY", blocked.ErrorCode);
+        Assert.True((await groups.UpdateStatusAsync(owner.Id, groupId, "opening")).Ok);
+    }
+
+    [Fact]
+    public async Task DefaultCategories_CannotBeRenamedOrDeleted()
+    {
+        var (db, auth, groups) = Setup();
+        var owner = await Reg(auth, "catowner");
+        var created = await groups.CreateAsync(owner.Id, "Category group", "USD", [], []);
+        var groupId = ((GroupCreated)created.Data!).Group.Id;
+        var categories = new CategoryService(db);
+        var food = (await categories.EnsureAsync(groupId)).Single(c => c.Key == "food");
+
+        var rename = await categories.RenameAsync(owner.Id, groupId, food.Id, "Dining");
+        var delete = await categories.DeleteAsync(owner.Id, groupId, food.Id);
+
+        Assert.Equal("VALIDATION", rename.ErrorCode);
+        Assert.Equal("VALIDATION", delete.ErrorCode);
+        var saved = await db.GroupCategories.FindAsync(food.Id);
+        Assert.Equal("Food", saved!.Name);
+        Assert.True(saved.IsDefault);
     }
 
     [Fact]

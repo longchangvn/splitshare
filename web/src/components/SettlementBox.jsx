@@ -142,7 +142,11 @@ export function SettlementBox({ groupId, currency, members, onPay, plan: planPro
         title={<span className="wizard-title-name">{t('settlement.detailTitle')}</span>}
         centered
         size="lg"
-        classNames={{ content: 'wizard-modal-content settle-modal', header: 'wizard-modal-header' }}
+        classNames={{
+          content: 'wizard-modal-content settle-modal',
+          header: 'wizard-modal-header',
+          body: 'wizard-modal-body settle-modal-body',
+        }}
       >
         {!view ? (
           <Err e={e} />
@@ -203,9 +207,10 @@ export function SettlementBox({ groupId, currency, members, onPay, plan: planPro
                       </div>
                       {!historical && onPay && (
                         <Button
-                          size="xs"
+                          size="compact-xs"
                           variant="filled"
                           color="teal"
+                          className="settle-xfer-pay"
                           onClick={() => { onPay(xfer); setOpen(false); }}
                         >
                           {t('groupDetail.pay')}

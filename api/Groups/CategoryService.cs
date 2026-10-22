@@ -20,6 +20,12 @@ public sealed class CategoryService(AppDbContext db)
 
     private static readonly Regex SlugRe = new("[^a-z0-9]+", RegexOptions.Compiled);
 
+    private async Task<GroupOp?> GuardWriteAsync(Guid actorId, Guid groupId)
+    {
+        var write = await new GroupStatusPolicy(db).CheckWriteAsync(groupId, actorId);
+        return write.Allowed ? null : new GroupOp(false, write.ErrorCode, write.Error);
+    }
+
     public static object Map(GroupCategory c) => new
     {
         category_id = c.Id,
@@ -106,6 +112,7 @@ public sealed class CategoryService(AppDbContext db)
 
     public async Task<GroupOp> AddAsync(Guid actorId, Guid groupId, string? name)
     {
+        if (await GuardWriteAsync(actorId, groupId) is { } denied) return denied;
         if (await db.GroupMembers.FindAsync(groupId, actorId) is null)
             return new(false, "FORBIDDEN", "Not a group member.");
         var g = await db.Groups.FindAsync(groupId);
@@ -137,6 +144,7 @@ public sealed class CategoryService(AppDbContext db)
 
     public async Task<GroupOp> RenameAsync(Guid actorId, Guid groupId, Guid categoryId, string? name)
     {
+        if (await GuardWriteAsync(actorId, groupId) is { } denied) return denied;
         if (await db.GroupMembers.FindAsync(groupId, actorId) is null)
             return new(false, "FORBIDDEN", "Not a group member.");
         name = (name ?? "").Trim();
@@ -145,19 +153,21 @@ public sealed class CategoryService(AppDbContext db)
 
         var row = await db.GroupCategories.FirstOrDefaultAsync(c => c.Id == categoryId && c.GroupId == groupId);
         if (row is null) return new(false, "NOT_FOUND", "Category not found.");
+        if (row.IsDefault)
+            return new(false, "VALIDATION", "Default categories cannot be renamed.");
 
         var clash = await db.GroupCategories.AnyAsync(c =>
             c.GroupId == groupId && c.Id != categoryId && c.Name.ToLower() == name.ToLower());
         if (clash) return new(false, "VALIDATION", "A category with that name already exists.");
 
         row.Name = name;
-        row.IsDefault = false; // custom label wins over i18n defaults
         await db.SaveChangesAsync();
         return new(true, null, null, Map(row));
     }
 
     public async Task<GroupOp> DeleteAsync(Guid actorId, Guid groupId, Guid categoryId)
     {
+        if (await GuardWriteAsync(actorId, groupId) is { } denied) return denied;
         if (await db.GroupMembers.FindAsync(groupId, actorId) is null)
             return new(false, "FORBIDDEN", "Not a group member.");
 
