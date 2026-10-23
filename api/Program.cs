@@ -58,28 +58,14 @@ builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<ExpenseService>();
 builder.Services.AddScoped<PaymentService>();
 builder.Services.AddScoped<RecurringService>();
-// Receipt OCR: Ocr:Provider "ollama" = local Ollama vision model, else disabled stub.
-if (string.Equals(builder.Configuration["Ocr:Provider"], "ollama", StringComparison.OrdinalIgnoreCase))
-{
-    var ocrTimeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Ocr:TimeoutSeconds", 60));
-    builder.Services.AddHttpClient(OllamaOcrService.HttpClientName, c =>
-    {
-        c.BaseAddress = new Uri(builder.Configuration["Ocr:BaseUrl"] ?? "http://localhost:11434/");
-        c.Timeout = ocrTimeout + TimeSpan.FromSeconds(5);
-    });
-    // Service defaults add the standard resilience handler (10 s attempt / 3 retries) to every client;
-    // one OCR inference can exceed that and retrying re-runs the model, so allow one long attempt.
-    builder.Services.Configure<Microsoft.Extensions.Http.Resilience.HttpStandardResilienceOptions>(
-        $"{OllamaOcrService.HttpClientName}-standard", o =>
-        {
-            o.Retry.ShouldHandle = _ => ValueTask.FromResult(false);
-            o.AttemptTimeout.Timeout = ocrTimeout;
-            o.TotalRequestTimeout.Timeout = ocrTimeout;
-            o.CircuitBreaker.SamplingDuration = ocrTimeout * 2;
-        });
-    builder.Services.AddSingleton<IOcrService, OllamaOcrService>();
-}
-else builder.Services.AddSingleton<IOcrService, DisabledOcrService>();
+// Receipt OCR (specs/004): Ocr:Provider "openai-compatible" (OpenCode Console by default) or disabled.
+builder.Services.AddHttpClient(OpenAiCompatibleOcrService.HttpClientName,
+    c => c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Ocr:TimeoutSeconds", 30)));
+if (string.Equals(builder.Configuration["Ocr:Provider"], "openai-compatible", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddSingleton<IOcrService, OpenAiCompatibleOcrService>();
+else
+    builder.Services.AddSingleton<IOcrService, DisabledOcrService>();
+builder.Services.AddScoped<ReceiptScanService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
 builder.Services.AddSingleton<IEmailSender, StubEmailSender>();
@@ -131,6 +117,16 @@ builder.Services.AddRateLimiter(o =>
         {
             PermitLimit = 5, Window = TimeSpan.FromMinutes(1), QueueLimit = 0
         }));
+    // Receipt scans cost provider quota: limit per authenticated user (IP fallback).
+    o.AddPolicy(ReceiptScanEndpoints.RateLimitPolicy, ctx =>
+    RateLimitPartition.GetFixedWindowLimiter(
+        AuthEndpoints.CurrentUserId(ctx.User)?.ToString() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("Ocr:RateLimit:PermitLimit", 20),
+            Window = TimeSpan.FromMinutes(builder.Configuration.GetValue("Ocr:RateLimit:WindowMinutes", 10)),
+            QueueLimit = 0
+        }));
 });
 
 var app = builder.Build();
@@ -162,8 +158,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter(); // after authentication so per-user policies can read the user id
 app.UseAuthorization();
 // NOTE: no HTTPS redirection in Docker (TLS terminates at proxy). Enable in prod with certs.
 // app.UseHttpsRedirection();
@@ -202,6 +198,7 @@ PaymentEndpoints.Map(api);
 LedgerEndpoints.Map(api);
 RecurringEndpoints.Map(api);
 TripPackEndpoints.Map(api);
+ReceiptScanEndpoints.Map(api);
 
 // Migrations own the schema (task 1.2); startup stays up when DB is down.
 using (var scope = app.Services.CreateScope())

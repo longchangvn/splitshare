@@ -235,15 +235,15 @@ public static class TripPackEndpoints
             if (file.Length is 0 or > ExpenseService.MaxImageBytes)
                 return ApiResults.Error("VALIDATION", $"Image must be 1B-10MB (got {file.Length}B).", 422);
             await using var ms = new MemoryStream();
-            await file.CopyToAsync(ms, ct);
+            await form.Files[0].CopyToAsync(ms);
             try
             {
-                return Results.Ok(await ocr.ExtractAsync(ImageSanitizer.Sanitize(ms.ToArray(), file.ContentType), file.ContentType, ct));
+                var s = await ocr.ExtractAsync(ms.ToArray(), form.Files[0].ContentType);
+                return Results.Ok(new { suggestion = s.ToDictionary() });
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
+            catch (OcrProviderException)
             {
-                log.LogWarning("OCR provider failed: {Error}", ex.GetType().Name);
-                return ApiResults.Error("OCR_PROVIDER_ERROR", "Receipt scanning failed. Try again or enter it manually.", 503);
+                return ApiResults.Error("OCR_PROVIDER_ERROR", "Receipt scan failed.", 503);
             }
         }).DisableAntiforgery();
     }

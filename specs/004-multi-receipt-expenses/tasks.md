@@ -1,6 +1,39 @@
 # Tasks: Scan multiple receipts → create multiple expenses
 
-**Status**: Planned — not started. Exploration done 2026-10-22.
+## v1 implemented (2026-10-22): single "Scan receipt" in Add expense, web mobile site only
+
+User-narrowed scope: in the web New expense form, on phone-width screens only, a
+**Scan receipt** button opens camera or library (no `capture` attr), the image is resized
+to ≤1600 px, JPEG quality 0.7, JFIF 70 DPI, then `POST /api/v1/groups/{id}/expenses/scan`
+pre-fills title / amount / date / category and stages the photo as a receipt.
+
+- [X] V1 API: `IOcrService` typed (`ReceiptSuggestion`, `OcrContext`, `OcrProviderException`) — `api/Expenses/OcrService.cs`
+- [X] V2 API: `ReceiptParser` (untrusted model output → validated fields) — `api/Expenses/ReceiptParser.cs`
+- [X] V3 API: `OpenAiCompatibleOcrService` (OpenCode chat/completions, vision) — `api/Expenses/OpenAiCompatibleOcrService.cs`
+- [X] V4 API: `ReceiptScanService` (member guard, mime/size, EXIF strip) — `api/Expenses/ReceiptScanService.cs`; `ExpenseService.NormalizeImageMime` extracted
+- [X] V5 API: new endpoint module `api/Endpoints/ReceiptScanEndpoints.cs`; legacy `/expenses/ocr` adapted
+- [X] V6 API: DI + `ocr-user` rate limit (UseRateLimiter moved after UseAuthentication) — `api/Program.cs`
+- [X] V7 Config: `api/appsettings.json` (no key), `docker-compose.yml`, `.github/workflows/cd-api.yml`
+- [X] V8 Tests: `tests/ReceiptScanTests.cs` (18 tests)
+- [X] V9 Web: `web/src/receiptScan.js`, Scan button in `web/src/components/Forms.jsx`, i18n en+vi
+- [X] V10 Web tests: `web/test/receipt-scan.test.mjs`; `vite build`
+- [X] V11 Docs: README section
+- [X] V11b Scope change (user): scan returns/fills the **total only** — response `{total, confidence, warnings}`; prompt asks only for the grand total
+- [X] V11c Live test harness `ReceiptScanLiveTests` (opt-in `OCR_LIVE_TEST=1`) + synthetic fixture `tests/fixtures/receipt-sample.jpg` (TOTAL 21.00)
+- [ ] V12 **Live check passing** — ran with the real `.env` key: free models `glm-5.3-flash-free`, `deepseek-v4.1-flash-free`, `nemotron-3.5-super-vl-free` all return 403 FreeTierError. Needs a paid OpenCode model or another provider (e.g. Gemini free tier), then phone test
+- [ ] V13 `.env.example` `OCR_*` lines (skipped: file has uncommitted user edits)
+
+**Blocker found 2026-10-22**: calling `glm-5.3-flash-free` directly returns
+`403 FreeTierError: "OpenCode's free tier can only be used from within OpenCode"` (without
+a key and with an invalid key). Whether a valid Console key unlocks free models is
+unverified. If not, set `Ocr:Model` to a paid model on the same gateway (e.g.
+`gemini-3.5-flash-lite`, ~$0.001/receipt) — config only, no code change.
+
+The multi-receipt batch flow below remains planned.
+
+---
+
+**Status (batch flow)**: Planned — not started. Exploration done 2026-10-22.
 Provider decision: **OpenCode Console OpenAI-compatible endpoint, free vision model
 `glm-5.3-flash-free`** (fallback `deepseek-v4.1-flash-free`), swappable by config.
 

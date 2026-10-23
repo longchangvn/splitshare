@@ -122,6 +122,12 @@ requests; no new storage/DB resources.
   model provider (US/EU).
 - **Not yet verified**: that image input actually works through this endpoint for these
   models, and their accuracy → first task (spike) in `tasks.md`.
+- **Verified 2026-10-22**: direct calls to `glm-5.3-flash-free` return
+  `403 {"type":"FreeTierError","message":"OpenCode's free tier can only be used from within OpenCode..."}`
+  with no key and with an invalid key; a paid model with an invalid key returns
+  `401 Invalid credential`. So free models may be restricted to the OpenCode app — test
+  with a real Console key; fall back to a paid model via `Ocr:Model`. Do not spoof
+  OpenCode client headers to get around this.
 
 ## 4. Expected accuracy (estimates, to be measured in the spike)
 
