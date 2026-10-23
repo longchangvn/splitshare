@@ -218,3 +218,38 @@ Expected: no whitespace errors.
 git add <only files changed by verification fixes>
 git commit -m "test: verify dashboard owe/owed breakdown"
 ~~~
+
+---
+
+## Addendum (post-review revision): no cross-group summing + panel placement
+
+Two review corrections arrived after the plan was completed and verified:
+
+1. **No cross-group summing.** The "net per person across groups" semantics was
+   reverted (user: "my bad do not sum cross group"). A person is now shown once
+   **per group**, never as a combined cross-group row. Within-group per-person
+   netting is unchanged — the API already does it server-side via the raw pair
+   netting in `GET /api/v1/me/balances` (`groups[].owes[] / owed_to_me[]`,
+   payer-based and payment-adjusted), so mobile can consume the same endpoint
+   as-is. The planned top-level `breakdown` object was **dropped**; the API
+   contract is unchanged.
+2. **Panel placement.** The open breakdown panel must render immediately after
+   the card that opened it (was stranded below the other card because it was
+   inserted after both cards in the DOM). Now: owe card → owe panel → owed card
+   → owed panel (desktop grid placements unaffected: explicit rows at ≥75em).
+
+Revised frontend behavior:
+
+- `web/src/breakdown.js`: `buildBreakdown` is now a **group-section builder**
+  (no netting) — one section per group with rows in that direction, sorted by
+  section total desc; people sorted amount desc, name asc.
+- `BreakdownPanel`: sections keyed by group; header = group-name link +
+  currency code; person rows = avatar, name, amount (per-group chips removed —
+  the header is the link now). Note copy: `dashboard.perGroupNote`
+  ("Shown per group — never summed across groups" / Vietnamese equivalent).
+- CSS: `.dash-breakdown-group` header + `.dash-group-link` replace the
+  `.dash-breakdown-currency`-as-header and `.dash-group-chip` styles (light +
+  dark).
+- Tests: executable coverage updated — never-sums-across-groups,
+  never-sums-across-currencies, per-group headers, and DOM-order assertions
+  that each panel follows its own card (12/12 passing). Backend untouched.
