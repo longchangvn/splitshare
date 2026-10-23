@@ -510,6 +510,7 @@ export function ReportPanel({
   detail: detailProp = null,
   summary: summaryProp = null,
   plan: planProp = null,
+  settleTick = 0,
   embedded = false,
   onPay = null,
   categoryManager = null,
@@ -610,6 +611,7 @@ export function ReportPanel({
             currency={c}
             members={members}
             plan={plan}
+            settleTick={settleTick}
             onPay={onPay}
           />
           <div className="report-metric">
