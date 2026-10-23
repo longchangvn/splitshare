@@ -2083,6 +2083,26 @@ a {
   border-radius: 16px;
   background: #fff;
 }
+/* Scrollable "Your contacts" box in the New-group wizard (top 20 by name). */
+.wizard-contacts-box {
+  border: 1px solid #e4ebe7;
+  border-radius: 16px;
+  padding: 10px 12px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.wizard-contacts-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #64748b;
+  margin-bottom: 8px;
+}
+.wizard-contacts-box .wizard-person {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 8px 0;
+}
 .wizard-pay-hint {
   flex-direction: column;
   align-items: stretch;
@@ -3116,6 +3136,16 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
 .ledger-action-btn:focus-visible {
   outline: 2px solid #66bd93;
   outline-offset: 2px;
+}
+.ledger-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 30px 16px;
+  border: 1px dashed #dce7e1;
+  border-radius: 16px;
+  text-align: center;
 }
 .balance-mobile-list {
   border-top: 1px solid #e2eae5;
@@ -6668,6 +6698,12 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
   background: #181b1c;
   border-color: #2a3030;
 }
+[data-ss-theme="dark"] .wizard-contacts-box {
+  border-color: #2a3030;
+}
+[data-ss-theme="dark"] .wizard-contacts-title {
+  color: #9aa6a1;
+}
 [data-ss-theme="dark"] .gd-action-ghost {
   background: #222627;
   border-color: #3a4341;
@@ -6792,6 +6828,9 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
 [data-ss-theme="dark"] .ledger-action-btn:hover {
   border-color: #4a6759;
   background: #22302a;
+}
+[data-ss-theme="dark"] .ledger-empty {
+  border-color: #38413f;
 }
 [data-ss-theme="dark"] .balance-mobile-list,
 [data-ss-theme="dark"] .balance-mobile-debtor + .balance-mobile-debtor {

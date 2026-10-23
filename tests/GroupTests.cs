@@ -202,4 +202,37 @@ public sealed class GroupTests
         await db.SaveChangesAsync();
         Assert.Equal("HAS_OPEN_BALANCE", (await groups.DeleteAsync(a.Id, gid2)).ErrorCode);
     }
+
+    [Fact]
+    public async Task FromTemplate_Known_Template_Applies_Presets()
+    {
+        var (_, auth, groups) = Setup();
+        var a = await Reg(auth, "tpl-known");
+        var ok = await groups.FromTemplateAsync(a.Id, "Wedding grp", "USD", "wedding", null, null);
+        Assert.True(ok.Ok);
+        var g = ((GroupCreated)ok.Data!).Group;
+        Assert.Equal("event", g.Mode);
+        Assert.Equal(1000000L, g.BudgetCents); // 10000 budget -> cents
+        Assert.Equal(20000L, g.FlatFeeCents);  // 200 flat fee -> cents
+    }
+
+    [Fact]
+    public async Task FromTemplate_Unknown_Or_Empty_Template_Creates_Plain_Group()
+    {
+        var (db, auth, groups) = Setup();
+        var a = await Reg(auth, "tpl-unknown");
+        // Unknown template no longer 422s — it creates a plain group.
+        var custom = await groups.FromTemplateAsync(a.Id, "Ski trip", "USD", "ski-trip", null, null);
+        Assert.True(custom.Ok);
+        var g1 = ((GroupCreated)custom.Data!).Group;
+        Assert.Equal("shared", g1.Mode); // default mode, no preset applied
+        Assert.Null(g1.BudgetCents);
+        Assert.Empty(db.RecurringRules.Where(r => r.GroupId == g1.Id));
+        // Empty template behaves like plain creation; explicit budget/fee still apply.
+        var none = await groups.FromTemplateAsync(a.Id, "Plain grp", "USD", "", 50m, 5m);
+        Assert.True(none.Ok);
+        var g2 = ((GroupCreated)none.Data!).Group;
+        Assert.Equal(5000L, g2.BudgetCents);
+        Assert.Equal(500L, g2.FlatFeeCents);
+    }
 }
