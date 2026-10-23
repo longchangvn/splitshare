@@ -58,7 +58,28 @@ builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<ExpenseService>();
 builder.Services.AddScoped<PaymentService>();
 builder.Services.AddScoped<RecurringService>();
-builder.Services.AddSingleton<IOcrService, DisabledOcrService>();
+// Receipt OCR: Ocr:Provider "ollama" = local Ollama vision model, else disabled stub.
+if (string.Equals(builder.Configuration["Ocr:Provider"], "ollama", StringComparison.OrdinalIgnoreCase))
+{
+    var ocrTimeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Ocr:TimeoutSeconds", 60));
+    builder.Services.AddHttpClient(OllamaOcrService.HttpClientName, c =>
+    {
+        c.BaseAddress = new Uri(builder.Configuration["Ocr:BaseUrl"] ?? "http://localhost:11434/");
+        c.Timeout = ocrTimeout + TimeSpan.FromSeconds(5);
+    });
+    // Service defaults add the standard resilience handler (10 s attempt / 3 retries) to every client;
+    // one OCR inference can exceed that and retrying re-runs the model, so allow one long attempt.
+    builder.Services.Configure<Microsoft.Extensions.Http.Resilience.HttpStandardResilienceOptions>(
+        $"{OllamaOcrService.HttpClientName}-standard", o =>
+        {
+            o.Retry.ShouldHandle = _ => ValueTask.FromResult(false);
+            o.AttemptTimeout.Timeout = ocrTimeout;
+            o.TotalRequestTimeout.Timeout = ocrTimeout;
+            o.CircuitBreaker.SamplingDuration = ocrTimeout * 2;
+        });
+    builder.Services.AddSingleton<IOcrService, OllamaOcrService>();
+}
+else builder.Services.AddSingleton<IOcrService, DisabledOcrService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
 builder.Services.AddSingleton<IEmailSender, StubEmailSender>();

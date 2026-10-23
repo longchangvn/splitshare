@@ -222,16 +222,29 @@ public static class TripPackEndpoints
         });
 
         // ---- OCR (capability-gated stub) ----
-        api.MapPost("/expenses/ocr", async (HttpRequest req, IOcrService ocr) =>
+        // Returns one entry per receipt found in the image: [{ summary, total }].
+        api.MapPost("/expenses/ocr", async (HttpRequest req, IOcrService ocr, ILogger<IOcrService> log, CancellationToken ct) =>
         {
             if (!ocr.Enabled) return ApiResults.Error("OCR_UNAVAILABLE", "Receipt scanning is not enabled.", 501);
             if (!req.HasFormContentType) return ApiResults.Error("VALIDATION", "multipart/form-data required.", 422);
-            var form = await req.ReadFormAsync();
+            var form = await req.ReadFormAsync(ct);
             if (form.Files.Count == 0) return ApiResults.Error("VALIDATION", "No file uploaded.", 422);
+            var file = form.Files[0];
+            if (!ExpenseService.AllowedMimes.Contains(file.ContentType))
+                return ApiResults.Error("VALIDATION", $"Allowed: jpg png webp heic (got '{file.ContentType}').", 422);
+            if (file.Length is 0 or > ExpenseService.MaxImageBytes)
+                return ApiResults.Error("VALIDATION", $"Image must be 1B-10MB (got {file.Length}B).", 422);
             await using var ms = new MemoryStream();
-            await form.Files[0].CopyToAsync(ms);
-            var fields = await ocr.ExtractAsync(ms.ToArray(), form.Files[0].ContentType);
-            return Results.Ok(new { suggestion = fields });
+            await file.CopyToAsync(ms, ct);
+            try
+            {
+                return Results.Ok(await ocr.ExtractAsync(ImageSanitizer.Sanitize(ms.ToArray(), file.ContentType), file.ContentType, ct));
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
+            {
+                log.LogWarning("OCR provider failed: {Error}", ex.GetType().Name);
+                return ApiResults.Error("OCR_PROVIDER_ERROR", "Receipt scanning failed. Try again or enter it manually.", 503);
+            }
         }).DisableAntiforgery();
     }
 

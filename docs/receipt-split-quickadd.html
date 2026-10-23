@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SplitShare — Quick Receipt Split: 2 Designs (least-click)</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:#0f172a;color:#0f172a;padding:32px 20px}
+  .page{max-width:1500px;margin:0 auto}
+  .hero{color:#fff;margin-bottom:8px}
+  .hero h1{font-size:28px;font-weight:800}
+  .hero h1 span{color:#2dd4bf}
+  .hero p{color:#94a3b8;margin-top:8px;font-size:14px;line-height:1.6;max-width:960px}
+  .meta{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 28px}
+  .pill{font-size:12px;background:#1e293b;color:#cbd5e1;border:1px solid #334155;padding:6px 12px;border-radius:999px}
+  .pill b{color:#2dd4bf}
+  h2.sec{color:#fff;font-size:18px;margin:36px 0 6px}
+  p.secp{color:#94a3b8;font-size:13px;line-height:1.6;max-width:960px;margin-bottom:18px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(390px,1fr));gap:28px;justify-items:center}
+  .frame-wrap{display:flex;flex-direction:column;gap:12px;width:100%;max-width:390px}
+  .frame-label h3{font-size:15px;color:#fff}
+  .frame-label p{font-size:12px;color:#94a3b8;margin-top:4px;line-height:1.5}
+  .frame-label code{color:#2dd4bf;font-size:11px}
+  .phone{width:360px;height:780px;background:#f1f5f9;border-radius:44px;padding:12px;box-shadow:0 20px 60px rgba(0,0,0,.5);border:1px solid #334155;margin:0 auto}
+  .screen{background:#f8fafc;width:100%;height:100%;border-radius:34px;overflow:hidden;display:flex;flex-direction:column;position:relative}
+  .notch{height:30px;display:flex;justify-content:center;align-items:center;background:#fff}
+  .notch i{display:block;width:110px;height:24px;background:#0f172a;border-radius:999px}
+  .appbar{background:#fff;padding:12px 16px 10px;border-bottom:1px solid #e2e8f0}
+  .appbar .row{display:flex;align-items:center;justify-content:space-between}
+  .appbar h2{font-size:17px;font-weight:800}
+  .appbar small{font-size:12px;color:#64748b}
+  .teal{color:#0d9488}
+  .content{flex:1;overflow:hidden;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:12px 13px;box-shadow:0 1px 2px rgba(15,23,42,.05)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;background:#0d9488;color:#fff;border-radius:12px;padding:13px;font-size:14px;font-weight:700;border:0;width:100%}
+  .btn-sec{background:#ccfbf1;color:#0f766e}
+  .btn-dark{background:#0f172a}
+  .btn-ghost{background:#fff;border:1px solid #cbd5e1;color:#0f172a}
+  .avatar{width:30px;height:30px;border-radius:999px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:800;flex:none}
+  .badge{font-size:10px;font-weight:800;padding:3px 8px;border-radius:999px;letter-spacing:.02em}
+  .b-open{background:#fef9c3;color:#854d0e;border:1px solid #fde047}
+  .b-red{background:#fee2e2;color:#b91c1c;border:1px solid #fecaca}
+  .b-teal{background:#ccfbf1;color:#0f766e;border:1px solid #99f6e4}
+  .b-orange{background:#ffedd5;color:#9a3412;border:1px solid #fed7aa}
+  .muted{font-size:12px;color:#64748b;line-height:1.5}
+  .small{font-size:11px}
+  .h{font-size:13px;font-weight:800}
+  .amt{font-size:14px;font-weight:800}
+  .row2{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .seg{display:flex;background:#e2e8f0;border-radius:10px;padding:3px;gap:3px}
+  .seg span{flex:1;text-align:center;font-size:11px;font-weight:700;padding:7px 0;border-radius:8px;color:#64748b}
+  .seg span.on{background:#fff;color:#0f766e;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+
+  /* member chips (Design A) */
+  .chips{display:flex;gap:8px;flex-wrap:wrap}
+  .chip{display:flex;align-items:center;gap:6px;background:#fff;border:1.5px solid #cbd5e1;border-radius:999px;padding:5px 10px 5px 5px;font-size:12px;font-weight:700;color:#475569;cursor:pointer;user-select:none}
+  .chip.on{border-color:#0d9488;background:#ccfbf1;color:#0f766e}
+  .chip .avatar{width:24px;height:24px;font-size:10px}
+  .chip .share{font-size:10px;font-weight:800;color:#0f766e}
+  .chip .x{font-size:10px;color:#94a3b8}
+
+  /* amount + keypad (Design A) */
+  .amtline{text-align:center;padding:6px 0 2px}
+  .amtline .big{font-size:44px;font-weight:800;letter-spacing:-.02em}
+  .amtline .big small{font-size:22px;color:#94a3b8;font-weight:700}
+  .amtline .sub{font-size:11px;color:#64748b;margin-top:2px}
+  .keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .key{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:13px 0;text-align:center;font-size:20px;font-weight:800;color:#0f172a;box-shadow:0 1px 2px rgba(15,23,42,.06);cursor:pointer;user-select:none}
+  .key:active{background:#ccfbf1}
+  .key.fn{background:#f1f5f9;color:#64748b;font-size:15px}
+
+  /* split preview rows (Design A) */
+  .srow{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid #f1f5f9}
+  .srow:last-child{border-bottom:0}
+  .srow .name{font-size:13px;font-weight:700;flex:1}
+  .srow .val{font-size:13px;font-weight:800}
+  .penny{font-size:9px;font-weight:800;background:#fef9c3;color:#854d0e;border:1px solid #fde047;border-radius:999px;padding:1px 5px;margin-left:4px}
+
+  /* Design B camera */
+  .cam{flex:1;background:linear-gradient(180deg,#1e293b,#0f172a);position:relative;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .receipt{width:190px;background:#fff;border-radius:6px;padding:14px 12px;transform:rotate(-2deg);box-shadow:0 12px 30px rgba(0,0,0,.5);font-family:ui-monospace,Menlo,monospace;font-size:9px;color:#334155}
+  .receipt h4{text-align:center;font-size:11px;margin-bottom:6px}
+  .receipt .li{display:flex;justify-content:space-between;padding:2px 0}
+  .receipt .tot{border-top:1px dashed #94a3b8;margin-top:5px;padding-top:4px;font-weight:800;display:flex;justify-content:space-between}
+  .scanframe{position:absolute;inset:60px 34px;border:2px solid rgba(45,212,191,.7);border-radius:18px}
+  .scanframe::before,.scanframe::after{content:"";position:absolute;left:-2px;right:-2px;height:14px;border:3px solid #2dd4bf}
+  .scanframe::before{top:-2px;border-bottom:0;border-radius:14px 14px 0 0}
+  .scanframe::after{bottom:-2px;border-top:0;border-radius:0 0 14px 14px}
+  .scanhint{position:absolute;bottom:16px;left:0;right:0;text-align:center;color:#cbd5e1;font-size:11px;font-weight:600}
+
+  /* line items (Design B) */
+  .li{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f1f5f9}
+  .li:last-child{border-bottom:0}
+  .li .nm{flex:1;font-size:12px;font-weight:600}
+  .li .pr{font-size:12px;font-weight:800;width:52px;text-align:right}
+  .who{display:flex;gap:3px}
+  .who i{font-style:normal;font-size:9px;font-weight:800;width:19px;height:19px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:#f1f5f9;color:#94a3b8;cursor:pointer}
+  .who i.on{background:#0d9488;color:#fff}
+
+  /* owe summary (both designs) */
+  .owehero{text-align:center;padding:12px 0 8px}
+  .owehero .big{font-size:34px;font-weight:800;color:#0f766e}
+  .owehero .lbl{font-size:12px;color:#64748b;margin-top:2px}
+  .netrow{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid #f1f5f9}
+  .netrow:last-child{border-bottom:0}
+  .netrow .name{font-size:13px;font-weight:700;flex:1}
+  .netrow .val{font-size:12px;font-weight:800}
+  .val.pos{color:#0f766e}.val.neg{color:#b91c1c}
+
+  table.cmp{width:100%;border-collapse:collapse;font-size:13px;color:#cbd5e1}
+  table.cmp th,table.cmp td{border:1px solid #334155;padding:9px 12px;text-align:left}
+  table.cmp th{background:#1e293b;color:#2dd4bf;font-size:12px}
+  table.cmp td b{color:#fff}
+  .note{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:14px 16px;color:#94a3b8;font-size:13px;line-height:1.65;margin-top:18px}
+  .note b{color:#2dd4bf}
+  .kbd{display:inline-block;background:#0f172a;border:1px solid #334155;color:#2dd4bf;border-radius:6px;padding:1px 6px;font-size:11px;font-family:ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="hero">
+    <h1>SplitShare — <span>Quick Receipt Split</span> (least-click)</h1>
+    <p>Two interactive mockups for the #1 job: <b style="color:#fff">enter an expense fast and instantly see what everyone's share is — and who owes whom after saving.</b>
+    Both designs collapse the current multi-field form (<code style="color:#2dd4bf">Forms.jsx</code>) into smart defaults + a single confirmation, and both end with a per-person owe summary.
+    Try Design A's keypad below — shares recompute live per FR-6 (<code style="color:#2dd4bf">preview-split</code>).</p>
+  </div>
+  <div class="meta">
+    <span class="pill">Goal: <b>open → type → done</b></span>
+    <span class="pill">Design A taps: <b>2</b> (open + save)</span>
+    <span class="pill">Design B taps: <b>2</b> (scan + confirm)</span>
+    <span class="pill">Everyone preselected by default</span>
+    <span class="pill">Live share + owe preview</span>
+    <span class="pill">Maps to <b>POST /expenses</b> + <b>preview-split</b></span>
+  </div>
+
+  <!-- ===================== DESIGN A ===================== -->
+  <h2 class="sec">Design A — “Instant Keypad” (amount-first, zero-navigation)</h2>
+  <p class="secp">One screen, no wizard. Amount keypad + split preview are visible <b style="color:#fff">simultaneously</b>, so you never navigate to check shares. Members of the active group are preselected (last-used snapshot), payer defaults to <b style="color:#fff">You</b>, split defaults to <b style="color:#fff">EQUAL</b>. Type digits → watch per-person share update → Save. Tap the keypad and chips — it's live.</p>
+  <div class="grid">
+
+    <!-- A1 -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="notch"><i></i></div>
+        <div class="appbar"><div class="row">
+          <h2>New expense <span class="teal">·</span> <small>Roommates 4</small></h2>
+          <span class="badge b-open">DRAFT</span>
+        </div></div>
+        <div class="content">
+          <div class="card" style="padding:8px 12px">
+            <div class="row2"><span class="muted">Paid by</span>
+              <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800">
+                <span class="avatar" style="background:#0d9488;width:22px;height:22px;font-size:10px">A</span>You ▾</span></div>
+          </div>
+          <div>
+            <div class="muted small" style="margin-bottom:6px">Splitting with <b style="color:#0f766e">4 people</b> · tap to exclude</div>
+            <div class="chips" id="aChips">
+              <span class="chip on" data-uid="0"><span class="avatar" style="background:#0d9488">A</span>You</span>
+              <span class="chip on" data-uid="1"><span class="avatar" style="background:#6366f1">B</span>Bao</span>
+              <span class="chip on" data-uid="2"><span class="avatar" style="background:#f59e0b">C</span>Chi</span>
+              <span class="chip on" data-uid="3"><span class="avatar" style="background:#ec4899">D</span>Dung</span>
+              <span class="chip" style="border-style:dashed">+ Add</span>
+            </div>
+          </div>
+          <div class="amtline">
+            <div class="big"><small>$</small><span id="aAmt">0.00</span></div>
+            <div class="sub" id="aSub">Type the total — split previews below as you go</div>
+          </div>
+          <div class="card" style="flex:1;overflow:auto">
+            <div class="row2" style="margin-bottom:2px">
+              <span class="h">Each person's share</span>
+              <span class="badge b-teal" id="aBadge">EQUAL ÷ 4</span>
+            </div>
+            <div id="aSplits"></div>
+          </div>
+          <div class="keypad" id="aPad">
+            <div class="key" data-k="1">1</div><div class="key" data-k="2">2</div><div class="key" data-k="3">3</div>
+            <div class="key" data-k="4">4</div><div class="key" data-k="5">5</div><div class="key" data-k="6">6</div>
+            <div class="key" data-k="7">7</div><div class="key" data-k="8">8</div><div class="key" data-k="9">9</div>
+            <div class="key fn" data-k="C">C</div><div class="key" data-k="0">0</div><div class="key fn" data-k="⌫">⌫</div>
+          </div>
+          <button class="btn" id="aSave" style="opacity:.45" disabled>Add expense — enter amount</button>
+        </div>
+      </div></div>
+      <div class="frame-label">
+        <h3>A1 · Ready state (0 taps so far)</h3>
+        <p>Everything pre-filled from context: group, payer=You, all 4 members selected, EQUAL. The keypad and the live share list share one screen — no tab, no modal, no scrolling to verify. <code>chips carry live $ share once you type</code></p>
+      </div>
+    </div>
+
+    <!-- A2 -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="notch"><i></i></div>
+        <div class="appbar"><div class="row">
+          <h2>New expense <span class="teal">·</span> <small>Roommates 4</small></h2>
+          <span class="badge b-open">DRAFT</span>
+        </div></div>
+        <div class="content">
+          <div class="card" style="padding:8px 12px">
+            <div class="row2"><span class="muted">Paid by</span>
+              <span style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:800">
+                <span class="avatar" style="background:#0d9488;width:22px;height:22px;font-size:10px">A</span>You ▾</span></div>
+          </div>
+          <div>
+            <div class="muted small" style="margin-bottom:6px">Splitting with <b style="color:#0f766e">4 people</b> · tap to exclude</div>
+            <div class="chips">
+              <span class="chip on"><span class="avatar" style="background:#0d9488">A</span>You <span class="share">$3.09</span></span>
+              <span class="chip on"><span class="avatar" style="background:#6366f1">B</span>Bao <span class="share">$3.09</span></span>
+              <span class="chip on"><span class="avatar" style="background:#f59e0b">C</span>Chi <span class="share">$3.08</span></span>
+              <span class="chip on"><span class="avatar" style="background:#ec4899">D</span>Dung <span class="share">$3.08</span></span>
+            </div>
+          </div>
+          <div class="amtline">
+            <div class="big"><small>$</small>12.34</div>
+            <div class="sub">Tap a chip to exclude · long-press chip = switch to EXACT / SHARES</div>
+          </div>
+          <div class="card" style="flex:1;overflow:auto">
+            <div class="row2" style="margin-bottom:2px">
+              <span class="h">Each person's share</span>
+              <span class="badge b-teal">EQUAL ÷ 4</span>
+            </div>
+            <div class="srow"><span class="avatar" style="background:#0d9488">A</span><span class="name">You (payer)</span><span class="badge b-orange" style="font-size:9px">+1¢</span><span class="val">$3.09</span></div>
+            <div class="srow"><span class="avatar" style="background:#6366f1">B</span><span class="name">Bao</span><span class="badge b-orange" style="font-size:9px">+1¢</span><span class="val">$3.09</span></div>
+            <div class="srow"><span class="avatar" style="background:#f59e0b">C</span><span class="name">Chi</span><span class="val">$3.08</span></div>
+            <div class="srow"><span class="avatar" style="background:#ec4899">D</span><span class="name">Dung</span><span class="val">$3.08</span></div>
+            <div class="muted small" style="margin-top:8px">Server rule (FR-6): floor + remainder 1¢ to first users by id — surfaced here so the +1¢ is never a surprise.</div>
+          </div>
+          <button class="btn">Add expense — you get back $9.25</button>
+        </div>
+      </div></div>
+      <div class="frame-label">
+        <h3>A2 · After typing “1234” (2nd and last tap = Save)</h3>
+        <p>Shares recompute on every keystroke via <code>POST /expenses/preview-split</code>. The +1¢ remainder rule is shown inline (FR-6). The Save button itself already states the outcome — “you get back $9.25” — so expectation #2 is answered <b style="color:#fff">before</b> you commit.</p>
+      </div>
+    </div>
+
+    <!-- A3 -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="notch"><i></i></div>
+        <div class="appbar"><div class="row">
+          <h2>Roommates 4</h2><span class="badge b-teal">SAVED · v8</span>
+        </div></div>
+        <div class="content">
+          <div class="card" style="text-align:center;padding:14px">
+            <div style="font-size:26px">✅</div>
+            <div class="h" style="margin-top:4px">“Dinner” · $12.34 added</div>
+            <div class="muted small" style="margin-top:2px">Settlement updated v7 → v8</div>
+          </div>
+          <div class="card">
+            <div class="owehero">
+              <div class="big">+ $9.25</div>
+              <div class="lbl">You are owed — 3 people owe you</div>
+            </div>
+            <div class="netrow"><span class="avatar" style="background:#6366f1">B</span><span class="name">Bao owes you</span><span class="val neg">−$3.09 → you</span></div>
+            <div class="netrow"><span class="avatar" style="background:#f59e0b">C</span><span class="name">Chi owes you</span><span class="val neg">−$3.08 → you</span></div>
+            <div class="netrow"><span class="avatar" style="background:#ec4899">D</span><span class="name">Dung owes you</span><span class="val neg">−$3.08 → you</span></div>
+          </div>
+          <div class="card" style="background:#f0fdfa;border-color:#99f6e4">
+            <div class="row2"><span class="h" style="color:#0f766e">Optimized: 3 debts → 1 transfer (saved 2) · v8</span><span class="muted small">Why?</span></div>
+            <div class="muted small" style="margin-top:4px">Bao → You $3.09 · Chi → You $3.08 · Dung → You $3.08 <b>(netted: they can pay as one if they pooled)</b></div>
+          </div>
+          <button class="btn">Share summary</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost">Undo</button>
+            <button class="btn btn-dark">+ Add another</button>
+          </div>
+        </div>
+      </div></div>
+      <div class="frame-label">
+        <h3>A3 · Saved — “who owes whom” answered instantly</h3>
+        <p>Success screen doubles as the balance report: net position (+$9.25), a per-person owe list, and the compact settlement bar (FR-7) with a Pay path. “+ Add another” reuses the same keypad for the next receipt — chain-enter a full night out in seconds.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== DESIGN B ===================== -->
+  <h2 class="sec">Design B — “Scan &amp; Confirm” (receipt-first, 1 glance = done)</h2>
+  <p class="secp">For paper receipts: the camera <b style="color:#fff">is</b> the entry form. OCR fills title + line items + total, the last-used participants for that group are preselected, and the confirm button carries the full split summary. Optional item-level assignment is tap-person→tap-items — no per-item forms. Images flow through the existing two-phase attach (FR-5).</p>
+  <div class="grid">
+
+    <!-- B1 -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="notch" style="background:#0f172a"><i style="background:#334155"></i></div>
+        <div class="appbar" style="background:#0f172a;border-bottom:0">
+          <div class="row"><h2 style="color:#fff">Scan receipt <span class="teal">·</span> <small style="color:#94a3b8">Roommates 4</small></h2>
+          <span style="color:#94a3b8;font-size:16px">✕</span></div>
+        </div>
+        <div class="cam">
+          <div class="scanframe"></div>
+          <div class="receipt">
+            <h4>QUÁN ĂN HÈ</h4>
+            <div class="li"><span>Phở x2</span><span>18.00</span></div>
+            <div class="li"><span>Bánh mì x3</span><span>13.50</span></div>
+            <div class="li"><span>Cà phê sữa x4</span><span>12.00</span></div>
+            <div class="li"><span>Gỏi cuốn x2</span><span>9.00</span></div>
+            <div class="li"><span>Svc 10%</span><span>5.25</span></div>
+            <div class="tot"><span>TOTAL</span><span>$57.75</span></div>
+          </div>
+          <div class="scanhint">Hold steady — auto-capturing… (or tap ⬤)</div>
+        </div>
+        <div style="background:#0f172a;padding:10px 14px 14px">
+          <div class="muted small" style="color:#94a3b8;margin-bottom:6px">Will split with (recents for this group):</div>
+          <div class="chips" style="margin-bottom:10px">
+            <span class="chip on" style="background:#134e4a;border-color:#2dd4bf;color:#5eead4"><span class="avatar" style="background:#0d9488">A</span>You</span>
+            <span class="chip on" style="background:#134e4a;border-color:#2dd4bf;color:#5eead4"><span class="avatar" style="background:#6366f1">B</span>Bao</span>
+            <span class="chip on" style="background:#134e4a;border-color:#2dd4bf;color:#5eead4"><span class="avatar" style="background:#f59e0b">C</span>Chi</span>
+            <span class="chip on" style="background:#134e4a;border-color:#2dd4bf;color:#5eead4"><span class="avatar" style="background:#ec4899">D</span>Dung</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="text-align:center;color:#fff;font-size:22px">⬤</div>
+            <button class="btn" style="flex:1">Capture &amp; read receipt</button>
+          </div>
+        </div>
+      </div></div>
+      <div class="frame-label">
+        <h3>B1 · Camera = the form (1st tap: shutter)</h3>
+        <p>No fields to fill before scanning. Participants strip is preselected from the group's recents so even the “who” step is usually zero-tap. Auto-capture triggers without the shutter tap when the receipt is stable.</p>
+      </div>
+    </div>
+
+    <!-- B2 -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="notch"><i></i></div>
+        <div class="appbar"><div class="row">
+          <h2>Review scan</h2><span class="badge b-open">OCR 98%</span>
+        </div></div>
+        <div class="content" style="gap:8px">
+          <div class="card" style="display:flex;gap:10px;align-items:center">
+            <div style="width:44px;height:56px;border-radius:6px;background:linear-gradient(180deg,#fde68a,#f59e0b);display:flex;align-items:center;justify-content:center;font-size:18px">🧾</div>
+            <div style="flex:1">
+              <div class="h">Quán Ăn Hè — dinner</div>
+              <div class="muted small">Today 20:14 · 5 items · tax+tip included</div>
+            </div>
+            <div class="amt">$57.75</div>
+          </div>
+          <div class="card">
+            <div class="row2" style="margin-bottom:2px"><span class="h">Line items</span><span class="muted small">tap person = assign</span></div>
+            <div class="li"><span class="nm">Phở ×2</span><span class="who"><i class="on">C</i><i class="on">D</i><i>B</i><i>A</i></span><span class="pr">$18.00</span></div>
+            <div class="li"><span class="nm">Bánh mì ×3</span><span class="who"><i class="on">A</i><i class="on">B</i><i class="on">C</i><i>D</i></span><span class="pr">$13.50</span></div>
+            <div class="li"><span class="nm">Cà phê sữa ×4</span><span class="who"><i class="on">A</i><i class="on">B</i><i class="on">C</i><i class="on">D</i></span><span class="pr">$12.00</span></div>
+            <div class="li"><span class="nm">Gỏi cuốn ×2</span><span class="who"><i class="on">A</i><i>B</i><i>C</i><i>D</i></span><span class="pr">$9.00</span></div>
+            <div class="li"><span class="nm muted">Svc 10% — split evenly</span><span class="pr muted">$5.25</span></div>
+          </div>
+          <div class="card">
+            <div class="row2" style="margin-bottom:2px"><span class="h">Everyone's share</span><span class="badge b-teal">AUTO from items</span></div>
+            <div class="srow"><span class="avatar" style="background:#0d9488">A</span><span class="name">You (payer)</span><span class="val">$13.25</span></div>
+            <div class="srow"><span class="avatar" style="background:#6366f1">B</span><span class="name">Bao</span><span class="val">$12.41</span></div>
+            <div class="srow"><span class="avatar" style="background:#f59e0b">C</span><span class="name">Chi</span><span class="val">$18.55</span></div>
+            <div class="srow"><span class="avatar" style="background:#ec4899">D</span><span class="name">Dung</span><span class="val">$13.54</span></div>
+            <div class="muted small" style="margin-top:6px">Service fee distributed by item share · remainder rules applied server-side. Not right? Tap a person → falls back to EXACT editor.</div>
+          </div>
+          <button class="btn">Confirm — you get back $44.50</button>
+        </div>
+      </div></div>
+      <div class="frame-label">
+        <h3>B2 · Review = one glance, one tap to save</h3>
+        <p>OCR output is <b style="color:#fff">editable in place</b>: tap person bubbles to assign items (splits update live). Both expectations are met on this single screen — the full per-person share list plus the “you get back” outcome on the CTA. Any change hits <code>preview-split</code> with SHARES/EXACT detail.</p>
+      </div>
+    </div>
+
+    <!-- B3 -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="notch"><i></i></div>
+        <div class="appbar"><div class="row">
+          <h2>Roommates 4</h2><span class="badge b-teal">SAVED · v9</span>
+        </div></div>
+        <div class="content">
+          <div class="card" style="text-align:center;padding:14px">
+            <div style="font-size:26px">✅</div>
+            <div class="h" style="margin-top:4px">“Quán Ăn Hè — dinner” · $57.75</div>
+            <div class="muted small" style="margin-top:2px">Receipt photo attached · EXIF stripped</div>
+          </div>
+          <div class="card">
+            <div class="owehero">
+              <div class="big">+ $44.50</div>
+              <div class="lbl">You are owed · settles your old taxi debt too</div>
+            </div>
+            <div class="netrow"><span class="avatar" style="background:#6366f1">B</span><span class="name">Bao</span><span class="val neg">owes you $12.41</span></div>
+            <div class="netrow"><span class="avatar" style="background:#f59e0b">C</span><span class="name">Chi</span><span class="val neg">owes you $18.55</span></div>
+            <div class="netrow"><span class="avatar" style="background:#ec4899">D</span><span class="name">Dung</span><span class="val neg">owes you $13.54</span></div>
+          </div>
+          <div class="card" style="background:#f0fdfa;border-color:#99f6e4">
+            <div class="row2"><span class="h" style="color:#0f766e">Optimized: 3 debts → 2 transfers (saved 1) · v9</span><span class="muted small">Why?</span></div>
+            <div class="muted small" style="margin-top:4px">Chi → You $18.55 · Bao+Dung → You $25.95 <b>(netted against prior OPEN ledger)</b></div>
+          </div>
+          <button class="btn">Request all — 3 payments</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost">View receipt</button>
+            <button class="btn btn-dark">Done</button>
+          </div>
+        </div>
+      </div></div>
+      <div class="frame-label">
+        <h3>B3 · Saved — owe list merged with prior balance</h3>
+        <p>The owe summary reflects <b style="color:#fff">netted</b> positions across the whole OPEN ledger (FR-7), not just this expense, and “Request all” deep-links into the optimized transfer list with Pay buttons.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== COMPARISON ===================== -->
+  <h2 class="sec">Head-to-head vs. current form flow</h2>
+  <table class="cmp">
+    <tr><th>&nbsp;</th><th>Current (<code>Forms.jsx</code> modal)</th><th>Design A — Instant Keypad</th><th>Design B — Scan &amp; Confirm</th></tr>
+    <tr><td><b>Taps to save an equal split</b></td><td>~8–12 (amount, title, payer, split type, member multi-select…)</td><td><b>2</b> (open FAB + Save) — everything else is smart defaults</td><td><b>2</b> (shutter + Confirm)</td></tr>
+    <tr><td><b>See each person's share</b></td><td>After choosing type + members; easy to miss</td><td><b>Live on the same screen, every keystroke</b></td><td>Live on review screen + inside item assign</td></tr>
+    <tr><td><b>See who is owed / owes after save</b></td><td>Separate settlement view</td><td><b>On the success screen itself</b> (+ per-person list)</td><td><b>On the success screen itself</b> (+ netted with old balance)</td></tr>
+    <tr><td><b>Receipt photo</b></td><td>Separate upload step</td><td>Optional 📎 in appbar; photo IS the entry (OCR)</td><td>Primary input; two-phase attach per FR-5</td></tr>
+    <tr><td><b>Non-equal splits</b></td><td>Pick EXACT/PERCENT/SHARES tab</td><td>Long-press a chip or “+ Add” → advanced sheet</td><td>Tap person bubbles per line item (SHARES auto)</td></tr>
+    <tr><td><b>Remainder +1¢ rule (FR-6)</b></td><td>Not surfaced</td><td>Inline badge next to affected people</td><td>Inline in share list + note</td></tr>
+  </table>
+
+  <div class="note">
+    <b>Recommendation:</b> ship <b>Design A</b> as the default add-expense flow on both web and mobile (it's the least-click path for the most common case — an amount you already know), and keep <b>Design B</b> as the camera entry point that lands <i>in</i> Design A's review layout. Both share the same success screen (A3/B3) so “who owes whom” is always the last thing you see.<br><br>
+    <b>API mapping (no backend changes needed):</b> keystroke previews → <span class="kbd">POST /expenses/preview-split</span> (debounced ~250ms, includes <span class="kbd">unsettled_preview[]</span> for the FR-8 warning) · save → <span class="kbd">POST /groups/:id/expenses</span> with <span class="kbd">Idempotency-Key</span> · owe summary → <span class="kbd">GET /groups/:id/me</span> + <span class="kbd">GET /groups/:id/settlement</span> · OCR → client-side or pluggable OCR service, always human-confirm before commit.<br><br>
+    <b>A11y:</b> keypad keys are real buttons with <span class="kbd">aria-label</span> (“digit three”); share list is a live region polite-updating “Chi's share, $3.08”; settlement bar uses <span class="kbd">aria-expanded</span> per FR-10.
+  </div>
+
+</div>
+
+<script>
+(function(){
+  var cents = 0, excluded = {};
+  var people = [
+    {id:'A', name:'You',   color:'#0d9488', label:'You (payer)'},
+    {id:'B', name:'Bao',   color:'#6366f1'},
+    {id:'C', name:'Chi',   color:'#f59e0b'},
+    {id:'D', name:'Dung',  color:'#ec4899'}
+  ];
+  var amtEl = document.getElementById('aAmt');
+  var subEl = document.getElementById('aSub');
+  var splitsEl = document.getElementById('aSplits');
+  var badgeEl = document.getElementById('aBadge');
+  var saveBtn = document.getElementById('aSave');
+
+  function active(){ return people.filter(function(p){ return !excluded[p.id]; }); }
+
+  // FR-6 EQUAL: floor(total/n), remainder 1c to first r users sorted by id asc
+  function equalShares(total, n){
+    var base = Math.floor(total / n), rem = total - base * n, out = [];
+    for (var i = 0; i < n; i++) out.push(base + (i < rem ? 1 : 0));
+    return out;
+  }
+
+  function render(){
+    var n = active().length;
+    amtEl.textContent = (cents / 100).toFixed(2);
+    badgeEl.textContent = n ? ('EQUAL ÷ ' + n) : 'NO ONE SELECTED';
+    if (cents === 0) {
+      subEl.textContent = 'Type the total — split previews below as you go';
+      splitsEl.innerHTML = people.map(function(p){
+        var off = excluded[p.id];
+        return '<div class="srow" style="' + (off ? 'opacity:.4' : '') + '">'
+          + '<span class="avatar" style="background:' + p.color + '">' + p.id + '</span>'
+          + '<span class="name">' + p.name + (off ? ' (excluded)' : '') + '</span>'
+          + '<span class="val muted">$0.00</span></div>';
+      }).join('');
+      saveBtn.disabled = true; saveBtn.style.opacity = .45;
+      saveBtn.textContent = 'Add expense — enter amount';
+      return;
+    }
+    var shares = n ? equalShares(cents, n) : [];
+    var k = 0;
+    splitsEl.innerHTML = people.map(function(p){
+      var off = excluded[p.id];
+      var val = (!off && k < n) ? shares[k++] : null;
+      var penny = (val !== null && val > shares.reduce(function(a,b){return Math.min(a,b);}, shares[0])) ? '<span class="penny">+1¢</span>' : '';
+      return '<div class="srow" style="' + (off ? 'opacity:.4' : '') + '">'
+        + '<span class="avatar" style="background:' + p.color + '">' + p.id + '</span>'
+        + '<span class="name">' + p.name + (p.id === 'A' && !off ? ' (payer)' : '') + (off ? ' (excluded)' : '') + '</span>'
+        + penny
+        + '<span class="val">' + (off ? '—' : '$' + (val/100).toFixed(2)) + '</span></div>';
+    }).join('');
+    subEl.textContent = n + ' people × $' + ((cents/n)/100).toFixed(2) + ' avg · tap a chip to exclude';
+    saveBtn.disabled = false; saveBtn.style.opacity = 1;
+    var getBack = cents - (n ? shares[0] : 0); // payer paid all, keeps own share
+    saveBtn.textContent = 'Add expense — you get back $' + (getBack/100).toFixed(2);
+  }
+
+  document.getElementById('aPad').addEventListener('click', function(e){
+    var k = e.target.getAttribute('data-k'); if (!k) return;
+    if (k === 'C') cents = 0;
+    else if (k === '⌫') cents = Math.floor(cents / 10);
+    else { var next = cents * 10 + Number(k); if (next <= 100000000) cents = next; }
+    render();
+  });
+
+  document.getElementById('aChips').addEventListener('click', function(e){
+    var chip = e.target.closest('.chip[data-uid]'); if (!chip) return;
+    var p = people[chip.getAttribute('data-uid')];
+    if (active().length === 1 && !excluded[p.id]) return; // keep >= 1 participant
+    excluded[p.id] = !excluded[p.id];
+    chip.classList.toggle('on', !excluded[p.id]);
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
