@@ -13,7 +13,10 @@ public sealed record GroupNets(
     Dictionary<Guid, string> Names,
     int RawDebts,
     string InputsHash,
-    string Currency);
+    string Currency,
+    // Raw pairwise debts: (debtor -> creditor) => signed cents, positive = debtor owes.
+    // Derived from the same expense/split/payment pass as Nets; no extra queries.
+    Dictionary<(Guid Debtor, Guid Creditor), long>? PairDebts = null);
 
 /// <summary>
 /// Net balances + settlement persistence per spec §2/§5.
@@ -73,6 +76,14 @@ public sealed class LedgerService(AppDbContext db)
 
         var rawDebts = 0;
         var hashParts = new List<string>();
+        var pairDebts = new Dictionary<(Guid, Guid), long>();
+        void PairAdd(Guid debtor, Guid creditor, long v)
+        {
+            if (v == 0 || debtor == creditor) return;
+            var key = (debtor, creditor);
+            pairDebts.TryGetValue(key, out var c);
+            pairDebts[key] = c + v;
+        }
         foreach (var e in expenses.OrderBy(e => e.Id))
         {
             hashParts.Add($"expense:{e.Id:N}:{e.Version}:{e.AmountCents}");
@@ -82,7 +93,11 @@ public sealed class LedgerService(AppDbContext db)
             {
                 if (!nets.ContainsKey(s.UserId)) nets[s.UserId] = 0;
                 nets[s.UserId] -= s.ShareCents;
-                if (s.ShareCents > 0 && s.UserId != e.PayerId) rawDebts++;
+                if (s.ShareCents > 0 && s.UserId != e.PayerId)
+                {
+                    rawDebts++;
+                    PairAdd(s.UserId, e.PayerId, s.ShareCents); // split member owes the payer
+                }
             }
         }
         foreach (var p in payments.OrderBy(p => p.Id))
@@ -92,12 +107,13 @@ public sealed class LedgerService(AppDbContext db)
             if (!nets.ContainsKey(p.ToUserId)) nets[p.ToUserId] = 0;
             nets[p.FromUserId] += p.AmountCents; // debtor owes less
             nets[p.ToUserId] -= p.AmountCents; // creditor is owed less
+            PairAdd(p.FromUserId, p.ToUserId, -p.AmountCents); // pair debt shrinks
         }
 
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', hashParts))));
         foreach (var id in nets.Keys)
             if (!users.ContainsKey(id)) users[id] = "Unknown";
-        return new GroupNets(nets, users, rawDebts, hash, group.Currency);
+        return new GroupNets(nets, users, rawDebts, hash, group.Currency, pairDebts);
     }
 
     public async Task<(SettlementPlan Plan, SettlementResult Result)> RecomputeAsync(Guid groupId)
@@ -189,7 +205,9 @@ public sealed class LedgerService(AppDbContext db)
     public sealed record GroupRow(Guid GroupId, string Name, string Currency, long NetCents,
         bool Delinquent, DateTime? OldestUnsettledAt, DateTime CreatedAt,
         string? MyRole, int MemberCount, long SpentCents, bool NeedsSettlement = false,
-        string Status = "opening");
+        string Status = "opening",
+        // Raw payer-based debts for the requesting user in this group (task: owe/owed breakdown).
+        List<OweTo> Owes = null!, List<OwedFrom> OwedToMe = null!);
     public sealed record CurrencyTotals(long OweCents, long OwedCents);
     public sealed record AllView(List<GroupRow> Groups, Dictionary<string, CurrencyTotals> Totals);
     public sealed record MemberSummary(Guid UserId, string DisplayName,
@@ -331,6 +349,39 @@ public sealed class LedgerService(AppDbContext db)
     private static string NameOf(Dictionary<Guid, string> names, Guid id)
         => names.TryGetValue(id, out var n) ? n : "Unknown";
 
+    /// <summary>
+    /// Raw payer-based debts touching <paramref name="userId"/>, netted per counterparty:
+    /// positive = they owe me, negative = I owe them (a payment between the two, or a
+    /// reverse-direction expense, offsets the pair). Sign decides the panel, so a person
+    /// appears in at most one list per group. Lists are empty, never null, so the
+    /// additive payload stays contract-safe.
+    /// </summary>
+    private static (List<OweTo> Owes, List<OwedFrom> OwedToMe) RawDebtsFor(
+        GroupNets snapshot, Guid userId)
+    {
+        var net = new Dictionary<Guid, long>();
+        void Add(Guid counterparty, long signedForMe)
+        {
+            if (signedForMe == 0) return;
+            net.TryGetValue(counterparty, out var c);
+            net[counterparty] = c + signedForMe;
+        }
+        foreach (var ((debtor, creditor), amount) in snapshot.PairDebts ?? EmptyPairs)
+        {
+            if (debtor == userId) Add(creditor, -amount);          // I am the debtor
+            else if (creditor == userId) Add(debtor, amount);      // I am the creditor
+        }
+        var owes = net.Where(kv => kv.Value < 0)
+            .Select(kv => new OweTo(kv.Key, NameOf(snapshot.Names, kv.Key), -kv.Value))
+            .OrderByDescending(o => o.AmountCents).ToList();
+        var owed = net.Where(kv => kv.Value > 0)
+            .Select(kv => new OwedFrom(kv.Key, NameOf(snapshot.Names, kv.Key), kv.Value))
+            .OrderByDescending(o => o.AmountCents).ToList();
+        return (owes, owed);
+    }
+
+    private static readonly Dictionary<(Guid, Guid), long> EmptyPairs = new();
+
     /// <summary>Per-group personal view: net + owes/owed-to from current transfers (task 7.2).</summary>
     public async Task<MeView?> BuildMeAsync(Guid groupId, Guid userId)
     {
@@ -388,9 +439,11 @@ public sealed class LedgerService(AppDbContext db)
             myRoles.TryGetValue(g.Id, out var myRole);
             memberCounts.TryGetValue(g.Id, out var memberCount);
             spentByGroup.TryGetValue(g.Id, out var spentCents);
+            var (owes, owedToMe) = RawDebtsFor(snapshot, userId);
             rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent,
                 needsSettlement ? oldest : null, g.CreatedAt,
-                myRole, memberCount, spentCents, needsSettlement, g.Status));
+                myRole, memberCount, spentCents, needsSettlement, g.Status,
+                owes, owedToMe));
             totals.TryGetValue(g.Currency, out var t);
             totals[g.Currency] = net < 0
                 ? new CurrencyTotals(t?.OweCents - net ?? -net, t?.OwedCents ?? 0)

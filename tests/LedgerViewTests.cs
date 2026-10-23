@@ -150,4 +150,75 @@ public sealed class LedgerViewTests
         Assert.Equal(1500L, all.Totals["USD"].OweCents);
         Assert.Equal(0L, all.Totals["USD"].OwedCents);
     }
+
+    [Fact]
+    public async Task All_RawDebtBreakdown_PayerBased_AndPaymentAdjusted()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db);
+        await exp.CreateAsync(a.Id, g.Id, "D", null, 30m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        // Raw debt: B owes A 1500 (B's share of A's expense).
+        var owesB = (await ledger.BuildAllAsync(b.Id)).Groups.Single().Owes;
+        var row = Assert.Single(owesB);
+        Assert.Equal(a.Id, row.ToUserId);
+        Assert.Equal(a.DisplayName, row.ToName);
+        Assert.Equal(1500L, row.AmountCents);
+        // A is owed 1500 by B.
+        var owedA = (await ledger.BuildAllAsync(a.Id)).Groups.Single().OwedToMe;
+        var rowA = Assert.Single(owedA);
+        Assert.Equal(b.Id, rowA.FromUserId);
+        Assert.Equal(1500L, rowA.AmountCents);
+
+        // B pays A 500 -> the raw pair debt shrinks to 1000 (payment-adjusted).
+        db.Payments.Add(new Payment
+        { GroupId = g.Id, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 500, CreatedBy = b.Id });
+        await db.SaveChangesAsync();
+
+        var afterB = (await ledger.BuildAllAsync(b.Id)).Groups.Single().Owes;
+        Assert.Equal(1000L, Assert.Single(afterB).AmountCents);
+        var afterA = (await ledger.BuildAllAsync(a.Id)).Groups.Single().OwedToMe;
+        Assert.Equal(1000L, Assert.Single(afterA).AmountCents);
+    }
+
+    [Fact]
+    public async Task All_RawDebtBreakdown_NetsBothDirectionsPerCounterparty()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db);
+        // A pays 30m split A/B -> B owes A 1500.
+        await exp.CreateAsync(a.Id, g.Id, "D", null, 30m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        // B pays 10m split A/B in the same group -> A owes B 500.
+        await exp.CreateAsync(b.Id, g.Id, "E", null, 10m, b.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+
+        // Per-pair netting: B owes A 1500 - 500 = 1000, one row, no mirror row.
+        var forB = (await ledger.BuildAllAsync(b.Id)).Groups.Single();
+        Assert.Equal(1000L, Assert.Single(forB.Owes).AmountCents);
+        Assert.Empty(forB.OwedToMe);
+        var forA = (await ledger.BuildAllAsync(a.Id)).Groups.Single();
+        Assert.Equal(1000L, Assert.Single(forA.OwedToMe).AmountCents);
+        Assert.Empty(forA.Owes);
+    }
+
+    [Fact]
+    public async Task All_RawDebtBreakdown_EmptyListsWhenNoDebts()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db);
+        await exp.CreateAsync(a.Id, g.Id, "D", null, 30m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        db.Payments.Add(new Payment
+        { GroupId = g.Id, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 1500, CreatedBy = b.Id });
+        await db.SaveChangesAsync();
+
+        var all = await ledger.BuildAllAsync(b.Id);
+        var row = all.Groups.Single();
+        Assert.NotNull(row.Owes);      // never null: additive, contract-safe
+        Assert.NotNull(row.OwedToMe);
+        Assert.Empty(row.Owes);
+        Assert.Empty(row.OwedToMe);
+        Assert.Equal(0L, all.Totals["USD"].OweCents); // totals untouched by the breakdown
+    }
 }
