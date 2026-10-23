@@ -514,6 +514,7 @@ export function ReportPanel({
   embedded = false,
   onPay = null,
   categoryManager = null,
+  afterMetrics = null,
 }) {
   const { user } = useAuth();
   const [detail, setDetail] = useState(detailProp);
@@ -637,6 +638,8 @@ export function ReportPanel({
             </div>
           )}
         </div>
+
+        {afterMetrics}
 
         {(plan?.transfers || []).length > 0 && (
           <section className="report-card">

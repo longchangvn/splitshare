@@ -217,8 +217,120 @@ public sealed class LedgerViewTests
         var row = all.Groups.Single();
         Assert.NotNull(row.Owes);      // never null: additive, contract-safe
         Assert.NotNull(row.OwedToMe);
+        Assert.NotNull(row.MyTransfers); // settled -> no transfers, but never null
         Assert.Empty(row.Owes);
         Assert.Empty(row.OwedToMe);
+        Assert.Empty(row.MyTransfers);
         Assert.Equal(0L, all.Totals["USD"].OweCents); // totals untouched by the breakdown
+    }
+
+    [Fact]
+    public async Task All_Balance_NetsPerCurrency_NeverAcrossAndPrimaryIsLargest()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db, "USD");
+        // USD: A pays 30 split A/B -> B is owed-less by 1500, A +1500.
+        await exp.CreateAsync(a.Id, g.Id, "D", null, 30m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        // EUR: B pays 20 split A/B -> B +1000, A -1000.
+        var g2 = new Group { Name = "EU", Currency = "EUR", CreatedBy = b.Id };
+        db.Groups.Add(g2);
+        db.GroupMembers.AddRange(
+            new GroupMember { GroupId = g2.Id, UserId = a.Id },
+            new GroupMember { GroupId = g2.Id, UserId = b.Id, Role = "owner" });
+        await db.SaveChangesAsync();
+        await exp.CreateAsync(b.Id, g2.Id, "E", null, 20m, b.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+
+        // For B: USD -1500, EUR +1000 -> netted per currency, never summed.
+        var all = await ledger.BuildAllAsync(b.Id);
+        var balance = all.Balance;
+        Assert.Equal(2, balance.CurrencyCount);
+        Assert.Equal(2, balance.GroupCount);
+        Assert.Equal("USD", balance.PrimaryCurrency);   // largest |net| wins
+        Assert.Equal(-1500L, balance.PrimaryNetCents);
+        Assert.Equal("owe", balance.Direction);
+        var usd = balance.ByCurrency.Single(r => r.Currency == "USD");
+        var eur = balance.ByCurrency.Single(r => r.Currency == "EUR");
+        Assert.Equal(-1500L, usd.NetCents);
+        Assert.Equal(1000L, eur.NetCents); // no cross-currency summation
+        Assert.Equal(1, usd.GroupCount);
+        Assert.Equal(1, eur.GroupCount);
+        // Largest |net| first: USD before EUR.
+        Assert.Equal("USD", balance.ByCurrency[0].Currency);
+
+        // For A: USD +1500, EUR -1000 -> primary USD, direction owed.
+        var forA = (await ledger.BuildAllAsync(a.Id)).Balance;
+        Assert.Equal("USD", forA.PrimaryCurrency);
+        Assert.Equal(1500L, forA.PrimaryNetCents);
+        Assert.Equal("owed", forA.Direction);
+    }
+
+    [Fact]
+    public async Task All_Balance_SettledWhenNetsAreZero()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, g) = await SeedAsync(auth, db, "USD");
+        await exp.CreateAsync(a.Id, g.Id, "D", null, 30m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        db.Payments.Add(new Payment
+        { GroupId = g.Id, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 1500, CreatedBy = b.Id });
+        await db.SaveChangesAsync();
+
+        var all = await ledger.BuildAllAsync(b.Id);
+        Assert.Equal(0L, all.Balance.PrimaryNetCents);
+        Assert.Equal("settled", all.Balance.Direction);
+        Assert.Equal("USD", all.Balance.PrimaryCurrency);
+        var usd = all.Balance.ByCurrency.Single();
+        Assert.Equal("USD", usd.Currency);
+        Assert.Equal(0L, usd.NetCents);
+        Assert.Equal(1, usd.GroupCount);
+    }
+
+    [Fact]
+    public async Task All_MyTransfers_AreTheOptimizerPlan_OnlyMine()
+    {
+        var (db, auth, exp, ledger) = Setup();
+        var (a, b, _) = await SeedAsync(auth, db, "USD");
+        var c = (await auth.RegisterAsync("ldc" + Guid.NewGuid().ToString("N")[..6], "c@x.io", "C",
+            "pass1234", null)).User!;
+        var g = new Group { Name = "TRI", Currency = "USD", CreatedBy = a.Id };
+        db.Groups.Add(g);
+        db.GroupMembers.AddRange(
+            new GroupMember { GroupId = g.Id, UserId = a.Id, Role = "owner" },
+            new GroupMember { GroupId = g.Id, UserId = b.Id },
+            new GroupMember { GroupId = g.Id, UserId = c.Id });
+        await db.SaveChangesAsync();
+
+        // A pays 30 split A/B -> B owes A 1500. B pays 30 split B/C -> C owes B 1500.
+        // Nets: A +1500, B 0, C -1500 -> optimizer collapses 2 raw debts into
+        // ONE transfer C -> A 1500 (B nets to zero and drops out of transfers).
+        await exp.CreateAsync(a.Id, g.Id, "D", null, 30m, a.Id,
+            SplitType.Equal, [a.Id, b.Id], null, null, null);
+        await exp.CreateAsync(b.Id, g.Id, "E", null, 30m, b.Id,
+            SplitType.Equal, [b.Id, c.Id], null, null, null);
+
+        // A and B are also in the seeded (expense-free) group; scope to TRI.
+        var forA = (await ledger.BuildAllAsync(a.Id)).Groups.Single(x => x.Name == "TRI");
+        var xferA = Assert.Single(forA.MyTransfers);
+        Assert.Equal(c.Id, xferA.FromUserId);
+        Assert.Equal(c.DisplayName, xferA.FromName);
+        Assert.Equal(a.Id, xferA.ToUserId);
+        Assert.Equal(a.DisplayName, xferA.ToName);
+        Assert.Equal(1500L, xferA.AmountCents);
+        Assert.False(xferA.FromMe); // A receives, so this is not A's own payment
+
+        var forC = (await ledger.BuildAllAsync(c.Id)).Groups.Single(x => x.Name == "TRI");
+        var xferC = Assert.Single(forC.MyTransfers);
+        Assert.True(xferC.FromMe);
+        Assert.Equal(1500L, xferC.AmountCents);
+
+        // B nets to zero -> no optimized transfer, yet the raw pairwise debts
+        // still name B (raw view and optimizer view stay distinct).
+        var allB = await ledger.BuildAllAsync(b.Id);
+        var forB = allB.Groups.Single(x => x.Name == "TRI");
+        Assert.Empty(forB.MyTransfers);
+        Assert.NotEmpty(forB.Owes);
+        Assert.Equal(0L, allB.Balance.PrimaryNetCents); // B's total balance is settled
     }
 }

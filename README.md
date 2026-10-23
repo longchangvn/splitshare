@@ -63,12 +63,42 @@ dotnet run --project api --urls http://localhost:8081
 VITE_API_URL=http://localhost:8081 npm run --prefix web dev
 ```
 
+## Deploy (Azure, GitHub Actions)
+
+Manual `workflow_dispatch` workflows: **CD API** (`cd-api.yml`) then **CD Web**
+(`cd-web.yml`). Both log in to Azure with OIDC. `cd-api.yml` binds a GitHub
+environment (`environment:`) to read environment- and repository-level
+vars/secrets, so each environment needs a matching federated identity
+credential on the Azure app registration. Set it up once per environment:
+
+```sh
+az login
+scripts/setup-github-oidc.sh <SPLITSHARE_AZURE_CLIENT_ID> splitshare-test
+```
+
+See `docs/github-oidc-setup.md` for details and the portal alternative.
+
 ## Test
 
 ```sh
 dotnet test tests/SplitShare.Tests.csproj
 npm run --prefix web build
+node --test web/test/*.mjs
 ```
+
+## Web: quick "Add expense"
+
+The dashboard views (`/`, `/groups`, `/activity`) show a floating **Add expense**
+button. Its picker selects people (multi-select + scrollable contacts list) and/or
+one group, then **Next**:
+
+- group only → opens the group with the New expense form;
+- people only → creates a group with a default name ("You, Ann, Bob", USD) and those
+  people, then opens the New expense form;
+- people + group → opens the New group wizard pre-filled with the people and the
+  group's members; **Next** creates it and opens the New expense form.
+
+Spec: `specs/003-quick-add-expense/`. Frontend-only; uses existing endpoints.
 
 ## API contract
 

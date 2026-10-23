@@ -77,7 +77,7 @@ export default function ExpenseDetailScreen({ route, navigation }) {
       load();
     } catch (err) {
       if (err.code === 'STALE_VERSION') Alert.alert('Stale version', '409 — reload and retry.');
-      else if (err.code === 'EXPENSE_LOCKED') Alert.alert('Locked', '403 — settled snapshot. Create a correction instead.');
+      else if (err.code === 'EXPENSE_LOCKED') Alert.alert('Archived', '403 — settled snapshot. Create a correction instead.');
       else if (err.code === 'INVOLVES_REMOVED_MEMBER') Alert.alert('Removed member', 'Owner must re-add the member first.');
       else setE(err);
     } finally { setBusy(false); }
@@ -125,12 +125,12 @@ export default function ExpenseDetailScreen({ route, navigation }) {
       <View style={s.card}>
         <View style={s.row}>
           <Text style={s.title}>{exp.title}</Text>
-          <Text style={locked ? s.bLock : s.bOpen}>{exp.status || 'OPEN'}</Text>
+          <Text style={locked ? s.bLock : s.bOpen}>{locked ? 'ARCHIVED' : 'ACTIVE'}</Text>
         </View>
         {!!exp.description && <Text style={s.muted}>{exp.description}</Text>}
         <Text style={s.h}>Paid by {displayNameOf(members, exp.payer_id)} · {fmt(exp.amount_cents || 0, currency)}</Text>
         {!editing ? (
-          <Text style={s.muted}>Tap Edit to change title/amount (creator or owner, OPEN only).</Text>
+          <Text style={s.muted}>Tap Edit to change title/amount (creator or owner, ACTIVE only).</Text>
         ) : (
           <>
             <TextInput style={s.inp} value={title} onChangeText={(v) => { setTitle(v); liveEditPreview(v, amount); }} placeholder="Title (1-100)" />

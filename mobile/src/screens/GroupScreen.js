@@ -45,7 +45,8 @@ export default function GroupDetailScreen({ route, navigation }) {
   const [tab, setTab] = useState('Ledger');
   const [q, setQ] = useState('');
   const [qDebounced, setQDebounced] = useState('');
-  const [fStatus, setFStatus] = useState('');
+  // Archive view: default scope is active (OPEN); LOCKED = Archived.
+  const [fStatus, setFStatus] = useState('OPEN');
   const [showF, setShowF] = useState(false);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -148,16 +149,16 @@ export default function GroupDetailScreen({ route, navigation }) {
           {tab === 'Ledger' && (
             <>
               <View style={s.frow}>
-                <TextInput style={[s.inp, { flex: 1 }]} value={q} onChangeText={setQ} placeholder="Filter — title · payer · $ · date · status" />
+                <TextInput style={[s.inp, { flex: 1 }]} value={q} onChangeText={setQ} placeholder="Filter — title · payer · $ · date" />
                 <Pressable style={s.fbtn} onPress={() => setShowF(!showF)}>
-                  <Text>⧩{(fStatus ? '•' : '')}</Text>
+                  <Text>⧩{(fStatus && fStatus !== 'OPEN' ? '•' : '')}</Text>
                 </Pressable>
               </View>
               {showF && (
                 <View style={s.fcard}>
-                  {['', 'OPEN', 'LOCKED'].map((st) => (
-                    <Pressable key={st || 'all'} style={[s.chip, fStatus === st && s.chipOn]} onPress={() => setFStatus(st)}>
-                      <Text style={s.chipT}>{st || 'All'}</Text>
+                  {[['OPEN', 'Active'], ['LOCKED', 'Archived']].map(([st, label]) => (
+                    <Pressable key={st} style={[s.chip, fStatus === st && s.chipOn]} onPress={() => setFStatus(st)}>
+                      <Text style={s.chipT}>{label}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -180,14 +181,36 @@ export default function GroupDetailScreen({ route, navigation }) {
                       </View>
                       <View style={s.row}>
                         <Text style={s.muted}>
-                          {it.status === 'LOCKED' ? 'Settled · snapshot' : `my share ${fmt(it.my_share_cents || it.share_cents || 0, currency)}`}
+                          {it.status === 'LOCKED' ? 'Archived · snapshot' : `my share ${fmt(it.my_share_cents || it.share_cents || 0, currency)}`}
                           {it.has_image ? ' · 🧾' : ''}
                         </Text>
-                        <Text style={it.status === 'LOCKED' ? s.bLock : s.bOpen}>{it.status || 'OPEN'}</Text>
+                        <Text style={it.status === 'LOCKED' ? s.bLock : s.bOpen}>{it.status === 'LOCKED' ? 'ARCHIVED' : 'ACTIVE'}</Text>
                       </View>
                     </Pressable>
                   );
                 })}
+                {!loading && items.length === 0 && (
+                  <View style={s.card}>
+                    {fStatus === 'LOCKED' ? (
+                      <>
+                        <Text style={s.h}>The archive is empty — settled entries will appear here.</Text>
+                        <Pressable style={[s.quiet, { marginTop: 8 }]} onPress={() => setFStatus('OPEN')}>
+                          <Text style={s.quietT}>View active</Text>
+                        </Pressable>
+                      </>
+                    ) : plan && (plan.transfers || []).length === 0 ? (
+                      <>
+                        <Text style={s.h}>All settled 🎉</Text>
+                        <Text style={s.muted}>Everyone is even — active entries are cleared out.</Text>
+                        <Pressable style={[s.quiet, { marginTop: 8 }]} onPress={() => setFStatus('LOCKED')}>
+                          <Text style={s.quietT}>View archive</Text>
+                        </Pressable>
+                      </>
+                    ) : (
+                      <Text style={s.muted}>No active entries — add an expense or payment to get started.</Text>
+                    )}
+                  </View>
+                )}
               </ScrollView>
             </>
           )}
