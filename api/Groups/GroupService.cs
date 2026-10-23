@@ -378,30 +378,40 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
             ["wedding"] = ("event", 10000m, 200m, []),
         };
 
-    /// <summary>One-click configured group: mode + budget + flat fee + inactive recurring drafts.</summary>
+    /// <summary>One-click configured group: mode + budget + flat fee + inactive recurring drafts.
+    /// No template validation: an unknown (or empty) template simply creates a plain
+    /// group — only known template keys contribute presets. Explicit budget/flat fee
+    /// always apply.</summary>
     public async Task<GroupOp> FromTemplateAsync(Guid creatorId, string name, string? currency,
         string template, decimal? budget, decimal? flatFee)
     {
-        if (!Templates.TryGetValue(template.Trim(), out var t))
-            return new(false, "VALIDATION", $"template must be {string.Join('|', Templates.Keys)}.");
         var created = await CreateAsync(creatorId, name, currency, [], []);
         if (!created.Ok) return created;
         var g = ((GroupCreated)created.Data!).Group;
-        g.Mode = t.Mode;
-        var effBudget = budget ?? t.Budget;
-        if (effBudget is { } eb) g.BudgetCents = (long)(eb * 100m);
-        var effFee = flatFee ?? t.FlatFee;
-        if (effFee is { } ef) g.FlatFeeCents = (long)(ef * 100m);
-        foreach (var spec in t.Recurring)
+        var key = template?.Trim();
+        if (!string.IsNullOrWhiteSpace(key) && Templates.TryGetValue(key, out var t))
         {
-            var parts = spec.Split('|');
-            db.RecurringRules.Add(new Models.RecurringRule
+            g.Mode = t.Mode;
+            var effBudget = budget ?? t.Budget;
+            if (effBudget is { } eb) g.BudgetCents = (long)(eb * 100m);
+            var effFee = flatFee ?? t.FlatFee;
+            if (effFee is { } ef) g.FlatFeeCents = (long)(ef * 100m);
+            foreach (var spec in t.Recurring)
             {
-                GroupId = g.Id, Title = parts[0], AmountCents = (long)(decimal.Parse(parts[1]) * 100m),
-                Frequency = parts[2], PayerId = creatorId,
-                ParticipantIdsJson = System.Text.Json.JsonSerializer.Serialize(new[] { creatorId }),
-                NextRunAt = DateTime.UtcNow.AddDays(30), Active = false, CreatedBy = creatorId
-            });
+                var parts = spec.Split('|');
+                db.RecurringRules.Add(new Models.RecurringRule
+                {
+                    GroupId = g.Id, Title = parts[0], AmountCents = (long)(decimal.Parse(parts[1]) * 100m),
+                    Frequency = parts[2], PayerId = creatorId,
+                    ParticipantIdsJson = System.Text.Json.JsonSerializer.Serialize(new[] { creatorId }),
+                    NextRunAt = DateTime.UtcNow.AddDays(30), Active = false, CreatedBy = creatorId
+                });
+            }
+        }
+        else
+        {
+            if (budget is { } b) g.BudgetCents = (long)(b * 100m);
+            if (flatFee is { } f) g.FlatFeeCents = (long)(f * 100m);
         }
         await db.SaveChangesAsync();
         return new(true, null, null, new GroupCreated(g, InviteLink(BaseUrl, g.InviteToken), 0, 0));

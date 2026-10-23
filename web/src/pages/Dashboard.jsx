@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Button, CopyButton, Group, Modal, Select, Skeleton, Stack, Text,
+  Autocomplete, Button, CopyButton, Group, Modal, Skeleton, Stack, Text,
   TextInput, Textarea, Title,
 } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { buildBreakdown } from '../breakdown.js';
+import { resolveTemplateKey } from '../wizardUtils.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, ChevronRight, initialsOf, pastelFor } from '../components/Net.jsx';
@@ -24,6 +25,7 @@ export function Dashboard() {
   const [tpl, setTpl] = useState('');
   const [cq, setCq] = useState('');
   const [contacts, setContacts] = useState([]);
+  const [myContacts, setMyContacts] = useState([]); // top 20 by display name
   const [searching, setSearching] = useState(false);
   const [picked, setPicked] = useState([]);
   const [emails, setEmails] = useState('');
@@ -46,11 +48,17 @@ export function Dashboard() {
     document.querySelector('.app-stage-scroll')?.scrollTo({ top: 0 });
   }, [view]);
 
+  const loadMyContacts = () => api.get('/api/v1/contacts?limit=20')
+    .then((list) => setMyContacts([...(list || [])]
+      .sort((a, b) => String(a.display_name).localeCompare(String(b.display_name)))))
+    .catch(() => {}); // non-fatal: the box just keeps whatever it had
+
   const openWizard = () => {
     setName('');
     setTpl(''); setCq(''); setContacts([]);
     setPicked([]); setEmails(''); setCreated(null); setE(null);
     setStep(1); setOpen(true);
+    loadMyContacts(); // refresh the "Your contacts" box
   };
 
   const searchContacts = async () => {
@@ -65,11 +73,15 @@ export function Dashboard() {
     try {
       const emailList = emails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
       const memberIds = picked.map((p) => p.user_id);
+      // Free-text combobox: catalog labels resolve to their key; "None"/empty
+      // means no template (plain create). Unknown text passes through as-is.
+      const tplKey = resolveTemplateKey(templates, tpl, t('common.none'));
+      const tplLabel = tplKey ? (templates.find((x) => x.key === tplKey)?.label || tplKey) : '';
       let g;
       let link = null;
-      if (tpl) {
+      if (tplKey) {
         g = await api.post('/api/v1/groups/from-template', {
-          name, currency: DEFAULT_CURRENCY, template: tpl,
+          name, currency: DEFAULT_CURRENCY, template: tplKey,
         });
         const gid0 = g.group_id ?? g.group?.id;
         if (!gid0) { setE({ message: t('errors.noGroupId') }); return; }
@@ -98,7 +110,7 @@ export function Dashboard() {
         link,
         name: g.group?.name || name,
         currency: DEFAULT_CURRENCY,
-        template: templates.find((x) => x.key === tpl)?.label || '',
+        template: tplLabel,
         people: [...picked.map((p) => p.display_name), ...emailList],
       });
       load();
@@ -129,7 +141,7 @@ export function Dashboard() {
       step={step} setStep={setStep}
       name={name} setName={setName}
       tpl={tpl} setTpl={setTpl} create={create} cq={cq} setCq={setCq} searchContacts={searchContacts}
-      searching={searching} contacts={contacts} picked={picked} setPicked={setPicked}
+      searching={searching} contacts={contacts} myContacts={myContacts} picked={picked} setPicked={setPicked}
       emails={emails} setEmails={setEmails} creating={creating} created={created}
       templates={templates}
       onOpenGroup={() => { setOpen(false); nav(`/groups/${created?.gid}`); }}
@@ -732,13 +744,14 @@ function BreakdownPanel({ kind, rows, onClose }) {
 function GroupWizard({
   step, setStep,
   name, setName, tpl, setTpl, create, cq, setCq, searchContacts,
-  searching, contacts, picked, setPicked, emails, setEmails, creating, created, onOpenGroup,
+  searching, contacts, myContacts = [], picked, setPicked, emails, setEmails, creating, created, onOpenGroup,
   templates = [],
 }) {
   const t = useT();
   if (created) return <GroupCreated created={created} onOpenGroup={onOpenGroup} />;
   const nameOk = name.trim().length >= 3 && name.trim().length <= 50;
-  const templateOptions = templates.map((item) => ({ value: item.key, label: item.label }));
+  // Free-input combobox: suggestions are the localized "None" plus catalog labels.
+  const templateOptions = [t('common.none'), ...templates.map((item) => item.label)];
 
   const onSubmit = (ev) => {
     ev.preventDefault();
@@ -762,12 +775,11 @@ function GroupWizard({
             value={name}
             onChange={(x) => setName(x.target.value)}
           />
-          <Select
+          <Autocomplete
             label={t('wizard.template')}
             placeholder={t('common.none')}
-            clearable
-            value={tpl || null}
-            onChange={(v) => setTpl(v || '')}
+            value={tpl}
+            onChange={setTpl}
             data={templateOptions}
             comboboxProps={{ withinPortal: true }}
           />
@@ -775,6 +787,13 @@ function GroupWizard({
       )}
       {step === 2 && (
         <div className="wizard-fields">
+          <Textarea
+            label={t('wizard.inviteByEmail')}
+            placeholder={t('wizard.emailsPh')}
+            minRows={2}
+            value={emails}
+            onChange={(x) => setEmails(x.target.value)}
+          />
           <Group gap="xs" align="flex-end" wrap="nowrap" className="wizard-search-row">
             <TextInput
               label={t('wizard.searchContacts')}
@@ -789,33 +808,23 @@ function GroupWizard({
           </Group>
           {contacts.length > 0 && (
             <Stack gap={8}>
-              {contacts.map((c) => {
-                const on = picked.some((p) => p.user_id === c.user_id);
-                return (
-                  <div className="wizard-person" key={c.user_id}>
-                    <div style={{ minWidth: 0 }}>
-                      <Text size="sm" fw={600} truncate>{c.display_name}</Text>
-                      <Text size="xs" c="dimmed" truncate>@{c.username}</Text>
-                    </div>
-                    <button
-                      type="button"
-                      className={on ? 'wizard-chip is-on' : 'wizard-chip'}
-                      onClick={() => setPicked(on ? picked.filter((p) => p.user_id !== c.user_id) : [...picked, c])}
-                    >
-                      {on ? t('common.added') : t('common.add')}
-                    </button>
-                  </div>
-                );
-              })}
+              {contacts.map((c) => (
+                <WizardPersonRow key={c.user_id} c={c} picked={picked} setPicked={setPicked} />
+              ))}
             </Stack>
           )}
-          <Textarea
-            label={t('wizard.inviteByEmail')}
-            placeholder={t('wizard.emailsPh')}
-            minRows={2}
-            value={emails}
-            onChange={(x) => setEmails(x.target.value)}
-          />
+          <div className="wizard-contacts-box">
+            <div className="wizard-contacts-title">{t('wizard.yourContacts')}</div>
+            {myContacts.length === 0 ? (
+              <Text size="xs" c="dimmed">{t('wizard.noContacts')}</Text>
+            ) : (
+              <Stack gap={8}>
+                {myContacts.map((c) => (
+                  <WizardPersonRow key={c.user_id} c={c} picked={picked} setPicked={setPicked} />
+                ))}
+              </Stack>
+            )}
+          </div>
         </div>
       )}
       {step === 1 ? (
@@ -827,6 +836,27 @@ function GroupWizard({
         </Group>
       )}
     </form>
+  );
+}
+
+/** Shared pick/unpick row used by the search results and the contacts box. */
+function WizardPersonRow({ c, picked, setPicked }) {
+  const t = useT();
+  const on = picked.some((p) => p.user_id === c.user_id);
+  return (
+    <div className="wizard-person">
+      <div style={{ minWidth: 0 }}>
+        <Text size="sm" fw={600} truncate>{c.display_name}</Text>
+        <Text size="xs" c="dimmed" truncate>@{c.username}</Text>
+      </div>
+      <button
+        type="button"
+        className={on ? 'wizard-chip is-on' : 'wizard-chip'}
+        onClick={() => setPicked(on ? picked.filter((p) => p.user_id !== c.user_id) : [...picked, c])}
+      >
+        {on ? t('common.added') : t('common.add')}
+      </button>
+    </div>
   );
 }
 
