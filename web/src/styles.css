@@ -2463,7 +2463,8 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
 }
 .dash-chevron.is-open { transform: rotate(90deg); }
 
-/* Inline owe/owed breakdown panel (per person, per currency). */
+/* Inline owe/owed breakdown panel (per group, per person — never summed
+   across groups: each group renders its own section). */
 .dash-breakdown { grid-column: 1 / -1; }
 .dash-breakdown-head {
   display: flex;
@@ -2483,14 +2484,27 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
   border-radius: 8px;
 }
 .dash-breakdown-close:hover { background: rgba(100, 116, 139, 0.12); color: #334155; }
+.dash-breakdown-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid #eef4f1;
+  margin-bottom: 6px;
+}
+.dash-group-link {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #0f766e;
+  text-decoration: none;
+}
+.dash-group-link:hover { text-decoration: underline; }
 .dash-breakdown-currency {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: #64748b;
-  padding: 8px 0 4px;
-  border-bottom: 1px solid #eef4f1;
-  margin-bottom: 6px;
+  color: #94a3b8;
 }
 .dash-person-row {
   display: flex;
@@ -2527,24 +2541,6 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
   color: #14251f;
   font-variant-numeric: tabular-nums;
 }
-.dash-person-groups {
-  flex: 1 1 100%;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.dash-group-chip {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: rgba(20, 184, 166, 0.1);
-  border: 1px solid rgba(20, 184, 166, 0.28);
-  color: #0f766e;
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-}
-.dash-group-chip:hover { background: rgba(20, 184, 166, 0.18); }
 .dash-breakdown-note {
   margin-top: 10px;
   font-size: 12px;
@@ -6256,9 +6252,14 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
   background: rgba(255, 255, 255, 0.08);
   color: #e8eeeb;
 }
+[data-ss-theme="dark"] .dash-breakdown-group {
+  border-bottom-color: #2a3030;
+}
+[data-ss-theme="dark"] .dash-group-link {
+  color: #5eead4;
+}
 [data-ss-theme="dark"] .dash-breakdown-currency {
   color: #9aa6a1;
-  border-bottom-color: #2a3030;
 }
 [data-ss-theme="dark"] .dash-person-row + .dash-person-row {
   border-top-color: #2a3030;
@@ -6269,14 +6270,6 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
 [data-ss-theme="dark"] .dash-person-name,
 [data-ss-theme="dark"] .dash-person-amount {
   color: #e8eeeb;
-}
-[data-ss-theme="dark"] .dash-group-chip {
-  background: rgba(45, 212, 191, 0.14);
-  border-color: rgba(45, 212, 191, 0.32);
-  color: #5eead4;
-}
-[data-ss-theme="dark"] .dash-group-chip:hover {
-  background: rgba(45, 212, 191, 0.22);
 }
 [data-ss-theme="dark"] .dash-breakdown-note {
   color: #9aa6a1;

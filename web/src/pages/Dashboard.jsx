@@ -5,6 +5,7 @@ import {
   TextInput, Textarea, Title,
 } from '@mantine/core';
 import { api, fmt } from '../api.js';
+import { buildBreakdown } from '../breakdown.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, ChevronRight, initialsOf, pastelFor } from '../components/Net.jsx';
@@ -119,8 +120,8 @@ export function Dashboard() {
   const oweGroups = groups.filter((g) => g.net_cents < 0).length;
   const owedGroups = groups.filter((g) => g.net_cents > 0).length;
 
-  // Per-person, per-currency breakdown from the raw owes[]/owed_to_me[] rows.
-  // Amounts are netted per person per currency (never summed across currencies).
+  // Per-group, per-person breakdown from the raw owes[]/owed_to_me[] rows.
+  // Never summed across groups or currencies — each group is its own section.
   const breakdown = buildBreakdown(groups);
 
   const wizard = (
@@ -174,6 +175,15 @@ export function Dashboard() {
           <DashChevron open={openPanel === 'owe'} />
         </button>
 
+        {/* Panel renders immediately after the card that opened it. */}
+        {openPanel === 'owe' && (
+          <BreakdownPanel
+            kind="owe"
+            rows={breakdown.owe}
+            onClose={() => setOpenPanel(null)}
+          />
+        )}
+
         <button
           type="button"
           className={`dash-card dash-stat dash-stat-btn dash-owed is-clickable is-${owedCents > 0 ? 'owed' : 'settled'}`}
@@ -201,10 +211,10 @@ export function Dashboard() {
           <DashChevron open={openPanel === 'owed'} />
         </button>
 
-        {openPanel && (
+        {openPanel === 'owed' && (
           <BreakdownPanel
-            kind={openPanel}
-            rows={openPanel === 'owe' ? breakdown.owe : breakdown.owed}
+            kind="owed"
+            rows={breakdown.owed}
             onClose={() => setOpenPanel(null)}
           />
         )}
@@ -672,42 +682,14 @@ function DashChevron({ open }) {
 }
 
 /**
- * Net the raw per-group owes[]/owed_to_me[] rows per person per currency.
- * owe[currency][user] = total I owe them; owed[currency][user] = total they owe me.
- * A person lands in exactly one panel per currency (sign decides). Never summed
- * across currencies — sections are keyed by currency.
+ * Per-group, per-person owe/owed rows come from ./breakdown.js (group-section
+ * builder, executed directly by tests in web/test/dashboard-owe-breakdown.test.mjs).
+ * Each group is its own section — amounts are never summed across groups.
  */
-function buildBreakdown(groups) {
-  const owe = {};
-  const owed = {};
-  const add = (bucket, currency, userId, name, amountCents, group) => {
-    bucket[currency] = bucket[currency] || {};
-    const row = bucket[currency][userId] || { user_id: userId, name, amount_cents: 0, groups: [] };
-    row.amount_cents += amount_cents;
-    if (!row.groups.some((gr) => gr.group_id === group.group_id)) {
-      row.groups.push({ group_id: group.group_id, name: group.name });
-    }
-    bucket[currency][userId] = row;
-  };
-  for (const g of groups) {
-    for (const o of g.owes || []) add(owe, g.currency, o.to_user_id, o.to_name, o.amount_cents, g);
-    for (const o of g.owed_to_me || []) add(owed, g.currency, o.from_user_id, o.from_name, o.amount_cents, g);
-  }
-  const sort = (bucket) => Object.entries(bucket)
-    .map(([currency, people]) => ({
-      currency,
-      people: Object.values(people).sort((a, b) => b.amount_cents - a.amount_cents
-        || String(a.name).localeCompare(String(b.name))),
-    }))
-    .sort((a, b) => b.people.reduce((s, p) => s + p.amount_cents, 0)
-      - a.people.reduce((s, p) => s + p.amount_cents, 0));
-  return { owe: sort(owe), owed: sort(owed) };
-}
 
 function BreakdownPanel({ kind, rows, onClose }) {
   const t = useT();
-  const total = rows.reduce((sum, section) => sum + section.people.length, 0);
-  const isEmpty = total === 0;
+  const isEmpty = rows.length === 0;
   return (
     <section id="dash-breakdown" className="dash-card dash-breakdown" aria-live="polite">
       <div className="dash-breakdown-head">
@@ -724,8 +706,13 @@ function BreakdownPanel({ kind, rows, onClose }) {
         </Text>
       )}
       {!isEmpty && rows.map((section) => (
-        <div key={section.currency} className="dash-breakdown-section">
-          <div className="dash-breakdown-currency">{section.currency}</div>
+        <div key={section.group_id} className="dash-breakdown-section">
+          <div className="dash-breakdown-group">
+            <Link className="dash-group-link" to={`/groups/${section.group_id}`}>
+              {section.name}
+            </Link>
+            <span className="dash-breakdown-currency">{section.currency}</span>
+          </div>
           {section.people.map((p) => (
             <div key={p.user_id} className="dash-person-row">
               <span className="dash-person-avatar" style={{ background: pastelFor(p.name).from }} aria-hidden>
@@ -733,18 +720,11 @@ function BreakdownPanel({ kind, rows, onClose }) {
               </span>
               <span className="dash-person-name">{p.name}</span>
               <span className="dash-person-amount">{fmt(p.amount_cents, section.currency)}</span>
-              <span className="dash-person-groups">
-                {p.groups.map((g) => (
-                  <Link key={g.group_id} className="dash-group-chip" to={`/groups/${g.group_id}`}>
-                    {g.name}
-                  </Link>
-                ))}
-              </span>
             </div>
           ))}
         </div>
       ))}
-      {!isEmpty && <div className="dash-breakdown-note">{t('dashboard.perCurrencyNote')}</div>}
+      {!isEmpty && <div className="dash-breakdown-note">{t('dashboard.perGroupNote')}</div>}
     </section>
   );
 }
