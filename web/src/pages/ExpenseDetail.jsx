@@ -121,7 +121,13 @@ export function ExpenseDetail() {
       <Card withBorder shadow="sm" padding="md" radius="md" mt="xs">
         <Group gap="sm" mb="xs">
           <Title order={2}>{x.title}</Title>
-          <Badge color={statusColor(x.status)} variant="light">{x.status}</Badge>
+          <Badge color={statusColor(x.status)} variant="light">
+            {String(x.status || '').toUpperCase() === 'LOCKED'
+              ? t('groupDetail.statusLocked')
+              : String(x.status || '').toUpperCase() === 'OPEN'
+                ? t('groupDetail.statusOpen')
+                : x.status}
+          </Badge>
         </Group>
         {x.description && <Text mb="sm">{x.description}</Text>}
         <Text size="sm" mb="sm">{t('expense.paidBy')} <b>{displayNameOf(members, x.payer_id)}</b> · <b>{fmt(x.amount_cents, '')}</b></Text>

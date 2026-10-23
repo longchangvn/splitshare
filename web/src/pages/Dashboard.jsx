@@ -5,10 +5,12 @@ import {
   TextInput, Textarea, Title,
 } from '@mantine/core';
 import { api, fmt } from '../api.js';
-import { buildBreakdown } from '../breakdown.js';
+import { buildBalance, signPrefix, toneForNet } from '../balance.js';
 import { resolveTemplateKey } from '../wizardUtils.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
+import { QuickAddExpense } from '../components/QuickAddExpense.jsx';
+import { ADD_EXPENSE_STATE } from '../quickAdd.js';
 import { ActivityKindThumb, ChevronRight, initialsOf, pastelFor } from '../components/Net.jsx';
 import { getTemplates, subscribeCatalogs } from '../settingsStore.js';
 import { useT } from '../prefs.jsx';
@@ -32,8 +34,9 @@ export function Dashboard() {
   const [created, setCreated] = useState(null);
   const [creating, setCreating] = useState(false);
   const [step, setStep] = useState(1);
+  const [forExpense, setForExpense] = useState(false); // quick-add Flow 1: create → New expense
   const [templates, setTemplates] = useState(() => getTemplates());
-  const [openPanel, setOpenPanel] = useState(null); // 'owe' | 'owed' | null
+  const [openPanel, setOpenPanel] = useState(false); // My balance breakdown
 
   const load = () => api.get('/api/v1/me/balances').then(setData).catch(setE);
   useEffect(() => { load(); }, []);
@@ -57,8 +60,15 @@ export function Dashboard() {
     setName('');
     setTpl(''); setCq(''); setContacts([]);
     setPicked([]); setEmails(''); setCreated(null); setE(null);
-    setStep(1); setOpen(true);
+    setStep(1); setOpen(true); setForExpense(false);
     loadMyContacts(); // refresh the "Your contacts" box
+  };
+
+  // Quick-add Flow 1: reuse the wizard pre-filled with the chosen people + group members.
+  const openWizardForExpense = (members) => {
+    openWizard();
+    setPicked(members);
+    setForExpense(true);
   };
 
   const searchContacts = async () => {
@@ -105,6 +115,11 @@ export function Dashboard() {
         setE({ message: t('errors.noGroupId') });
         return;
       }
+      if (forExpense) {
+        setOpen(false);
+        nav(`/groups/${gid}`, { state: ADD_EXPENSE_STATE });
+        return;
+      }
       setCreated({
         gid,
         link,
@@ -117,24 +132,15 @@ export function Dashboard() {
     } catch (err) { setE(err); } finally { setCreating(false); }
   };
 
-  const totals = data ? Object.entries(data.totals || {}) : [];
   const groups = data?.groups || [];
   // Group settled = no open balances among members (not personal net).
   const settledCount = groups.filter((g) => !groupNeedsSettlement(g)).length;
   const openGroupCount = Math.max(0, groups.length - settledCount);
   const settledPct = groups.length ? Math.round((settledCount / groups.length) * 100) : 0;
-  const topOwe = [...totals].sort((a, b) => (b[1]?.owe_cents || 0) - (a[1]?.owe_cents || 0))[0];
-  const topOwed = [...totals].sort((a, b) => (b[1]?.owed_cents || 0) - (a[1]?.owed_cents || 0))[0];
-  const oweCents = topOwe?.[1]?.owe_cents || 0;
-  const owedCents = topOwed?.[1]?.owed_cents || 0;
-  const oweCurrency = topOwe?.[0] || DEFAULT_CURRENCY;
-  const owedCurrency = topOwed?.[0] || DEFAULT_CURRENCY;
-  const oweGroups = groups.filter((g) => g.net_cents < 0).length;
-  const owedGroups = groups.filter((g) => g.net_cents > 0).length;
 
-  // Per-group, per-person breakdown from the raw owes[]/owed_to_me[] rows.
-  // Never summed across groups or currencies — each group is its own section.
-  const breakdown = buildBreakdown(groups);
+  // Netted "My balance": server nets per currency (never across currencies);
+  // the panel lists each open group with its optimized (fewest) transfers.
+  const balance = buildBalance(groups, data?.balance);
 
   const wizard = (
     <GroupWizard
@@ -143,7 +149,7 @@ export function Dashboard() {
       tpl={tpl} setTpl={setTpl} create={create} cq={cq} setCq={setCq} searchContacts={searchContacts}
       searching={searching} contacts={contacts} myContacts={myContacts} picked={picked} setPicked={setPicked}
       emails={emails} setEmails={setEmails} creating={creating} created={created}
-      templates={templates}
+      templates={templates} forExpense={forExpense}
       onOpenGroup={() => { setOpen(false); nav(`/groups/${created?.gid}`); }}
     />
   );
@@ -162,76 +168,57 @@ export function Dashboard() {
       <div className="dash-grid">
         <button
           type="button"
-          className={`dash-card dash-stat dash-stat-btn dash-owe is-clickable is-${oweCents > 0 ? 'open' : 'settled'}`}
-          aria-expanded={openPanel === 'owe'}
+          className={`dash-card dash-stat dash-stat-btn dash-balance is-clickable is-${balance.tone}`}
+          aria-expanded={openPanel}
           aria-controls="dash-breakdown"
-          onClick={() => setOpenPanel(openPanel === 'owe' ? null : 'owe')}
+          onClick={() => setOpenPanel(!openPanel)}
         >
           <div className="dash-card-top">
             <div>
-              <div className="dash-kicker">{t('net.youOweShort')}</div>
+              <div className="dash-kicker">{t('dashboard.myBalance')}</div>
               {!data && !e && <MoneyShimmer />}
               {data && (
-                <div className="dash-value">{fmt(oweCents, oweCurrency)}</div>
+                <div className="dash-value">
+                  {signPrefix(balance.primaryNetCents)}
+                  {fmt(Math.abs(balance.primaryNetCents), balance.primaryCurrency || DEFAULT_CURRENCY)}
+                </div>
               )}
               <div className="dash-delta">
-                {!data && e ? '—' : data && (totals.length > 1
-                  ? t('dashboard.multiCurrency', { count: totals.length })
-                  : oweCents > 0
-                    ? t(oweGroups === 1 ? 'dashboard.oweInGroupsOne' : 'dashboard.oweInGroups', { count: oweGroups })
-                    : t('net.nothingOutstanding'))}
+                {!data && e ? '—' : data && (balance.direction === 'owe'
+                  ? t('dashboard.balanceOwe')
+                  : balance.direction === 'owed'
+                    ? t('dashboard.balanceOwed')
+                    : t('net.settledUp'))}
               </div>
+              {data && balance.currencyCount > 1 && (
+                <div className="dash-balance-others">
+                  {balance.byCurrency
+                    .filter((c) => c.currency !== balance.primaryCurrency)
+                    .map((c) => (
+                      <span key={c.currency} className={`dash-balance-chip is-${toneForNet(c.net_cents)}`}>
+                        {signPrefix(c.net_cents)}{fmt(Math.abs(c.net_cents), c.currency)}
+                      </span>
+                    ))}
+                </div>
+              )}
             </div>
-            <span className="dash-stat-icon" aria-hidden><StatIconOwe /></span>
+            <span className="dash-stat-icon" aria-hidden>
+              {balance.direction === 'owe' ? <StatIconOwe /> : <StatIconOwed />}
+            </span>
           </div>
-          <DashChevron open={openPanel === 'owe'} />
+          <DashChevron open={openPanel} />
         </button>
 
         {/* Panel renders immediately after the card that opened it. */}
-        {openPanel === 'owe' && (
-          <BreakdownPanel
-            kind="owe"
-            rows={breakdown.owe}
-            onClose={() => setOpenPanel(null)}
-          />
+        {openPanel && (
+          <BalancePanel groups={balance.groups} onClose={() => setOpenPanel(false)} />
         )}
 
         <button
           type="button"
-          className={`dash-card dash-stat dash-stat-btn dash-owed is-clickable is-${owedCents > 0 ? 'owed' : 'settled'}`}
-          aria-expanded={openPanel === 'owed'}
-          aria-controls="dash-breakdown"
-          onClick={() => setOpenPanel(openPanel === 'owed' ? null : 'owed')}
+          className="dash-card dash-stat dash-stat-btn dash-count is-groups is-clickable"
+          onClick={() => nav('/groups')}
         >
-          <div className="dash-card-top">
-            <div>
-              <div className="dash-kicker">{t('net.owedToYou')}</div>
-              {!data && !e && <MoneyShimmer />}
-              {data && (
-                <div className="dash-value">{fmt(owedCents, owedCurrency)}</div>
-              )}
-              <div className="dash-delta">
-                {!data && e ? '—' : data && (totals.length > 1
-                  ? t('dashboard.neverSummed')
-                  : owedCents > 0
-                    ? t(owedGroups === 1 ? 'dashboard.owedInGroupsOne' : 'dashboard.owedInGroups', { count: owedGroups })
-                    : t('net.allClear'))}
-              </div>
-            </div>
-            <span className="dash-stat-icon" aria-hidden><StatIconOwed /></span>
-          </div>
-          <DashChevron open={openPanel === 'owed'} />
-        </button>
-
-        {openPanel === 'owed' && (
-          <BreakdownPanel
-            kind="owed"
-            rows={breakdown.owed}
-            onClose={() => setOpenPanel(null)}
-          />
-        )}
-
-        <section className="dash-card dash-stat dash-count is-groups">
           <div className="dash-card-top">
             <div>
               <div className="dash-kicker">{t('dashboard.activeGroups')}</div>
@@ -243,7 +230,8 @@ export function Dashboard() {
             </div>
             <span className="dash-stat-icon" aria-hidden><StatIconGroups /></span>
           </div>
-        </section>
+          <span className="dash-chevron" aria-hidden><ChevronRight size={18} /></span>
+        </button>
 
         <section className="dash-card dash-gauge">
           <div className="dash-kicker">{t('dashboard.settlement')}</div>
@@ -365,6 +353,8 @@ export function Dashboard() {
         {wizard}
         <Err e={e} />
       </Modal>
+
+      <QuickAddExpense onCreateGroup={openWizardForExpense} />
     </Shell>
   );
 }
@@ -694,49 +684,51 @@ function DashChevron({ open }) {
 }
 
 /**
- * Per-group, per-person owe/owed rows come from ./breakdown.js (group-section
- * builder, executed directly by tests in web/test/dashboard-owe-breakdown.test.mjs).
- * Each group is its own section — amounts are never summed across groups.
+ * My balance breakdown: one section per open group (from ./balance.js), each
+ * listing the settlement optimizer's transfers that involve me. Amounts stay
+ * in their group's currency and are never summed across groups here.
  */
-
-function BreakdownPanel({ kind, rows, onClose }) {
+function BalancePanel({ groups, onClose }) {
   const t = useT();
-  const isEmpty = rows.length === 0;
+  const isEmpty = groups.length === 0;
   return (
     <section id="dash-breakdown" className="dash-card dash-breakdown" aria-live="polite">
       <div className="dash-breakdown-head">
-        <div className="dash-kicker">
-          {kind === 'owe' ? t('net.youOweShort') : t('net.owedToYou')}
-        </div>
+        <div className="dash-kicker">{t('dashboard.balanceByGroup')}</div>
         <button type="button" className="dash-breakdown-close" onClick={onClose}>
           {t('dashboard.collapseBreakdown')}
         </button>
       </div>
-      {isEmpty && (
-        <Text c="dimmed" size="sm">
-          {kind === 'owe' ? t('dashboard.breakdownEmptyOwe') : t('dashboard.breakdownEmptyOwed')}
-        </Text>
-      )}
-      {!isEmpty && rows.map((section) => (
-        <div key={section.group_id} className="dash-breakdown-section">
+      {isEmpty && <Text c="dimmed" size="sm">{t('net.allSettled')}</Text>}
+      {!isEmpty && groups.map((g) => (
+        <div key={g.group_id} className="dash-breakdown-section">
           <div className="dash-breakdown-group">
-            <Link className="dash-group-link" to={`/groups/${section.group_id}`}>
-              {section.name}
+            <Link className="dash-group-link" to={`/groups/${g.group_id}`}>
+              {g.name}
             </Link>
-            <span className="dash-breakdown-currency">{section.currency}</span>
+            <span className={`dash-breakdown-net is-${toneForNet(g.net_cents)}`}>
+              {signPrefix(g.net_cents)}{fmt(Math.abs(g.net_cents), g.currency)}
+            </span>
           </div>
-          {section.people.map((p) => (
-            <div key={p.user_id} className="dash-person-row">
-              <span className="dash-person-avatar" style={{ background: pastelFor(p.name).from }} aria-hidden>
-                {initialsOf(p.name)}
-              </span>
-              <span className="dash-person-name">{p.name}</span>
-              <span className="dash-person-amount">{fmt(p.amount_cents, section.currency)}</span>
-            </div>
-          ))}
+          {g.transfers.map((x) => {
+            const other = x.from_me ? x.to_name : x.from_name;
+            return (
+              <div key={`${x.from_user_id}-${x.to_user_id}`} className={`dash-person-row is-${x.from_me ? 'open' : 'owed'}`}>
+                <span className="dash-person-avatar" style={{ background: pastelFor(other).from }} aria-hidden>
+                  {initialsOf(other)}
+                </span>
+                <span className="dash-person-name">
+                  {x.from_me
+                    ? t('dashboard.transferPay', { name: other })
+                    : t('dashboard.transferReceive', { name: other })}
+                </span>
+                <span className="dash-person-amount">{fmt(x.amount_cents, g.currency)}</span>
+              </div>
+            );
+          })}
         </div>
       ))}
-      {!isEmpty && <div className="dash-breakdown-note">{t('dashboard.perGroupNote')}</div>}
+      {!isEmpty && <div className="dash-breakdown-note">{t('dashboard.optimizedNote')}</div>}
     </section>
   );
 }
@@ -745,13 +737,18 @@ function GroupWizard({
   step, setStep,
   name, setName, tpl, setTpl, create, cq, setCq, searchContacts,
   searching, contacts, myContacts = [], picked, setPicked, emails, setEmails, creating, created, onOpenGroup,
-  templates = [],
+  templates = [], forExpense = false,
 }) {
   const t = useT();
   if (created) return <GroupCreated created={created} onOpenGroup={onOpenGroup} />;
   const nameOk = name.trim().length >= 3 && name.trim().length <= 50;
   // Free-input combobox: suggestions are the localized "None" plus catalog labels.
   const templateOptions = [t('common.none'), ...templates.map((item) => item.label)];
+  // Pre-picked people (quick-add) stay visible even when outside the top 20.
+  const boxContacts = [
+    ...picked.filter((p) => !myContacts.some((c) => c.user_id === p.user_id)),
+    ...myContacts,
+  ];
 
   const onSubmit = (ev) => {
     ev.preventDefault();
@@ -815,11 +812,11 @@ function GroupWizard({
           )}
           <div className="wizard-contacts-box">
             <div className="wizard-contacts-title">{t('wizard.yourContacts')}</div>
-            {myContacts.length === 0 ? (
+            {boxContacts.length === 0 ? (
               <Text size="xs" c="dimmed">{t('wizard.noContacts')}</Text>
             ) : (
               <Stack gap={8}>
-                {myContacts.map((c) => (
+                {boxContacts.map((c) => (
                   <WizardPersonRow key={c.user_id} c={c} picked={picked} setPicked={setPicked} />
                 ))}
               </Stack>
@@ -832,7 +829,7 @@ function GroupWizard({
       ) : (
         <Group gap="sm" grow className="wizard-actions">
           <Button className="wizard-back" type="button" onClick={() => setStep(1)} disabled={creating}>{t('common.back')}</Button>
-          <Button className="wizard-primary" type="submit" loading={creating} disabled={!nameOk}>{t('wizard.createGroup')}</Button>
+          <Button className="wizard-primary" type="submit" loading={creating} disabled={!nameOk}>{forExpense ? t('common.next') : t('wizard.createGroup')}</Button>
         </Group>
       )}
     </form>

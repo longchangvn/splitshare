@@ -13,6 +13,7 @@ import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
 import { RowMenu } from '../components/Mobile.jsx';
 import { ExpenseForm, PaymentForm } from '../components/Forms.jsx';
+import { AddExpenseFab } from '../components/QuickAddExpense.jsx';
 import { categoryLabel, categoryLabelForKey, categorySelectData } from '../categories.js';
 import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
@@ -58,7 +59,8 @@ export function GroupDetail() {
   const [type, setType] = useState('all');
   const [q, setQ] = useState('');
   const [payer, setPayer] = useState('');
-  const [fStatus, setFStatus] = useState('');
+  // Archive view: default scope is active (OPEN) entries; LOCKED = Archived.
+  const [fStatus, setFStatus] = useState('OPEN');
   const [fCat, setFCat] = useState('');
   const [fMin, setFMin] = useState('');
   const [fMax, setFMax] = useState('');
@@ -66,8 +68,8 @@ export function GroupDetail() {
   const [fTo, setFTo] = useState('');
   const [fSort, setFSort] = useState('newest');
   const [showF, setShowF] = useState(false);
-  const activeFilters = [payer, fStatus, fCat, fMin, fMax, fFrom, fTo]
-    .filter((v) => v !== '').length + (fSort === 'newest' ? 0 : 1);
+  const activeFilters = [payer, fCat, fMin, fMax, fFrom, fTo]
+    .filter((v) => v !== '').length + (fStatus && fStatus !== 'OPEN' ? 1 : 0) + (fSort === 'newest' ? 0 : 1);
   const [activity, setActivity] = useState([]);
   const [payHist, setPayHist] = useState([]);
   const [activityPage, setActivityPage] = useState(1);
@@ -141,6 +143,10 @@ export function GroupDetail() {
       setCopyFrom(location.state.copyFrom);
       setShowExp(true);
       nav(location.pathname, { replace: true }); // consume: no stale copy on reload
+    } else if (location.state?.addExpense) {
+      // Quick "Add expense" handoff from the dashboard FAB.
+      setShowExp(true);
+      nav(location.pathname, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -168,14 +174,17 @@ export function GroupDetail() {
       loadCategories();
     } catch (err) { setE(err); }
   };
-  const loadLedger = async () => {
+  const loadLedger = async (statusOverride) => {
     if (!validId) return;
     const req = ++ledgerReq.current;
     setLedgerLoading(true);
     try {
       const params = new URLSearchParams({ type, q, limit: '100' });
       if (payer) params.set('payer_id', payer);
-      if (fStatus) params.set('status', fStatus);
+      // Archive view: scope is always explicit (default OPEN). An override string
+      // lets the "view archive" empty-state action reload without stale state.
+      const st = typeof statusOverride === 'string' ? statusOverride : fStatus;
+      if (st) params.set('status', st);
       if (fCat) params.set('category', fCat);
       if (fMin !== '') params.set('min_amount', String(Math.round(Number(fMin) * 100)));
       if (fMax !== '') params.set('max_amount', String(Math.round(Number(fMax) * 100)));
@@ -582,6 +591,13 @@ export function GroupDetail() {
         saved: plan?.explanation?.saved ?? '—',
       });
 
+  // Archive empty state: active scope has no entries.
+  const ledgerItems = ledger?.items || [];
+  const ledgerEmpty = !!ledger && !ledgerLoading && ledgerItems.length === 0;
+  const hasLedgerHistory = (summary || []).some(
+    (m) => (m.total_paid_cents || 0) > 0 || (m.total_share_cents || 0) > 0,
+  );
+
   if (!detail) {
     return (
       <Shell>
@@ -812,8 +828,7 @@ export function GroupDetail() {
               onDelete={setCategoryDeleteTarget}
             />
           )}
-        />
-
+          afterMetrics={(
         <Card withBorder shadow="sm" padding="md" radius="md" className="gd-tabs">
           <Tabs value={tab} onChange={(v) => {
             let nv = v ?? 'ledger';
@@ -892,9 +907,8 @@ export function GroupDetail() {
               <Select
                 size="xs"
                 placeholder={t('common.status')}
-                clearable
                 value={fStatus}
-                onChange={(v) => setFStatus(v || '')}
+                onChange={(v) => setFStatus(v || 'OPEN')}
                 data={[
                   { value: 'OPEN', label: t('groupDetail.statusOpen') },
                   { value: 'LOCKED', label: t('groupDetail.statusLocked') },
@@ -964,9 +978,8 @@ export function GroupDetail() {
                     size="sm"
                     label={t('common.status')}
                     placeholder={t('common.any')}
-                    clearable
                     value={fStatus}
-                    onChange={(v) => setFStatus(v || '')}
+                    onChange={(v) => setFStatus(v || 'OPEN')}
                     data={[
                       { value: 'OPEN', label: t('groupDetail.statusOpen') },
                       { value: 'LOCKED', label: t('groupDetail.statusLocked') },
@@ -1135,6 +1148,38 @@ export function GroupDetail() {
               )}
             </div>
           </Box>
+          {ledgerEmpty && (
+            <div className="ledger-empty" role="status">
+              {fStatus === 'LOCKED' ? (
+                <>
+                  <Text size="sm" c="dimmed">{t('groupDetail.ledgerEmptyArchive')}</Text>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    mt={4}
+                    onClick={() => { setFStatus('OPEN'); loadLedger('OPEN'); }}
+                  >
+                    {t('groupDetail.viewActive')}
+                  </Button>
+                </>
+              ) : groupSettled && hasLedgerHistory ? (
+                <>
+                  <Text size="sm" fw={600}>{t('groupDetail.ledgerAllSettled')}</Text>
+                  <Text size="xs" c="dimmed">{t('groupDetail.ledgerAllSettledHint')}</Text>
+                  <Button
+                    size="xs"
+                    variant="light"
+                    mt={4}
+                    onClick={() => { setFStatus('LOCKED'); loadLedger('LOCKED'); }}
+                  >
+                    {t('groupDetail.viewArchive')}
+                  </Button>
+                </>
+              ) : (
+                <Text size="sm" c="dimmed">{t('groupDetail.ledgerEmptyActive')}</Text>
+              )}
+            </div>
+          )}
             </Tabs.Panel>
 
             <Tabs.Panel value="balances">
@@ -1262,7 +1307,7 @@ export function GroupDetail() {
                         fmt(p.amount_cents, detail.currency),
                         new Date(p.created_at).toLocaleString(),
                         p.reversed ? 'reversed' : null,
-                        p.status && p.status !== 'OPEN' ? p.status.toLowerCase() : null,
+                        p.status && p.status !== 'OPEN' ? t('groupDetail.statusLocked') : null,
                       ].filter(Boolean).join(' · ');
                       return (
                         <div key={row.key} className={`activity-row is-static${p.reversed ? ' is-reversed' : ''}`}>
@@ -1421,7 +1466,12 @@ export function GroupDetail() {
             </Tabs.Panel>
           </Tabs>
         </Card>
+          )}
+        />
       </Stack>
+
+      {/* Inside a group the FAB skips the picker and opens the normal expense form. */}
+      <AddExpenseFab onClick={() => setShowExp(true)} disabled={!canWriteGroup} />
 
       <Modal
         opened={showExp}

@@ -207,9 +207,24 @@ public sealed class LedgerService(AppDbContext db)
         string? MyRole, int MemberCount, long SpentCents, bool NeedsSettlement = false,
         string Status = "opening",
         // Raw payer-based debts for the requesting user in this group (task: owe/owed breakdown).
-        List<OweTo> Owes = null!, List<OwedFrom> OwedToMe = null!);
+        List<OweTo> Owes = null!, List<OwedFrom> OwedToMe = null!,
+        // Optimizer transfers touching the requesting user in this group (dashboard "My balance").
+        List<MyTransfer> MyTransfers = null!);
     public sealed record CurrencyTotals(long OweCents, long OwedCents);
-    public sealed record AllView(List<GroupRow> Groups, Dictionary<string, CurrencyTotals> Totals);
+    public sealed record AllView(List<GroupRow> Groups, Dictionary<string, CurrencyTotals> Totals,
+        BalanceSummary Balance = null!);
+    /// <summary>
+    /// My net across groups, netted **per currency only** (never across currencies):
+    /// net = sum(group nets). Primary currency = largest |net| (tie: currency code),
+    /// so the headline figure is the position that matters most. Direction is the
+    /// sign of the primary net: owe &lt; 0, owed &gt; 0, settled == 0.
+    /// </summary>
+    public sealed record BalanceSummary(string? PrimaryCurrency, long PrimaryNetCents, string Direction,
+        int GroupCount, int CurrencyCount, List<BalanceCurrencyRow> ByCurrency);
+    public sealed record BalanceCurrencyRow(string Currency, long NetCents, int GroupCount);
+    /// <summary>One settlement-optimizer transfer involving me in a group (from_me decides the copy).</summary>
+    public sealed record MyTransfer(Guid FromUserId, string FromName, Guid ToUserId, string ToName,
+        long AmountCents, bool FromMe);
     public sealed record MemberSummary(Guid UserId, string DisplayName,
         long TotalPaidCents, long TotalShareCents, long NetCents, long OweCents);
 
@@ -423,11 +438,14 @@ public sealed class LedgerService(AppDbContext db)
         var groups = await db.Groups.Where(g => groupIds.Contains(g.Id) && g.DeletedAt == null).ToListAsync();
         var rows = new List<GroupRow>();
         var totals = new Dictionary<string, CurrencyTotals>();
+        var netByCurrency = new Dictionary<string, (long Net, int Groups)>();
         foreach (var g in groups)
         {
             var snapshot = await ComputeNetsAsync(g.Id);
             if (snapshot is null) continue;
             var net = snapshot.Nets.TryGetValue(userId, out var n) ? n : 0L;
+            netByCurrency.TryGetValue(g.Currency, out var agg);
+            netByCurrency[g.Currency] = (agg.Net + net, agg.Groups + 1);
             var needsSettlement = snapshot.Nets.Values.Any(v => v != 0);
             var oldest = await db.Expenses
                 .Where(e => e.GroupId == g.Id && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
@@ -440,15 +458,59 @@ public sealed class LedgerService(AppDbContext db)
             memberCounts.TryGetValue(g.Id, out var memberCount);
             spentByGroup.TryGetValue(g.Id, out var spentCents);
             var (owes, owedToMe) = RawDebtsFor(snapshot, userId);
+            var myTransfers = OptimizedTransfersFor(snapshot, userId, net);
             rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent,
                 needsSettlement ? oldest : null, g.CreatedAt,
                 myRole, memberCount, spentCents, needsSettlement, g.Status,
-                owes, owedToMe));
+                owes, owedToMe, myTransfers));
             totals.TryGetValue(g.Currency, out var t);
             totals[g.Currency] = net < 0
                 ? new CurrencyTotals(t?.OweCents - net ?? -net, t?.OwedCents ?? 0)
                 : new CurrencyTotals(t?.OweCents ?? 0, t?.OwedCents + net ?? net);
         }
-        return new AllView(rows, totals);
+        return new AllView(rows, totals, BuildBalance(netByCurrency));
+    }
+
+    /// <summary>
+    /// Netted total balance: group nets summed **within each currency**, primary
+    /// currency = largest absolute net. Never summed across currencies (spec
+    /// ledger-views: "totals render per currency and are never summed across currencies").
+    /// </summary>
+    private static BalanceSummary BuildBalance(Dictionary<string, (long Net, int Groups)> netByCurrency)
+    {
+        var byCurrency = netByCurrency
+            .Select(kv => new BalanceCurrencyRow(kv.Key, kv.Value.Net, kv.Value.Groups))
+            .OrderByDescending(r => Math.Abs(r.NetCents))
+            .ThenBy(r => r.Currency, StringComparer.Ordinal)
+            .ToList();
+        var primary = byCurrency.Count > 0 ? byCurrency[0] : null;
+        var net = primary?.NetCents ?? 0L;
+        var direction = net > 0 ? "owed" : net < 0 ? "owe" : "settled";
+        return new BalanceSummary(primary?.Currency, net, direction,
+            byCurrency.Sum(r => r.GroupCount), byCurrency.Count, byCurrency);
+    }
+
+    /// <summary>
+    /// The settlement optimizer's transfers that involve me in this group — the
+    /// "fewest transfers" view, not the raw pairwise debts (see RawDebtsFor).
+    /// Zero nets are excluded by the optimizer itself, so a settled (or
+    /// uninvolved) group yields an empty list; the sum-zero invariant is checked
+    /// defensively instead of letting Compute throw on a malformed ledger.
+    /// </summary>
+    private static List<MyTransfer> OptimizedTransfersFor(GroupNets snapshot, Guid userId, long net)
+    {
+        var empty = new List<MyTransfer>();
+        if (net == 0 || snapshot.Nets.Values.Sum() != 0) return empty;
+        var result = SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts);
+        return result.Transfers
+            .Where(t => t.FromUserId == userId || t.ToUserId == userId)
+            .Select(t => new MyTransfer(
+                t.FromUserId, NameOf(snapshot.Names, t.FromUserId),
+                t.ToUserId, NameOf(snapshot.Names, t.ToUserId),
+                t.AmountCents, t.FromUserId == userId))
+            .OrderByDescending(t => t.AmountCents)
+            .ThenBy(t => t.FromUserId)
+            .ThenBy(t => t.ToUserId)
+            .ToList();
     }
 }
