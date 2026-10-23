@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Alert, Button, Checkbox, Group, Modal, Select, Stack, Text, TextInput,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { categorySelectData } from '../categories.js';
+import {
+  SCAN_MOBILE_QUERY, compressReceiptImage, scanErrorKey, scanToAmount,
+} from '../receiptScan.js';
 import { displayNameOf } from './Net.jsx';
 import { useT } from '../prefs.jsx';
 
@@ -338,6 +342,62 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     setAmountErr(moneyAmountError(next, t));
   };
 
+  // Receipt scan (mobile site only, create only, hidden unless the API has OCR enabled).
+  const isMobile = useMediaQuery(SCAN_MOBILE_QUERY);
+  const [ocrEnabled, setOcrEnabled] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const scanRef = useRef(null);
+  const canScan = !existing && isMobile && ocrEnabled;
+  useEffect(() => {
+    if (existing) return undefined;
+    let cancelled = false;
+    api.get('/api/v1/capabilities')
+      .then((c) => { if (!cancelled) setOcrEnabled(!!c?.ocr_enabled); })
+      .catch(() => { if (!cancelled) setOcrEnabled(false); });
+    return () => { cancelled = true; };
+  }, [existing]);
+
+  const onScanFile = async (ev) => {
+    const file = ev.target.files?.[0];
+    ev.target.value = '';
+    if (!file || scanning) return;
+    setScanning(true);
+    try {
+      let img;
+      try {
+        img = await compressReceiptImage(file);
+      } catch {
+        notifications.show({ message: t('forms.expense.scanImageError'), color: 'red' });
+        return;
+      }
+      const form = new FormData();
+      form.append('file', img, img.name);
+      const resp = await api.postForm(`/api/v1/groups/${groupId}/expenses/scan`, form);
+      const { amount: scanned, lowConfidence, warnings } = scanToAmount(resp);
+      if (scanned) {
+        onAmountChange(scanned);
+        setStaged((prev) => (prev.length < maxStaged ? [...prev, img] : prev));
+        notifications.show({
+          title: t('forms.expense.scanDone', { amount: fmt(Math.round(Number(scanned) * 100), currency) }),
+          message: lowConfidence ? t('forms.expense.scanLowConfidence') : t('forms.expense.scanCheck'),
+          color: lowConfidence ? 'orange' : 'teal',
+        });
+      } else {
+        notifications.show({
+          message: warnings.includes('not_a_receipt') ? t('forms.expense.scanNotReceipt') : t('forms.expense.scanNoTotal'),
+          color: 'orange',
+        });
+      }
+    } catch (err) {
+      notifications.show({
+        message: err?.status === 422 && err.message ? err.message : t(scanErrorKey(err)),
+        color: 'red',
+      });
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const submit = async (ev) => {
     ev.preventDefault();
     if (saving) return; // double-submit guard
@@ -492,6 +552,31 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
             </Stack>
           )}
         </div>
+
+        {canScan && (
+          <div className="wizard-field">
+            {/* No capture attribute: mobile browsers offer camera or photo library. */}
+            <input
+              ref={scanRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={onScanFile}
+              data-testid="scan-receipt-input"
+            />
+            <Button
+              type="button"
+              fullWidth
+              variant="light"
+              color="teal"
+              loading={scanning}
+              onClick={() => scanRef.current?.click()}
+            >
+              {t('forms.expense.scan')}
+            </Button>
+            <Text size="xs" c="dimmed" mt={4}>{t('forms.expense.scanHint')}</Text>
+          </div>
+        )}
 
         <TextInput
           label={t('forms.expense.title')}

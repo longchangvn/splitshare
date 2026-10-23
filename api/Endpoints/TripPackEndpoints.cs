@@ -230,8 +230,15 @@ public static class TripPackEndpoints
             if (form.Files.Count == 0) return ApiResults.Error("VALIDATION", "No file uploaded.", 422);
             await using var ms = new MemoryStream();
             await form.Files[0].CopyToAsync(ms);
-            var fields = await ocr.ExtractAsync(ms.ToArray(), form.Files[0].ContentType);
-            return Results.Ok(new { suggestion = fields });
+            try
+            {
+                var s = await ocr.ExtractAsync(ms.ToArray(), form.Files[0].ContentType);
+                return Results.Ok(new { suggestion = s.ToDictionary() });
+            }
+            catch (OcrProviderException)
+            {
+                return ApiResults.Error("OCR_PROVIDER_ERROR", "Receipt scan failed.", 503);
+            }
         }).DisableAntiforgery();
     }
 

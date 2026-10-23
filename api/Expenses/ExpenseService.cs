@@ -40,6 +40,26 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         { "image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif",
           "image/heic-sequence", "image/heif-sequence" };
 
+    public static string NormalizeImageMime(string? fileName, string? mime)
+    {
+        // Browsers sometimes send empty or non-standard content types (e.g. HEIC
+        // from iOS, or image/jpg). Infer from filename when missing.
+        var norm = (mime ?? "").Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(norm) || norm == "application/octet-stream")
+        {
+            norm = Path.GetExtension(fileName ?? "").ToLowerInvariant() switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                ".heic" => "image/heic",
+                ".heif" => "image/heif",
+                _ => norm
+            };
+        }
+        return norm == "image/jpg" ? "image/jpeg" : norm;
+    }
+
     public static (long Cents, string? Error) ParseAmount(decimal amount)
     {
         if (amount <= 0) return (0, "Amount must be > 0.");
@@ -574,22 +594,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         if (e is null) return new(false, "NOT_FOUND", "Expense not found.");
         var guard = await GuardAsync(e.GroupId, actorId, expenseId, needWriter: true);
         if (!guard.Ok) return guard;
-        // Browsers sometimes send empty or non-standard content types (e.g. HEIC
-        // from iOS, or image/jpg). Infer from filename when missing.
-        var norm = (mime ?? "").Trim().ToLowerInvariant();
-        if (string.IsNullOrEmpty(norm) || norm == "application/octet-stream")
-        {
-            norm = Path.GetExtension(fileName ?? "").ToLowerInvariant() switch
-            {
-                ".jpg" or ".jpeg" => "image/jpeg",
-                ".png" => "image/png",
-                ".webp" => "image/webp",
-                ".heic" => "image/heic",
-                ".heif" => "image/heif",
-                _ => norm
-            };
-        }
-        if (norm == "image/jpg") norm = "image/jpeg";
+        var norm = NormalizeImageMime(fileName, mime);
         if (!AllowedMimes.Contains(norm)) return new(false, "VALIDATION", $"Allowed: jpg png webp heic (got '{mime}').");
         if (bytes.Length == 0 || bytes.Length > MaxImageBytes)
             return new(false, "VALIDATION", $"Image must be 1B-10MB (got {bytes.Length}B).");
