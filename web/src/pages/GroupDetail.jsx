@@ -88,6 +88,9 @@ export function GroupDetail() {
   const [editBusy, setEditBusy] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payPreset, setPayPreset] = useState(null);
+  // Bumped after each recorded payment so Report/SettlementBox re-fetch their
+  // own settlement plan + completed-payments copies.
+  const [settleTick, setSettleTick] = useState(0);
   const [shareOpen, setShareOpen] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -796,6 +799,8 @@ export function GroupDetail() {
           groupId={id}
           detail={detail}
           summary={summary}
+          plan={plan}
+          settleTick={settleTick}
           embedded
           onPay={(xfer) => { setPayPreset(xfer); setPayOpen(true); }}
           categoryManager={(
@@ -1505,6 +1510,7 @@ export function GroupDetail() {
             loadLedger();
             loadSummary();
             loadActivityFeed();
+            setSettleTick((x) => x + 1);
             notifications.show({
               title: r.fully_settled ? 'Fully settled' : 'Payment recorded',
               color: 'teal',

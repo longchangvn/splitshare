@@ -51,7 +51,7 @@ function formatWhen(iso) {
 }
 
 /** Status card + detail dialog — first card of the Report section. */
-export function SettlementBox({ groupId, currency, members, onPay, plan: planProp = null }) {
+export function SettlementBox({ groupId, currency, members, onPay, plan: planProp = null, settleTick = 0 }) {
   const t = useT();
   const [plan, setPlan] = useState(planProp);
   const [hist, setHist] = useState([]);
@@ -67,12 +67,14 @@ export function SettlementBox({ groupId, currency, members, onPay, plan: planPro
   useEffect(() => {
     if (planProp) { setPlan(planProp); return; }
     load();
-  }, [groupId, planProp]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [groupId, planProp, settleTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Completed-payments list in the detail dialog — re-fetch after each
+  // recorded payment (settleTick) so it never shows a stale list.
   useEffect(() => {
     api.get(`/api/v1/groups/${groupId}/ledger?type=payment&limit=100`)
       .then((r) => setPayments(r.items || [])).catch(() => {});
-  }, [groupId]);
+  }, [groupId, settleTick]);
 
   const loadHist = async () => {
     try { setHist(await api.get(`/api/v1/groups/${groupId}/settlement/history`)); }
