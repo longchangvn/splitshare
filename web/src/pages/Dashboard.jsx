@@ -7,7 +7,7 @@ import {
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
-import { ActivityKindThumb, ChevronRight, pastelFor } from '../components/Net.jsx';
+import { ActivityKindThumb, ChevronRight, initialsOf, pastelFor } from '../components/Net.jsx';
 import { getTemplates, subscribeCatalogs } from '../settingsStore.js';
 import { useT } from '../prefs.jsx';
 
@@ -30,6 +30,7 @@ export function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [step, setStep] = useState(1);
   const [templates, setTemplates] = useState(() => getTemplates());
+  const [openPanel, setOpenPanel] = useState(null); // 'owe' | 'owed' | null
 
   const load = () => api.get('/api/v1/me/balances').then(setData).catch(setE);
   useEffect(() => { load(); }, []);
@@ -118,6 +119,10 @@ export function Dashboard() {
   const oweGroups = groups.filter((g) => g.net_cents < 0).length;
   const owedGroups = groups.filter((g) => g.net_cents > 0).length;
 
+  // Per-person, per-currency breakdown from the raw owes[]/owed_to_me[] rows.
+  // Amounts are netted per person per currency (never summed across currencies).
+  const breakdown = buildBreakdown(groups);
+
   const wizard = (
     <GroupWizard
       step={step} setStep={setStep}
@@ -142,7 +147,13 @@ export function Dashboard() {
       <Err e={e} />
 
       <div className="dash-grid">
-        <section className={`dash-card dash-stat dash-owe is-${oweCents > 0 ? 'open' : 'settled'}`}>
+        <button
+          type="button"
+          className={`dash-card dash-stat dash-stat-btn dash-owe is-clickable is-${oweCents > 0 ? 'open' : 'settled'}`}
+          aria-expanded={openPanel === 'owe'}
+          aria-controls="dash-breakdown"
+          onClick={() => setOpenPanel(openPanel === 'owe' ? null : 'owe')}
+        >
           <div className="dash-card-top">
             <div>
               <div className="dash-kicker">{t('net.youOweShort')}</div>
@@ -160,9 +171,16 @@ export function Dashboard() {
             </div>
             <span className="dash-stat-icon" aria-hidden><StatIconOwe /></span>
           </div>
-        </section>
+          <DashChevron open={openPanel === 'owe'} />
+        </button>
 
-        <section className={`dash-card dash-stat dash-owed is-${owedCents > 0 ? 'owed' : 'settled'}`}>
+        <button
+          type="button"
+          className={`dash-card dash-stat dash-stat-btn dash-owed is-clickable is-${owedCents > 0 ? 'owed' : 'settled'}`}
+          aria-expanded={openPanel === 'owed'}
+          aria-controls="dash-breakdown"
+          onClick={() => setOpenPanel(openPanel === 'owed' ? null : 'owed')}
+        >
           <div className="dash-card-top">
             <div>
               <div className="dash-kicker">{t('net.owedToYou')}</div>
@@ -180,7 +198,16 @@ export function Dashboard() {
             </div>
             <span className="dash-stat-icon" aria-hidden><StatIconOwed /></span>
           </div>
-        </section>
+          <DashChevron open={openPanel === 'owed'} />
+        </button>
+
+        {openPanel && (
+          <BreakdownPanel
+            kind={openPanel}
+            rows={openPanel === 'owe' ? breakdown.owe : breakdown.owed}
+            onClose={() => setOpenPanel(null)}
+          />
+        )}
 
         <section className="dash-card dash-stat dash-count is-groups">
           <div className="dash-card-top">
@@ -633,6 +660,92 @@ function MoneyShimmer() {
       <span className="dash-value-shimmer" />
       <span className="dash-delta-shimmer" />
     </span>
+  );
+}
+
+function DashChevron({ open }) {
+  return (
+    <span className={`dash-chevron${open ? ' is-open' : ''}`} aria-hidden>
+      <ChevronRight size={18} />
+    </span>
+  );
+}
+
+/**
+ * Net the raw per-group owes[]/owed_to_me[] rows per person per currency.
+ * owe[currency][user] = total I owe them; owed[currency][user] = total they owe me.
+ * A person lands in exactly one panel per currency (sign decides). Never summed
+ * across currencies — sections are keyed by currency.
+ */
+function buildBreakdown(groups) {
+  const owe = {};
+  const owed = {};
+  const add = (bucket, currency, userId, name, amountCents, group) => {
+    bucket[currency] = bucket[currency] || {};
+    const row = bucket[currency][userId] || { user_id: userId, name, amount_cents: 0, groups: [] };
+    row.amount_cents += amount_cents;
+    if (!row.groups.some((gr) => gr.group_id === group.group_id)) {
+      row.groups.push({ group_id: group.group_id, name: group.name });
+    }
+    bucket[currency][userId] = row;
+  };
+  for (const g of groups) {
+    for (const o of g.owes || []) add(owe, g.currency, o.to_user_id, o.to_name, o.amount_cents, g);
+    for (const o of g.owed_to_me || []) add(owed, g.currency, o.from_user_id, o.from_name, o.amount_cents, g);
+  }
+  const sort = (bucket) => Object.entries(bucket)
+    .map(([currency, people]) => ({
+      currency,
+      people: Object.values(people).sort((a, b) => b.amount_cents - a.amount_cents
+        || String(a.name).localeCompare(String(b.name))),
+    }))
+    .sort((a, b) => b.people.reduce((s, p) => s + p.amount_cents, 0)
+      - a.people.reduce((s, p) => s + p.amount_cents, 0));
+  return { owe: sort(owe), owed: sort(owed) };
+}
+
+function BreakdownPanel({ kind, rows, onClose }) {
+  const t = useT();
+  const total = rows.reduce((sum, section) => sum + section.people.length, 0);
+  const isEmpty = total === 0;
+  return (
+    <section id="dash-breakdown" className="dash-card dash-breakdown" aria-live="polite">
+      <div className="dash-breakdown-head">
+        <div className="dash-kicker">
+          {kind === 'owe' ? t('net.youOweShort') : t('net.owedToYou')}
+        </div>
+        <button type="button" className="dash-breakdown-close" onClick={onClose}>
+          {t('dashboard.collapseBreakdown')}
+        </button>
+      </div>
+      {isEmpty && (
+        <Text c="dimmed" size="sm">
+          {kind === 'owe' ? t('dashboard.breakdownEmptyOwe') : t('dashboard.breakdownEmptyOwed')}
+        </Text>
+      )}
+      {!isEmpty && rows.map((section) => (
+        <div key={section.currency} className="dash-breakdown-section">
+          <div className="dash-breakdown-currency">{section.currency}</div>
+          {section.people.map((p) => (
+            <div key={p.user_id} className="dash-person-row">
+              <span className="dash-person-avatar" style={{ background: pastelFor(p.name) }} aria-hidden>
+                {initialsOf(p.name)}
+              </span>
+              <span className="dash-person-name">{p.name}</span>
+              <span className="dash-person-amount">{fmt(p.amount_cents, section.currency)}</span>
+              <span className="dash-person-groups">
+                {p.groups.map((g) => (
+                  <Link key={g.group_id} className="dash-group-chip" to={`/groups/${g.group_id}`}>
+                    {g.name}
+                  </Link>
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+      {!isEmpty && <div className="dash-breakdown-note">{t('dashboard.perCurrencyNote')}</div>}
+    </section>
   );
 }
 
