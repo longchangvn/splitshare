@@ -84,6 +84,9 @@ jobs:
           GH_ASPNETCORE_ENVIRONMENT: ${{ vars.ASPNETCORE_ENVIRONMENT || 'Production' }}
           GH_UPLOADS__PATH: ${{ vars.UPLOADS__PATH || '/data/uploads' }}
           GH_AUTH__GOOGLECLIENTID: ${{ vars.AUTH__GOOGLECLIENTID }}
+          GH_OCR__ENABLED: ${{ vars.OCR__ENABLED }}
+          GH_OCR__MODEL: ${{ vars.OCR__MODEL }}
+          GH_OCR__APIKEY: ${{ secrets.OCR__APIKEY }}
           # Kept out of the run script: any ${{ }} inside it makes the whole
           # script one expression, which exceeds GitHub's 21000-char limit.
           WEB_BASE_VAR: ${{ vars.SPLITSHARE_WEB_BASE_URL }}
@@ -371,6 +374,9 @@ jobs:
             "Uploads__Path:GH_UPLOADS__PATH:false"
             "Auth__GoogleClientId:GOOGLE_CLIENT_ID:false"
             "Cors__AllowedOrigins__0:SWA_CORS:false"
+            "Ocr__Enabled:GH_OCR__ENABLED:false"
+            "Ocr__Model:GH_OCR__MODEL:false"
+            "Ocr__ApiKey:GH_OCR__APIKEY:true"
           )
           for entry in "${ENV_MAP[@]}"; do
             IFS=':' read -r name src is_secret <<< "$entry"

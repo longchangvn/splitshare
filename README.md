@@ -100,6 +100,39 @@ one group, then **Next**:
 
 Spec: `specs/003-quick-add-expense/`. Frontend-only; uses existing endpoints.
 
+## Web (mobile site): scan receipt in Add expense
+
+On phone-width screens (`max-width: 47.99em`) the New expense form shows **Scan receipt**
+when `GET /api/v1/capabilities` returns `ocr_enabled: true`. The phone offers camera or
+photo library; the image is resized (≤1600 px), re-encoded as JPEG quality 70 % with
+70 DPI, sent to `POST /api/v1/groups/{id}/expenses/scan` → `{ total, confidence, warnings }`,
+and only the **Amount** field is filled with the receipt total. The photo is attached as a
+receipt on Save.
+
+The API forwards the image (EXIF stripped) to an OpenAI-compatible vision endpoint —
+OpenCode Console by default. Config (`Ocr` section; the key is secret, env/user-secrets only):
+
+```sh
+dotnet user-secrets set "Ocr:Enabled" "true" --project api
+dotnet user-secrets set "Ocr:ApiKey" "<key>" --project api
+dotnet user-secrets set "Ocr:Model" "<vision model>" --project api
+# optional: Ocr:BaseUrl (default OpenCode), Ocr:TimeoutSeconds,
+# Ocr:RateLimit:PermitLimit / WindowMinutes (default 20 scans / 10 min per user)
+```
+
+OpenCode **free** models reject API calls (`403 FreeTierError`, verified 2026-10-22) — use a
+paid OpenCode model, or another OpenAI-compatible provider via `Ocr:BaseUrl` (e.g. Gemini:
+`https://generativelanguage.googleapis.com/v1beta/openai`).
+
+Live check against the real provider (opt-in, uses credits; sample receipt total is 21.00):
+
+```sh
+set -a; . ./.env; set +a; OCR_LIVE_TEST=1 dotnet test tests --filter ReceiptScanLiveTests
+```
+
+Compose: `OCR_ENABLED`, `OCR_API_KEY`, `OCR_MODEL`. CD: vars `OCR__ENABLED`, `OCR__MODEL`,
+secret `OCR__APIKEY`. Spec: `specs/004-multi-receipt-expenses/`.
+
 ## API contract
 
 - Base `/api/v1`, **snake_case both directions**, errors `{code, message, fields?}`.
