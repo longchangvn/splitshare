@@ -1,6 +1,8 @@
 # Feature Spec: Scan multiple receipts → create multiple expenses
 
-**Status**: Planned (not implemented) · **Scope**: API (`api/`), web (`web/`), mobile (`mobile/`)
+**Status**: v1 implemented (single "Scan receipt" in web Add expense, mobile site only — see
+`tasks.md` "v1 implemented"); multi-receipt batch flow below still planned.
+**Scope**: API (`api/`), web (`web/`), mobile (`mobile/`)
 **Related**: `research.md` (exploration, providers, cost, accuracy), `plan.md`, `tasks.md`
 
 ## User goal
