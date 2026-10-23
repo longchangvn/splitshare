@@ -2428,6 +2428,128 @@ a {
   height: 44px;
   border-radius: 14px;
 }
+/* Clickable stat cards (owe / owed disclosure buttons). */
+button.dash-stat-btn {
+  display: block;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+/* `.dash-stat` in the selectors keeps these above the tone rules
+   (.dash-card.dash-stat.is-open etc.) that also set box-shadow. */
+button.dash-stat.dash-stat-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(16, 42, 36, 0.1);
+}
+button.dash-stat.dash-stat-btn:active { transform: translateY(0); }
+button.dash-stat-btn:focus-visible {
+  outline: 2px solid var(--ss-focus, #14b8a6);
+  outline-offset: 2px;
+}
+button.dash-stat.dash-stat-btn[aria-expanded="true"] {
+  box-shadow: 0 0 0 2px var(--ss-focus, #14b8a6) inset;
+}
+.dash-chevron {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  display: inline-flex;
+  color: #64748b;
+  transition: transform 0.2s ease;
+}
+.dash-chevron.is-open { transform: rotate(90deg); }
+
+/* Inline owe/owed breakdown panel (per person, per currency). */
+.dash-breakdown { grid-column: 1 / -1; }
+.dash-breakdown-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.dash-breakdown-close {
+  border: 0;
+  background: none;
+  color: #64748b;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 8px;
+}
+.dash-breakdown-close:hover { background: rgba(100, 116, 139, 0.12); color: #334155; }
+.dash-breakdown-currency {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #64748b;
+  padding: 8px 0 4px;
+  border-bottom: 1px solid #eef4f1;
+  margin-bottom: 6px;
+}
+.dash-person-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+.dash-person-row + .dash-person-row { border-top: 1px solid #f1f6f3; }
+.dash-person-avatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+}
+.dash-person-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: #14251f;
+}
+.dash-person-amount {
+  flex: none;
+  font-weight: 700;
+  color: #14251f;
+  font-variant-numeric: tabular-nums;
+}
+.dash-person-groups {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.dash-group-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, 0.1);
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.dash-group-chip:hover { background: rgba(20, 184, 166, 0.18); }
+.dash-breakdown-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
 .dash-kicker {
   font-size: 13px;
   color: #64748b;
@@ -3490,6 +3612,14 @@ a {
   .dash-groups { grid-column: 3; grid-row: 2; }
   .dash-banner { grid-column: 1 / span 2; grid-row: 3; }
   .dash-promo { grid-column: 3; grid-row: 3; }
+  /* Breakdown panel sits directly under the stat cards; shift everything
+     below it down a row only while the panel is in the DOM. */
+  .dash-breakdown { grid-column: 1 / -1; grid-row: 2; }
+  .dash-grid:has(.dash-breakdown) .dash-gauge,
+  .dash-grid:has(.dash-breakdown) .dash-history,
+  .dash-grid:has(.dash-breakdown) .dash-groups { grid-row: 3; }
+  .dash-grid:has(.dash-breakdown) .dash-banner,
+  .dash-grid:has(.dash-breakdown) .dash-promo { grid-row: 4; }
 }
 
 /* Group detail — modern hero chrome */
@@ -6106,6 +6236,50 @@ a {
 [data-ss-theme="dark"] .dash-card.dash-stat.is-settled .dash-stat-icon {
   color: #4ade80;
   background: rgba(34, 197, 94, 0.14);
+}
+/* Clickable stat cards + inline owe/owed breakdown panel.
+   Selectors carry `.dash-stat.dash-stat-btn` so they out-specify the
+   tone rules above (which set `box-shadow: none`). */
+[data-ss-theme="dark"] button.dash-stat.dash-stat-btn:hover {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+}
+[data-ss-theme="dark"] button.dash-stat.dash-stat-btn[aria-expanded="true"] {
+  box-shadow: 0 0 0 2px var(--ss-focus, #14b8a6) inset;
+}
+[data-ss-theme="dark"] .dash-chevron {
+  color: #9aa6a1;
+}
+[data-ss-theme="dark"] .dash-breakdown-close {
+  color: #9aa6a1;
+}
+[data-ss-theme="dark"] .dash-breakdown-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eeeb;
+}
+[data-ss-theme="dark"] .dash-breakdown-currency {
+  color: #9aa6a1;
+  border-bottom-color: #2a3030;
+}
+[data-ss-theme="dark"] .dash-person-row + .dash-person-row {
+  border-top-color: #2a3030;
+}
+[data-ss-theme="dark"] .dash-person-avatar {
+  color: #c5d0cb;
+}
+[data-ss-theme="dark"] .dash-person-name,
+[data-ss-theme="dark"] .dash-person-amount {
+  color: #e8eeeb;
+}
+[data-ss-theme="dark"] .dash-group-chip {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: rgba(45, 212, 191, 0.32);
+  color: #5eead4;
+}
+[data-ss-theme="dark"] .dash-group-chip:hover {
+  background: rgba(45, 212, 191, 0.22);
+}
+[data-ss-theme="dark"] .dash-breakdown-note {
+  color: #9aa6a1;
 }
 [data-ss-theme="dark"] .app-stage .mantine-Card-root,
 [data-ss-theme="dark"] .app-stage .mantine-Paper-root {
