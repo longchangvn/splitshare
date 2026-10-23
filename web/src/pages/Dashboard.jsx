@@ -728,7 +728,7 @@ function BreakdownPanel({ kind, rows, onClose }) {
           <div className="dash-breakdown-currency">{section.currency}</div>
           {section.people.map((p) => (
             <div key={p.user_id} className="dash-person-row">
-              <span className="dash-person-avatar" style={{ background: pastelFor(p.name) }} aria-hidden>
+              <span className="dash-person-avatar" style={{ background: pastelFor(p.name).from }} aria-hidden>
                 {initialsOf(p.name)}
               </span>
               <span className="dash-person-name">{p.name}</span>
