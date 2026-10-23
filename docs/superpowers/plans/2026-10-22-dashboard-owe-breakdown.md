@@ -48,7 +48,7 @@
 - Consumes the expense/split/payment snapshot already loaded by `ComputeNetsAsync`.
 - Produces pairwise raw debts on `GroupNets` and, per requesting user, `GroupRow.Owes: List<OweTo>` / `GroupRow.OwedToMe: List<OwedFrom>` in `BuildAllAsync`'s JSON (`owes`, `owed_to_me`, snake_case like existing fields).
 
-- [ ] **Step 1: Write failing tests for the raw-debt breakdown**
+- [x] **Step 1: Write failing tests for the raw-debt breakdown**
 
 ~~~csharp
 [Fact]
@@ -72,23 +72,23 @@ public async Task All_RawDebtBreakdown_EmptyListsWhenNoDebts()
 }
 ~~~
 
-- [ ] **Step 2: Run the focused test to verify it fails**
+- [x] **Step 2: Run the focused test to verify it fails**
 
 Run: `dotnet test SplitShare.sln --filter FullyQualifiedName~LedgerViewTests`
 
 Expected: FAIL because `GroupRow` has no `Owes`/`OwedToMe` fields.
 
-- [ ] **Step 3: Implement pairwise raw debts inside the existing snapshot pass**
+- [x] **Step 3: Implement pairwise raw debts inside the existing snapshot pass**
 
 In `ComputeNetsAsync` (already iterates every expense split and payment), accumulate per-pair signed amounts: `pair[(debtor, creditor)] += share` for each split where `share > 0 && debtor != payer`; `pair[(from, to)] -= amount` for each open payment. Carry the resulting map on `GroupNets` (no new DB queries). In `BuildAllAsync`, for the requesting user derive `OweTo` entries (pair amount > 0) and `OwedFrom` entries (pair amount < 0, mirrored sign), netted per counterparty, names resolved from the snapshot's user dictionary. Do not alter totals computation or `BuildMeAsync`.
 
-- [ ] **Step 4: Run the focused test to verify it passes**
+- [x] **Step 4: Run the focused test to verify it passes**
 
 Run: `dotnet test SplitShare.sln --filter FullyQualifiedName~LedgerViewTests`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~bash
 git add api/Services/LedgerService.cs tests/LedgerViewTests.cs
@@ -104,7 +104,7 @@ git commit -m "feat: add raw per-person debt breakdown to me/balances"
 - Consumes `data.groups[].owes` / `data.groups[].owed_to_me` from `GET /api/v1/me/balances`.
 - Produces toggleable stat cards (`<button>`, `aria-expanded`, `aria-controls`, chevron) and an inline `.dash-breakdown` panel inside `.dash-grid` spanning all columns.
 
-- [ ] **Step 1: Write failing rendered markup assertions**
+- [x] **Step 1: Write failing rendered markup assertions**
 
 ~~~js
 test('owe and owed cards are buttons exposing aria-expanded', () => { ... });
@@ -113,23 +113,23 @@ test('clicking the owe card renders the breakdown panel with person rows', () =>
 
 (See Task 4 for the test file; create it here with the card-state assertions so the markup contract drives implementation.)
 
-- [ ] **Step 2: Run the focused web test to verify it fails**
+- [x] **Step 2: Run the focused web test to verify it fails**
 
 Run: `node --test test/dashboard-owe-breakdown.test.mjs` from web/
 
 Expected: FAIL because the test module and panel do not exist.
 
-- [ ] **Step 3: Implement card buttons, open state, aggregation, and panel**
+- [x] **Step 3: Implement card buttons, open state, aggregation, and panel**
 
 Add `const [openPanel, setOpenPanel] = useState(null)` ('owe' | 'owed' | null). Aggregate client-side: iterate `groups`, for each currency accumulate `personNet[currency][user_id] += -amount_cents` for `owes` entries and `+= amount_cents` for `owed_to_me` entries, keeping the display name and the set of contributing `{group_id, name}` links. Sort rows by descending absolute amount, tie-break by name. Render one panel (whichever card is open) as a `<section className="dash-card dash-breakdown">` inserted in `.dash-grid` directly after the two stat cards with `grid-column: 1 / -1`. Person row: initials avatar via `initialsOf`/`pastelFor` from `components/Net.jsx`, name, per-currency amount via `fmt`, group chips as `<Link to={/groups/:id}>`. Empty state uses existing dimmed copy; loading keeps `MoneyShimmer` on the cards and shows the panel skeleton only when open.
 
-- [ ] **Step 4: Run the focused web test to verify it passes**
+- [x] **Step 4: Run the focused web test to verify it passes**
 
 Run: `node --test test/dashboard-owe-breakdown.test.mjs` from web/
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ~~~bash
 git add web/src/pages/Dashboard.jsx
@@ -145,11 +145,11 @@ git commit -m "feat: add clickable owe/owed breakdown to dashboard"
 - Consumes class names from Task 2 (`is-clickable`, `dash-breakdown`, `dash-person-row`, `dash-group-chip`, `dash-chevron`).
 - Produces hover/active/focus-visible affordance on the two stat cards, animated chevron rotation, panel and person-row layout, `[data-ss-theme="dark"]` overrides, and mobile stacking consistent with the existing `.dash-grid` responsive rules (~line 3480).
 
-- [ ] **Step 1: Add the styles, keeping existing card tones (`is-open`, `is-owed`, `is-settled`) unchanged**
+- [x] **Step 1: Add the styles, keeping existing card tones (`is-open`, `is-owed`, `is-settled`) unchanged**
 
 Do not alter the shimmer animation or the ring gauge styles.
 
-- [ ] **Step 2: Verify visually against desktop and narrow widths, then commit**
+- [x] **Step 2: Verify visually against desktop and narrow widths, then commit**
 
 ~~~bash
 git add web/src/styles.css
@@ -166,9 +166,9 @@ git commit -m "feat: style dashboard owe/owed breakdown panel"
 - Consumes `t()` keys used by the panel markup.
 - Produces EN + VI entries for: breakdown section headings ("You owe" / "Owed to you" reuse `net.youOweShort` / `net.owedToYou`; add `dashboard.breakdownEmptyOwe`, `dashboard.breakdownEmptyOwed`, `dashboard.inGroups` chip tooltip, `dashboard.perCurrencyNote`, `dashboard.collapseBreakdown`, `dashboard.expandBreakdown`).
 
-- [ ] **Step 1: Add English and Vietnamese entries for every new key**
+- [x] **Step 1: Add English and Vietnamese entries for every new key**
 
-- [ ] **Step 2: Write/extend failing web tests for multi-currency and a11y**
+- [x] **Step 2: Write/extend failing web tests for multi-currency and a11y**
 
 ~~~js
 test('multi-currency breakdown renders separate currency sections plus the never-summed note', () => { ... });
@@ -176,13 +176,13 @@ test('breakdown toggle reports aria-expanded and toggles closed', () => { ... })
 test('all new i18n keys exist in both en and vi', () => { ... });
 ~~~
 
-- [ ] **Step 3: Run the focused web tests to verify they pass**
+- [x] **Step 3: Run the focused web tests to verify they pass**
 
 Run: `node --test test/dashboard-owe-breakdown.test.mjs` from web/
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ~~~bash
 git add web/src/i18n/messages.js web/test/dashboard-owe-breakdown.test.mjs
@@ -194,25 +194,25 @@ git commit -m "feat: localize dashboard owe/owed breakdown"
 **Files:**
 - Modify: only files required by failures discovered during verification.
 
-- [ ] **Step 1: Run the full backend suite**
+- [x] **Step 1: Run the full backend suite**
 
 Run: `dotnet test SplitShare.sln`
 
 Expected: PASS with no regressions (additive DTO fields must not break `ContractTests`).
 
-- [ ] **Step 2: Run web regression and production build**
+- [x] **Step 2: Run web regression and production build**
 
 Run: `node --test test/dashboard-owe-breakdown.test.mjs test/dashboard-loading-shimmer.test.mjs && npm run build` from web/
 
 Expected: PASS. Record any pre-existing unrelated failure separately rather than attributing it to this work.
 
-- [ ] **Step 3: Diff hygiene**
+- [x] **Step 3: Diff hygiene**
 
 Run: `git diff --check`
 
 Expected: no whitespace errors.
 
-- [ ] **Step 4: Commit final corrections if verification required any**
+- [x] **Step 4: Commit final corrections if verification required any**
 
 ~~~bash
 git add <only files changed by verification fixes>
