@@ -190,6 +190,10 @@ const en = {
   'groups.count': '{count} groups',
   'groups.countOne': '{count} group',
   'groups.totalSpend': 'Total spend',
+  'groups.filterLabel': 'Filter groups by status',
+  'groups.shownOf': '{shown} of {total} groups',
+  'groups.filterEmpty': 'No groups match the selected status.',
+  'groups.filterNone': 'Select at least one status to see groups.',
 
   'groupStatus.label': 'Group access',
   'groupStatus.opening': 'Opening',
@@ -560,6 +564,7 @@ const en = {
   'forms.expense.cat.other': 'Other',
 
   'scan.open': 'Scan receipts',
+  'scan.unavailable': 'Temporarily unavailable',
   'scan.title': 'Scan receipts',
   'scan.addPhotos': 'Add photos',
   'scan.takePhotos': 'Take photos',
@@ -933,6 +938,10 @@ const vi = {
   'groups.count': '{count} nhóm',
   'groups.countOne': '{count} nhóm',
   'groups.totalSpend': 'Tổng chi',
+  'groups.filterLabel': 'Lọc nhóm theo trạng thái',
+  'groups.shownOf': '{shown}/{total} nhóm',
+  'groups.filterEmpty': 'Không có nhóm nào khớp trạng thái đã chọn.',
+  'groups.filterNone': 'Chọn ít nhất một trạng thái để xem nhóm.',
 
   'groupStatus.label': 'Quyền truy cập nhóm',
   'groupStatus.opening': 'Đang mở',
@@ -1303,6 +1312,7 @@ const vi = {
   'forms.expense.cat.other': 'Khác',
 
   'scan.open': 'Quét hóa đơn',
+  'scan.unavailable': 'Tạm thời không khả dụng',
   'scan.title': 'Quét hóa đơn',
   'scan.addPhotos': 'Thêm ảnh',
   'scan.takePhotos': 'Chụp ảnh',

@@ -1033,10 +1033,12 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           onChange={(x) => setProofRef(x.target.value)}
         />
       </div>
-      <Button className="wizard-primary" fullWidth type="submit" loading={paying}>
-        {t('forms.payment.record')}
-      </Button>
-      <Err e={e} />
+      <div className="wizard-sticky-footer">
+        <Err e={e} />
+        <Button className="wizard-primary" fullWidth type="submit" loading={paying}>
+          {t('forms.payment.record')}
+        </Button>
+      </div>
     </form>
   );
 }

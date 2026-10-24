@@ -20,6 +20,9 @@ import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
 import { useT } from '../prefs.jsx';
 
+// Temporarily disabled: batch "Scan receipts" stays visible but cannot be used. Set to true to restore.
+const SCAN_RECEIPTS_ENABLED = false;
+
 // Mockup receipt thumbnails (docs/mobile-design.html screen 3): category →
 // emoji tile so ledger cards scan like receipts. Pure presentation.
 const CAT_TILE = {
@@ -251,6 +254,7 @@ export function GroupDetail() {
   useEffect(() => { loadLedger(); }, [id, type]);
   // Batch receipt scanning is offered only when the API has an OCR provider wired.
   useEffect(() => {
+    if (!SCAN_RECEIPTS_ENABLED) return undefined;
     let cancelled = false;
     api.get('/api/v1/capabilities')
       .then((c) => { if (!cancelled) setOcrEnabled(!!c?.ocr_enabled); })
@@ -273,6 +277,9 @@ export function GroupDetail() {
   const groupLifecycle = detail?.status || 'opening';
   const canWriteGroup = groupLifecycle === 'opening'
     || (groupLifecycle === 'locked' && detail?.my_role === 'owner');
+  const showScan = !SCAN_RECEIPTS_ENABLED || ocrEnabled;
+  const scanDisabled = !SCAN_RECEIPTS_ENABLED || !canWriteGroup;
+  const scanTitle = SCAN_RECEIPTS_ENABLED ? undefined : t('scan.unavailable');
   const lifecycleLabel = t(`groupStatus.${groupLifecycle}`);
   const groupCreatedSubtitle = formatGroupCreatedAt(detail?.created_at, t('report.createdOn'));
 
@@ -761,8 +768,8 @@ export function GroupDetail() {
               </button>
             </div>
             <div className="gd-action-quiet">
-              {ocrEnabled && (
-                <button type="button" className="gd-action-ghost" onClick={() => setScanOpen(true)} disabled={!canWriteGroup}>
+              {showScan && (
+                <button type="button" className="gd-action-ghost" onClick={() => setScanOpen(true)} disabled={scanDisabled} title={scanTitle}>
                   <GdActionIcon name="scan" />
                   <span>{t('scan.open')}</span>
                 </button>
@@ -807,12 +814,13 @@ export function GroupDetail() {
               <GdActionIcon name="pay" />
               <span>{t('groupDetail.recordPayment')}</span>
             </button>
-            {ocrEnabled && (
+            {showScan && (
               <button
                 type="button"
                 className="gd-action-btn"
                 onClick={() => setScanOpen(true)}
-                disabled={!canWriteGroup}
+                disabled={scanDisabled}
+                title={scanTitle}
               >
                 <GdActionIcon name="scan" />
                 <span>{t('scan.open')}</span>

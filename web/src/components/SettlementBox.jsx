@@ -117,7 +117,20 @@ export function SettlementBox({ groupId, currency, members, onPay, plan: planPro
 
   return (
     <>
-      <section className={`report-metric report-status-card is-${tone}`}>
+      <section
+        className={`report-metric report-status-card is-${tone} is-clickable`}
+        role="button"
+        tabIndex={0}
+        aria-label={`${statusTitle}. ${subtitle}. ${t('settlement.viewDetails')}`}
+        title={t('settlement.viewDetails')}
+        onClick={() => setOpen(true)}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault();
+            setOpen(true);
+          }
+        }}
+      >
         <div className="report-status-row">
           <StatusGlyph settled={settled} />
           <div className="report-status-copy">
@@ -125,13 +138,12 @@ export function SettlementBox({ groupId, currency, members, onPay, plan: planPro
             <p className="report-status-sub">{subtitle}</p>
           </div>
           <ActionIcon
+            component="span"
             className="report-status-info"
             variant="subtle"
             radius="xl"
             size="md"
-            aria-label={t('settlement.viewDetails')}
-            title={t('settlement.viewDetails')}
-            onClick={() => setOpen(true)}
+            aria-hidden
           >
             <InfoIcon />
           </ActionIcon>

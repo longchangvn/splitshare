@@ -367,18 +367,49 @@ function NewGroupIcon() {
   );
 }
 
+const GROUP_STATUSES = ['opening', 'locked', 'closed'];
+
 function GroupsPage({ groups, ready, error, onCreate, nav }) {
   const t = useT();
+  const [statuses, setStatuses] = useState(['opening']);
+  const statusOf = (g) => g.status || 'opening';
+  const shown = groups.filter((g) => statuses.includes(statusOf(g)));
+  const toggleStatus = (s) => setStatuses((cur) => (
+    cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]
+  ));
   return (
     <>
       <div className="dash-head">
         <div>
           <Title order={2}>{t('groups.title')}</Title>
-          <Text size="sm" c="dimmed">{ready ? `${groups.length} group${groups.length === 1 ? '' : 's'}` : '…'}</Text>
+          <Text size="sm" c="dimmed">
+            {ready ? t('groups.shownOf', { shown: shown.length, total: groups.length }) : '…'}
+          </Text>
         </div>
         <Button className="dash-cta" onClick={onCreate} leftSection={<NewGroupIcon />}>{t('dashboard.newGroup')}</Button>
       </div>
       <Err e={error} />
+      {ready && groups.length > 0 && (
+        <div className="groups-filter" role="group" aria-label={t('groups.filterLabel')}>
+          {GROUP_STATUSES.map((s) => {
+            const on = statuses.includes(s);
+            const count = groups.filter((g) => statusOf(g) === s).length;
+            return (
+              <button
+                key={s}
+                type="button"
+                className={`groups-filter-chip is-${s}${on ? ' is-on' : ''}`}
+                aria-pressed={on}
+                onClick={() => toggleStatus(s)}
+              >
+                <span className="groups-filter-dot" aria-hidden />
+                {t(`groupStatus.${s}`)}
+                <span className="groups-filter-count">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {!ready && !error && (
         <div className="groups-board" aria-hidden>
           <Skeleton className="group-skel" radius={22} />
@@ -393,9 +424,14 @@ function GroupsPage({ groups, ready, error, onCreate, nav }) {
           <Button variant="light" onClick={onCreate}>{t('dashboard.createGroup')}</Button>
         </div>
       )}
-      {ready && groups.length > 0 && (
+      {ready && groups.length > 0 && shown.length === 0 && (
+        <div className="groups-empty">
+          <Text c="dimmed">{statuses.length === 0 ? t('groups.filterNone') : t('groups.filterEmpty')}</Text>
+        </div>
+      )}
+      {ready && shown.length > 0 && (
         <div className="groups-board">
-          {groups.map((g) => (
+          {shown.map((g) => (
             <GroupTile key={g.group_id} group={g} onOpen={() => nav(`/groups/${g.group_id}`)} />
           ))}
         </div>
