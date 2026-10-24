@@ -1941,10 +1941,61 @@ a {
 .wizard-actions {
   width: 100%;
 }
-/* Cancel · Save & new · Save & close: on narrow screens the primary takes its own row. */
+/* Cancel · Save & new · Save & close — one row: quiet Cancel left, outlined
+   secondary + solid primary right. Narrow screens: primary takes its own row. */
+.expense-save-actions {
+  flex-wrap: nowrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+.expense-save-actions > .mantine-Button-root {
+  height: 44px;
+  padding-inline: 22px;
+  border-radius: 999px !important;
+  font-weight: 600;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.expense-save-actions > .expense-save-close { margin-top: 0; }
+.expense-save-actions > .expense-save-cancel {
+  margin-right: auto;
+  padding-inline: 14px;
+  background: transparent !important;
+  color: #5f6b66 !important;
+  border: 0 !important;
+}
+.expense-save-actions > .expense-save-cancel:hover {
+  background: #f2f4f3 !important;
+  color: #111214 !important;
+}
+.expense-save-actions > .expense-save-new {
+  background: #fff !important;
+  color: #111214 !important;
+  border: 1px solid #dfe5e2 !important;
+}
+.expense-save-actions > .expense-save-new:hover {
+  background: #f7f9f8 !important;
+  border-color: #c4cdc9 !important;
+}
+.expense-save-actions > .mantine-Button-root:disabled { opacity: 0.45; }
 @media (max-width: 480px) {
   .expense-save-actions { flex-wrap: wrap; }
-  .expense-save-actions > .wizard-primary { flex-basis: 100%; max-width: 100% !important; order: -1; }
+  .expense-save-actions > .expense-save-close { flex: 1 1 100%; order: -1; }
+  .expense-save-actions > .expense-save-new,
+  .expense-save-actions > .expense-save-cancel { flex: 1 1 0; margin-right: 0; }
+}
+[data-ss-theme="dark"] .expense-save-actions > .expense-save-cancel { color: #a9b5b0 !important; }
+[data-ss-theme="dark"] .expense-save-actions > .expense-save-cancel:hover {
+  background: #2a3131 !important;
+  color: #eef3f0 !important;
+}
+[data-ss-theme="dark"] .expense-save-actions > .expense-save-new {
+  background: transparent !important;
+  color: #eef3f0 !important;
+  border-color: #3a4341 !important;
+}
+[data-ss-theme="dark"] .expense-save-actions > .expense-save-new:hover {
+  background: #2a3131 !important;
+  border-color: #4a5452 !important;
 }
 .wizard-section {
   display: flex;

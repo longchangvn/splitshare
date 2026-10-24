@@ -799,14 +799,14 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
         </Alert>
       )}
       {!confirm && multiSave && (
-        <Group gap="sm" grow className="wizard-actions expense-save-actions">
+        <Group gap="sm" className="wizard-actions expense-save-actions">
           {onCancel && (
-            <Button className="wizard-back" type="button" onClick={onCancel} disabled={saving}>
+            <Button className="expense-save-cancel" type="button" onClick={onCancel} disabled={saving}>
               {t('common.cancel')}
             </Button>
           )}
           <Button
-            className="wizard-back"
+            className="expense-save-new"
             type="submit"
             onClick={() => { saveModeRef.current = 'new'; }}
             loading={saving && savingMode === 'new'}
@@ -815,7 +815,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
             {t('forms.expense.saveNew')}
           </Button>
           <Button
-            className="wizard-primary"
+            className="wizard-primary expense-save-close"
             type="submit"
             onClick={() => { saveModeRef.current = 'close'; }}
             loading={saving && savingMode === 'close'}
