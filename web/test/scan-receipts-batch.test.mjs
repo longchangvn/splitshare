@@ -196,7 +196,9 @@ test('ScanReceipts scans with the batch endpoint, uploads the photo and retries 
 
 test('GroupDetail shows the scan action only when capabilities report OCR', () => {
   assert.match(groupDetail, /api\.get\('\/api\/v1\/capabilities'\)/);
-  assert.match(groupDetail, /const canScan = |ocrEnabled && \(/);
+  assert.match(groupDetail, /const showScan = !SCAN_RECEIPTS_ENABLED \|\| ocrEnabled;/);
+  assert.match(groupDetail, /const scanDisabled = !SCAN_RECEIPTS_ENABLED \|\| !canWriteGroup;/);
+  assert.match(groupDetail, /showScan && \(/);
   assert.match(groupDetail, /<ScanReceipts[\s\S]*?meId=\{user\?\.user_id\}[\s\S]*?categories=\{categories\}/);
   assert.match(groupDetail, /onCreated=\{\(\) => \{ load\(\); loadLedger\(\); loadSummary\(\); \}\}/);
 });
