@@ -6,6 +6,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
+import { Err, useAuth } from '../auth.jsx';
 import { categorySelectData } from '../categories.js';
 import {
   SCAN_MOBILE_QUERY, compressReceiptImage, scanErrorKey, scanToAmount,
@@ -75,8 +76,7 @@ function moneyAmountError(raw, t) {
 // copyFrom: detail.expense payload to prefill a copy (task 4.1); images carried on save (4.2).
 export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSaveNew, onCancel, currency = '' }) {
   const t = useT();
-  const { user } = useAuth();
-  const meId = user?.user_id || '';
+  const meId = useAuth()?.user?.user_id;
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const activeIds = new Set(members.map((m) => m.user_id));
@@ -117,7 +117,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
   const [payer, setPayer] = useState(() => {
     const p = source?.payer_id;
     if (p && activeIds.has(p)) return p;
-    // Default to me (copy falls back to me when the original payer left).
     if (meId && activeIds.has(meId)) return meId;
     return members[0]?.user_id || '';
   });
