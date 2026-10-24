@@ -1,0 +1,235 @@
+{
+  "summary": {
+    "model": "glm-ocr:latest",
+    "base_url": "http://localhost:11434/v1",
+    "files": 7,
+    "scored": 7,
+    "errors": 0,
+    "avg_latency_ms": 4549,
+    "accuracy": {
+      "classification": 0.7142857142857143,
+      "total": 0.5,
+      "merchant": 0.3333333333333333,
+      "date": 0.16666666666666666,
+      "tax": 0.75,
+      "tip": 0,
+      "currency": 0,
+      "category": 0.3333333333333333
+    },
+    "receipts": 6
+  },
+  "results": [
+    {
+      "file": "01-pho.jpg",
+      "expected": {
+        "is_receipt": true,
+        "merchant": "PHO 24",
+        "total": 19.98,
+        "currency": null,
+        "date": "2026-10-20",
+        "tax": 1.48,
+        "tip": null,
+        "category": "food"
+      },
+      "latency_ms": 5352,
+      "http": 200,
+      "error": null,
+      "got": {
+        "is_receipt": true,
+        "merchant": "PHO 24",
+        "total": 19.98,
+        "currency": "USD",
+        "date": 2026,
+        "tax": 1.48,
+        "category": "food"
+      },
+      "scores": {
+        "classification": true,
+        "total": true,
+        "merchant": true,
+        "date": false,
+        "tax": true,
+        "category": true
+      }
+    },
+    {
+      "file": "02-grab.jpg",
+      "expected": {
+        "is_receipt": true,
+        "merchant": "GRAB RIDE",
+        "total": 8.5,
+        "currency": null,
+        "date": "2026-10-18",
+        "tax": null,
+        "tip": null,
+        "category": "transport"
+      },
+      "latency_ms": 5433,
+      "http": 200,
+      "error": null,
+      "got": {
+        "receipt": {
+          "date": "2026-10-18",
+          "total": 8.5,
+          "category": "food",
+          "confidence": {
+            "total": "high",
+            "date": "2026-10-18",
+            "merchant": "GRAB RIDE"
+          }
+        },
+        "trip receipt": "8.50"
+      },
+      "scores": {
+        "classification": true,
+        "total": false,
+        "merchant": false,
+        "date": false,
+        "category": false
+      }
+    },
+    {
+      "file": "03-hotel.jpg",
+      "expected": {
+        "is_receipt": true,
+        "merchant": "SUNRISE HOTEL",
+        "total": 142,
+        "currency": null,
+        "date": "2026-10-19",
+        "tax": 12,
+        "tip": null,
+        "category": "stay"
+      },
+      "latency_ms": 5263,
+      "http": 200,
+      "error": null,
+      "got": {
+        "is_receipt": false,
+        "merchant": "SUNRISE HOTEL",
+        "total": 142,
+        "currency": "USD",
+        "date": 2026,
+        "tax": 12,
+        "category": "stay"
+      },
+      "scores": {
+        "classification": false,
+        "total": true,
+        "merchant": true,
+        "date": false,
+        "tax": true,
+        "category": true
+      }
+    },
+    {
+      "file": "04-vinmart.jpg",
+      "expected": {
+        "is_receipt": true,
+        "merchant": "VINMART",
+        "total": 375000,
+        "currency": "VND",
+        "date": "2026-10-21",
+        "tax": 25000,
+        "tip": null,
+        "category": "food"
+      },
+      "latency_ms": 650,
+      "http": 200,
+      "error": null,
+      "got": {
+        "date": "2026-10-21",
+        "groceries": "350000",
+        "tax": "25000",
+        "total": "375000",
+        "vnd": "VND"
+      },
+      "scores": {
+        "classification": true,
+        "total": true,
+        "merchant": false,
+        "date": true,
+        "tax": true,
+        "currency": false,
+        "category": false
+      }
+    },
+    {
+      "file": "05-coffee.jpg",
+      "expected": {
+        "is_receipt": true,
+        "merchant": "BLUE BOTTLE COFFEE",
+        "total": 7.25,
+        "currency": null,
+        "date": "2026-10-22",
+        "tax": null,
+        "tip": 1,
+        "category": "food"
+      },
+      "latency_ms": 5097,
+      "http": 200,
+      "error": null,
+      "got": {
+        "receipt": {
+          "date": "2026-10-22",
+          "latte": "6.25",
+          "tip": "1.00"
+        }
+      },
+      "scores": {
+        "classification": true,
+        "total": false,
+        "merchant": false,
+        "date": false,
+        "tip": false,
+        "category": false
+      }
+    },
+    {
+      "file": "06-faded.jpg",
+      "expected": {
+        "is_receipt": true,
+        "merchant": "CORNER CAFE",
+        "total": 31.4,
+        "currency": null,
+        "date": "2026-10-17",
+        "tax": 3.4,
+        "tip": null,
+        "category": "food"
+      },
+      "latency_ms": 5119,
+      "http": 200,
+      "error": null,
+      "got": {
+        "receipt": {
+          "date": "2026-10-17",
+          "breakfast": "28.00",
+          "tax": "3.40",
+          "total": "31.40"
+        }
+      },
+      "scores": {
+        "classification": true,
+        "total": false,
+        "merchant": false,
+        "date": false,
+        "tax": false,
+        "category": false
+      }
+    },
+    {
+      "file": "07-note.jpg",
+      "expected": {
+        "is_receipt": false
+      },
+      "latency_ms": 4929,
+      "http": 200,
+      "error": null,
+      "got": {
+        "meetingNotes": "Attendees: Ana, Ben, Chi\nNext steps: book the venue\nBudget discussion moved to Friday"
+      },
+      "scores": {
+        "classification": false
+      }
+    }
+  ]
+}

@@ -45,7 +45,8 @@ public sealed class NotificationTests
         var push = new RecordingNotificationProvider();
         var notifier = new GroupNotifier(db, push, config, NullLogger<GroupNotifier>.Instance);
         return (db, auth,
-            new ExpenseService(db, ledger, new FakeStore(), new CategoryService(db)),
+            new ExpenseService(db, ledger, new FakeStore(), new CategoryService(db),
+                statusPolicy: new GroupStatusPolicy(db), notifier: notifier),
             new PaymentService(db, ledger, null, notifier),
             push);
     }

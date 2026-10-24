@@ -38,10 +38,25 @@ public static class ReceiptScanEndpoints
         }).DisableAntiforgery().RequireRateLimiting(RateLimitPolicy);
     }
 
+    /// <summary>
+    /// Additive shape: the flat total/confidence/warnings fields keep the shipped
+    /// single-scan client working, while <c>receipt</c> carries the batch fields.
+    /// </summary>
     public static object ToDto(ReceiptSuggestion s) => new
     {
         total = s.Total,
-        confidence = s.Confidence,
-        warnings = s.Warnings
+        confidence = s.Confidence.Total,
+        warnings = s.Warnings,
+        receipt = new
+        {
+            merchant = s.Merchant,
+            total = s.Total,
+            currency = s.Currency,
+            date = s.Date,
+            tax = s.Tax,
+            tip = s.Tip,
+            category = s.Category,
+            confidence = s.Confidence
+        }
     };
 }

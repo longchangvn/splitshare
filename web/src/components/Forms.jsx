@@ -73,7 +73,7 @@ function moneyAmountError(raw, t) {
 
 // Expense create/edit with live split preview + un-settle confirm (tasks 8.2/8.3).
 // copyFrom: detail.expense payload to prefill a copy (task 4.1); images carried on save (4.2).
-export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, currency = '' }) {
+export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSaveNew, onCancel, currency = '' }) {
   const t = useT();
   const { user } = useAuth();
   const meId = user?.user_id || '';
@@ -129,6 +129,9 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const [confirm, setConfirm] = useState(null); // [names] un-settle list
   const [pending, setPending] = useState(null); // PATCH body awaiting confirm
   const [saving, setSaving] = useState(false);
+  // Create-only: which footer button triggered submit ('close' | 'new'); Enter key = close.
+  const saveModeRef = useRef('close');
+  const [savingMode, setSavingMode] = useState('close');
   const [imgErrs, setImgErrs] = useState([]);
   const [e, setE] = useState(null);
   const todayStr = () => new Date().toISOString().slice(0, 10);
@@ -418,6 +421,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
   const submit = async (ev) => {
     ev.preventDefault();
     if (saving) return; // double-submit guard
+    const mode = saveModeRef.current;
+    saveModeRef.current = 'close';
     const amtErr = moneyAmountError(amount, t) || (!amount ? t('forms.payment.invalidAmount') : null);
     if (amtErr || !isValidMoneyAmount(amount)) {
       setAmountErr(amtErr || t('forms.payment.invalidAmount'));
@@ -425,13 +430,16 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     }
     setE(null);
     setImgErrs([]);
+    setSavingMode(mode);
     setSaving(true);
     try {
       if (!existing) {
         const r = await api.post(`/api/v1/groups/${groupId}/expenses`, build());
         const newId = r.expense?.expense_id;
+        let notified = false;
         if (newId && staged.length > 0) {
           const failures = await uploadStaged(newId);
+          notified = true;
           if (failures.length > 0) {
             setImgErrs(failures);
             notifications.show({ title: t('forms.expense.savedSomeFailed'), message: failures.join('; '), color: 'orange' });
@@ -439,7 +447,12 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
             notifications.show({ title: t('forms.expense.savedWithReceipts'), color: 'teal' });
           }
         }
-        onDone(r);
+        if (mode === 'new' && onSaveNew) {
+          if (!notified) notifications.show({ title: t('forms.expense.saved'), color: 'teal' });
+          onSaveNew(r);
+        } else {
+          onDone(r);
+        }
       } else {
         const r = await api.patch(`/api/v1/expenses/${existing.expense_id}`,
           { expected_version: existing.version, ...build() });
@@ -505,7 +518,10 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
     { value: 'SHARES', label: t('forms.expense.shares') },
   ];
   const catData = categorySelectData(categories, t);
-  const saveActionLabel = isCopy ? t('forms.expense.saveCopy') : t('forms.expense.addExpense');
+  const multiSave = !existing && !!onSaveNew;
+  const saveActionLabel = multiSave
+    ? t('common.save')
+    : isCopy ? t('forms.expense.saveCopy') : t('forms.expense.addExpense');
 
   return (
     <>
@@ -797,7 +813,34 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, curr
           </Group>
         </Alert>
       )}
-      {!confirm && (
+      {!confirm && multiSave && (
+        <Group gap="sm" grow className="wizard-actions expense-save-actions">
+          {onCancel && (
+            <Button className="wizard-back" type="button" onClick={onCancel} disabled={saving}>
+              {t('common.cancel')}
+            </Button>
+          )}
+          <Button
+            className="wizard-back"
+            type="submit"
+            onClick={() => { saveModeRef.current = 'new'; }}
+            loading={saving && savingMode === 'new'}
+            disabled={saving && savingMode !== 'new'}
+          >
+            {t('forms.expense.saveNew')}
+          </Button>
+          <Button
+            className="wizard-primary"
+            type="submit"
+            onClick={() => { saveModeRef.current = 'close'; }}
+            loading={saving && savingMode === 'close'}
+            disabled={saving && savingMode !== 'close'}
+          >
+            {t('forms.expense.saveClose')}
+          </Button>
+        </Group>
+      )}
+      {!confirm && !multiSave && (
         <Button
           className="wizard-primary"
           fullWidth

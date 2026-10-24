@@ -44,6 +44,7 @@
       "stopAtEntry": false,
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       },
