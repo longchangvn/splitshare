@@ -1941,6 +1941,11 @@ a {
 .wizard-actions {
   width: 100%;
 }
+/* Cancel · Save & new · Save & close: on narrow screens the primary takes its own row. */
+@media (max-width: 480px) {
+  .expense-save-actions { flex-wrap: wrap; }
+  .expense-save-actions > .wizard-primary { flex-basis: 100%; max-width: 100% !important; order: -1; }
+}
 .wizard-section {
   display: flex;
   flex-direction: column;

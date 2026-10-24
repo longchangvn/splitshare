@@ -1,9 +1,11 @@
 using SplitShare.Api.Data;
+using SplitShare.Api.Groups;
 
 namespace SplitShare.Api.Expenses;
 
-/// <summary>Scan one receipt photo for a group and return its total (nothing is saved).</summary>
-public sealed class ReceiptScanService(AppDbContext db, IOcrService ocr, ILogger<ReceiptScanService> logger)
+/// <summary>Scan one receipt photo for a group and return its fields (nothing is saved).</summary>
+public sealed class ReceiptScanService(AppDbContext db, IOcrService ocr, CategoryService categories,
+    ILogger<ReceiptScanService> logger)
 {
     /// <summary>Formats vision models accept; HEIC/HEIF are converted to JPEG by the client.</summary>
     public static readonly HashSet<string> ScanMimes = new(StringComparer.OrdinalIgnoreCase)
@@ -21,11 +23,22 @@ public sealed class ReceiptScanService(AppDbContext db, IOcrService ocr, ILogger
         var norm = ExpenseService.NormalizeImageMime(fileName, mime);
         if (!ScanMimes.Contains(norm)) return new(false, "VALIDATION", $"Scan supports jpg png webp (got '{mime}').");
         if (bytes.Length == 0 || bytes.Length > ExpenseService.MaxImageBytes)
-            return new(false, "VALIDATION", $"Image must be 1B-10MB (got {bytes.Length}B).");
+            return new(false, "VALIDATION", $"Image must be 1B-10MB (got {bytes.Length} bytes).");
 
         try
         {
-            var suggestion = await ocr.ExtractAsync(ImageSanitizer.Sanitize(bytes, norm), norm, ct);
+            var categoryKeys = (await categories.EnsureAsync(groupId)).Select(c => c.Key).ToList();
+            var suggestion = await ocr.ExtractAsync(
+                ImageSanitizer.Sanitize(bytes, norm), norm,
+                new OcrContext(group.Currency, categoryKeys), ct);
+
+            // A foreign receipt is still returned; the client asks for the FX triple
+            // (web) or a group-currency amount (mobile) before creating the expense.
+            if (suggestion.Currency is not null
+                && !string.Equals(suggestion.Currency, group.Currency, StringComparison.OrdinalIgnoreCase)
+                && !suggestion.Warnings.Contains("currency_mismatch"))
+                suggestion = suggestion with { Warnings = [.. suggestion.Warnings, "currency_mismatch"] };
+
             logger.LogInformation("Receipt scan ok group {GroupId} user {UserId} warnings {Warnings}",
                 groupId, actorId, string.Join(",", suggestion.Warnings));
             return new(true, null, null, suggestion);

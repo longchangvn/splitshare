@@ -4,9 +4,11 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using SplitShare.Api.Common;
 using SplitShare.Api.Data;
 using SplitShare.Api.Endpoints;
 using SplitShare.Api.Expenses;
+using SplitShare.Api.Groups;
 using SplitShare.Api.Models;
 
 namespace SplitShare.Tests;
@@ -14,6 +16,7 @@ namespace SplitShare.Tests;
 public sealed class ReceiptScanTests
 {
     private static readonly byte[] Jpeg = [0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x02, 0xFF, 0xD9];
+    private static readonly OcrContext UsdFood = new("USD", ["food", "stay", "transport", "other"]);
 
     // ---- ReceiptParser ----
 
@@ -27,7 +30,7 @@ public sealed class ReceiptScanTests
             ```
             """);
         Assert.Equal(21.00m, s.Total);
-        Assert.Equal("high", s.Confidence);
+        Assert.Equal("high", s.Confidence.Total);
         Assert.Empty(s.Warnings);
     }
 
@@ -36,7 +39,8 @@ public sealed class ReceiptScanTests
     [InlineData("""{"total":7}""", "7")]
     [InlineData("""{"total":0.015}""", "0.02")]
     public void Parser_Accepts_Numbers_And_Numeric_Strings(string json, string expected)
-        => Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture), ReceiptParser.Parse(json).Total);
+        => Assert.Equal(decimal.Parse(expected, System.Globalization.CultureInfo.InvariantCulture),
+            ReceiptParser.Parse(json).Total);
 
     [Theory]
     [InlineData("""{"total":-5}""", "total_invalid")]
@@ -44,7 +48,6 @@ public sealed class ReceiptScanTests
     [InlineData("""{"total":2000000}""", "total_invalid")]
     [InlineData("""{"total":null}""", "total_missing")]
     [InlineData("""{"total":"about 20"}""", "total_missing")]
-    [InlineData("""{"is_receipt":false,"total":10}""", "not_a_receipt")]
     public void Parser_Rejects_Bad_Totals(string json, string warning)
     {
         var s = ReceiptParser.Parse(json);
@@ -53,8 +56,80 @@ public sealed class ReceiptScanTests
     }
 
     [Fact]
+    public void Parser_Returns_Empty_Card_For_A_Non_Receipt_With_No_Total()
+    {
+        var s = ReceiptParser.Parse("""{"is_receipt":false}""");
+        Assert.Null(s.Total);
+        Assert.Equal(["not_a_receipt"], s.Warnings);
+        Assert.Null(s.Merchant);
+    }
+
+    [Fact]
+    public void Parser_Keeps_Fields_When_A_Receipt_Is_Misclassified()
+    {
+        // Small local models sometimes answer is_receipt=false for a valid receipt;
+        // keep the readable fields and let the user decide, with the warning attached.
+        var s = ReceiptParser.Parse("""{"is_receipt":false,"merchant":"Hotel","total":142}""");
+        Assert.Equal(142m, s.Total);
+        Assert.Equal("Hotel", s.Merchant);
+        Assert.Contains("not_a_receipt", s.Warnings);
+    }
+
+    [Fact]
+    public void Parser_Reads_Rich_Fields_And_Per_Field_Confidence()
+    {
+        var s = ReceiptParser.Parse("""
+            {"is_receipt":true,"merchant":"  Pho   24  ","total":19.98,"currency":"usd",
+             "date":"2026-10-20","tax":1.48,"tip":1.00,"category":"FOOD",
+             "confidence":{"total":"high","date":"low","merchant":"high","category":"maybe"}}
+            """, UsdFood);
+
+        Assert.Equal("Pho 24", s.Merchant);
+        Assert.Equal(19.98m, s.Total);
+        Assert.Equal("USD", s.Currency);
+        Assert.Equal(new DateOnly(2026, 10, 20), s.Date);
+        Assert.Equal(1.48m, s.Tax);
+        Assert.Equal(1.00m, s.Tip);
+        Assert.Equal("food", s.Category);
+        Assert.Equal("high", s.Confidence.Total);
+        Assert.Equal("low", s.Confidence.Date);
+        Assert.Equal("high", s.Confidence.Merchant);
+        Assert.Null(s.Confidence.Category); // invalid confidence values are ignored
+        Assert.Empty(s.Warnings);
+    }
+
+    [Fact]
+    public void Parser_Accepts_A_Nested_Receipt_Object()
+    {
+        var s = ReceiptParser.Parse("""{"receipt":{"merchant":"Corner Cafe","total":31.4,"category":"food"}}""", UsdFood);
+        Assert.Equal("Corner Cafe", s.Merchant);
+        Assert.Equal(31.40m, s.Total);
+        Assert.Equal("food", s.Category);
+    }
+
+    [Theory]
+    [InlineData("2999-01-01", null, "date_invalid")]
+    [InlineData("October 20", null, "date_invalid")]
+    [InlineData("20261017", "2026-10-17", null)]
+    public void Parser_Normalizes_And_Rejects_Dates(string raw, string? expected, string? warning)
+    {
+        var s = ReceiptParser.Parse($$"""{"total":5,"date":"{{raw}}"}""");
+        Assert.Equal(expected is null ? null : DateOnly.Parse(expected), s.Date);
+        if (warning is null) Assert.DoesNotContain("date_invalid", s.Warnings);
+        else Assert.Contains(warning, s.Warnings);
+    }
+
+    [Fact]
+    public void Parser_Filters_Categories_To_The_Group_List()
+    {
+        var s = ReceiptParser.Parse("""{"total":5,"category":"fuel"}""", UsdFood);
+        Assert.Null(s.Category);
+        Assert.Contains("category_unknown", s.Warnings);
+    }
+
+    [Fact]
     public void Parser_Ignores_Unknown_Confidence()
-        => Assert.Null(ReceiptParser.Parse("""{"total":3,"confidence":"maybe"}""").Confidence);
+        => Assert.Null(ReceiptParser.Parse("""{"total":3,"confidence":"maybe"}""").Confidence.Total);
 
     [Theory]
     [InlineData(null)]
@@ -83,12 +158,13 @@ public sealed class ReceiptScanTests
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
-    private static IConfiguration OcrConfig(bool enabled = true, string? key = "test-key") =>
+    private static IConfiguration OcrConfig(bool enabled = true, string? key = "test-key",
+        string? baseUrl = "https://opencode.test/inference/openai/v1/", string? model = "gemini-3.5-flash-lite") =>
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Ocr:Enabled"] = enabled.ToString(),
-            ["Ocr:BaseUrl"] = "https://opencode.test/inference/openai/v1/",
-            ["Ocr:Model"] = "gemini-3.5-flash-lite",
+            ["Ocr:BaseUrl"] = baseUrl,
+            ["Ocr:Model"] = model,
             ["Ocr:ApiKey"] = key,
         }).Build();
 
@@ -104,21 +180,44 @@ public sealed class ReceiptScanTests
         => new(new FakeFactory(h), cfg ?? OcrConfig(), NullLogger<OpenAiCompatibleOcrService>.Instance);
 
     [Fact]
-    public async Task Provider_Sends_OpenAi_Request_And_Parses_Total()
+    public async Task Provider_Sends_Context_Aware_OpenAi_Request()
     {
-        var h = new FakeHandler(_ => Chat("""{"is_receipt":true,"total":4.5,"confidence":"high"}"""));
-        var s = await Provider(h).ExtractAsync(Jpeg, "image/jpeg");
+        var h = new FakeHandler(_ => Chat("""
+            {"is_receipt":true,"merchant":"Cafe","total":4.5,"currency":"USD",
+             "date":"2026-10-20","category":"food","confidence":{"total":"high"}}
+            """));
+        var s = await Provider(h).ExtractAsync(Jpeg, "image/jpeg", UsdFood);
 
         Assert.Equal(4.50m, s.Total);
+        Assert.Equal("Cafe", s.Merchant);
+        Assert.Equal("USD", s.Currency);
+        Assert.Equal("high", s.Confidence.Total);
         Assert.Equal("https://opencode.test/inference/openai/v1/chat/completions", h.Last!.RequestUri!.ToString());
         Assert.Equal("Bearer", h.Last.Headers.Authorization!.Scheme);
         Assert.Equal("test-key", h.Last.Headers.Authorization.Parameter);
+
         using var body = JsonDocument.Parse(h.LastBody!);
         Assert.Equal("gemini-3.5-flash-lite", body.RootElement.GetProperty("model").GetString());
+        Assert.Equal("json_object", body.RootElement.GetProperty("response_format").GetProperty("type").GetString());
         var messages = body.RootElement.GetProperty("messages");
-        Assert.Contains("final total", messages[0].GetProperty("content").GetString());
+        var prompt = messages[0].GetProperty("content").GetString();
+        Assert.Contains("grand total", prompt);
+        Assert.Contains("group currency is USD", prompt);
+        Assert.Contains("\"food\"", prompt);
         var url = messages[1].GetProperty("content")[1].GetProperty("image_url").GetProperty("url").GetString();
         Assert.Equal($"data:image/jpeg;base64,{Convert.ToBase64String(Jpeg)}", url);
+    }
+
+    [Fact]
+    public async Task Provider_Allows_A_Keyless_Loopback_Endpoint()
+    {
+        var h = new FakeHandler(_ => Chat("""{"total":7}"""));
+        var provider = Provider(h, OcrConfig(key: null, baseUrl: "http://localhost:11434/v1", model: "glm-ocr:latest"));
+        Assert.True(provider.Enabled);
+
+        var s = await provider.ExtractAsync(Jpeg, "image/jpeg");
+        Assert.Equal(7m, s.Total);
+        Assert.Null(h.Last!.Headers.Authorization);
     }
 
     [Fact]
@@ -132,7 +231,7 @@ public sealed class ReceiptScanTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.Forbidden)] // OpenCode FreeTierError
+    [InlineData(HttpStatusCode.Forbidden)] // provider free-tier / auth rejection
     [InlineData(HttpStatusCode.TooManyRequests)]
     [InlineData(HttpStatusCode.InternalServerError)]
     public async Task Provider_Maps_Http_Errors(HttpStatusCode status)
@@ -151,26 +250,33 @@ public sealed class ReceiptScanTests
     }
 
     [Fact]
-    public void Provider_Disabled_Without_Flag_Or_Key()
+    public void Provider_Disabled_Without_Flag_Or_Configuration()
     {
         var h = new FakeHandler(_ => Chat("{}"));
         Assert.True(Provider(h).Enabled);
         Assert.False(Provider(h, OcrConfig(enabled: false)).Enabled);
-        Assert.False(Provider(h, OcrConfig(key: null)).Enabled);
+        Assert.False(Provider(h, OcrConfig(key: null)).Enabled); // non-loopback needs a key
+        Assert.False(Provider(h, OcrConfig(key: null, baseUrl: null)).Enabled);
+        Assert.False(Provider(h, OcrConfig(model: null)).Enabled);
         Assert.False(new DisabledOcrService().Enabled);
     }
 
     // ---- ReceiptScanService ----
 
-    private sealed class FakeOcr(bool enabled = true, Exception? fail = null) : IOcrService
+    private sealed class FakeOcr(bool enabled = true, Exception? fail = null,
+        ReceiptSuggestion? suggestion = null) : IOcrService
     {
         public bool Enabled => enabled;
         public byte[]? Image;
-        public Task<ReceiptSuggestion> ExtractAsync(byte[] image, string mime, CancellationToken ct = default)
+        public OcrContext? Context;
+        public Task<ReceiptSuggestion> ExtractAsync(byte[] image, string mime, OcrContext? context = null,
+            CancellationToken ct = default)
         {
             if (fail is not null) throw fail;
             Image = image;
-            return Task.FromResult(new ReceiptSuggestion(9.99m, "high", []));
+            Context = context;
+            return Task.FromResult(suggestion ?? new ReceiptSuggestion(
+                9.99m, new ReceiptConfidence("high"), [], "Cafe", "USD", new DateOnly(2026, 10, 20), 1m, 0.5m, "food"));
         }
     }
 
@@ -179,7 +285,7 @@ public sealed class ReceiptScanTests
         var db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
         var member = Guid.NewGuid();
-        var g = new Group { Name = "Trip", CreatedBy = member };
+        var g = new Group { Name = "Trip", CreatedBy = member, Currency = "USD" };
         db.Groups.Add(g);
         db.GroupMembers.Add(new GroupMember { GroupId = g.Id, UserId = member, Role = "owner" });
         await db.SaveChangesAsync();
@@ -187,17 +293,32 @@ public sealed class ReceiptScanTests
     }
 
     private static ReceiptScanService Scanner(AppDbContext db, IOcrService ocr)
-        => new(db, ocr, NullLogger<ReceiptScanService>.Instance);
+        => new(db, ocr, new CategoryService(db), NullLogger<ReceiptScanService>.Instance);
 
     [Fact]
-    public async Task Scan_Returns_Total()
+    public async Task Scan_Returns_The_Additive_Dto()
     {
         var (db, gid, me) = await SeedAsync();
         var r = await Scanner(db, new FakeOcr()).ScanAsync(me, gid, "r.jpg", "image/jpeg", Jpeg);
 
         Assert.True(r.Ok);
-        Assert.Equal("""{"total":9.99,"confidence":"high","warnings":[]}""",
-            JsonSerializer.Serialize(ReceiptScanEndpoints.ToDto((ReceiptSuggestion)r.Data!)));
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = new SnakeCaseNamingPolicy() };
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(
+            ReceiptScanEndpoints.ToDto((ReceiptSuggestion)r.Data!), options));
+        var root = doc.RootElement;
+        Assert.Equal(9.99m, root.GetProperty("total").GetDecimal());
+        Assert.Equal("high", root.GetProperty("confidence").GetString());
+        Assert.Empty(root.GetProperty("warnings").EnumerateArray());
+
+        var receipt = root.GetProperty("receipt");
+        Assert.Equal("Cafe", receipt.GetProperty("merchant").GetString());
+        Assert.Equal(9.99m, receipt.GetProperty("total").GetDecimal());
+        Assert.Equal("USD", receipt.GetProperty("currency").GetString());
+        Assert.Equal("2026-10-20", receipt.GetProperty("date").GetString());
+        Assert.Equal(1m, receipt.GetProperty("tax").GetDecimal());
+        Assert.Equal(0.5m, receipt.GetProperty("tip").GetDecimal());
+        Assert.Equal("food", receipt.GetProperty("category").GetString());
+        Assert.Equal("high", receipt.GetProperty("confidence").GetProperty("total").GetString());
     }
 
     [Fact]
@@ -235,6 +356,31 @@ public sealed class ReceiptScanTests
     }
 
     [Fact]
+    public async Task Scan_Passes_Group_Context_And_Flags_A_Currency_Mismatch()
+    {
+        var (db, gid, me) = await SeedAsync();
+        var ocr = new FakeOcr(suggestion: new ReceiptSuggestion(
+            375000m, ReceiptConfidence.None, [], "VinMart", "VND", null, 25000m, null, "food"));
+        var r = await Scanner(db, ocr).ScanAsync(me, gid, "r.jpg", "image/jpeg", Jpeg);
+
+        Assert.True(r.Ok);
+        Assert.Equal("USD", ocr.Context!.GroupCurrency);
+        Assert.Contains("food", ocr.Context.CategoryKeys);
+        Assert.Contains("currency_mismatch", ((ReceiptSuggestion)r.Data!).Warnings);
+    }
+
+    [Fact]
+    public async Task Scan_Does_Not_Flag_The_Group_Currency()
+    {
+        var (db, gid, me) = await SeedAsync();
+        var ocr = new FakeOcr(suggestion: new ReceiptSuggestion(
+            9.99m, ReceiptConfidence.None, [], "Cafe", "USD", null, null, null, "food"));
+        var r = await Scanner(db, ocr).ScanAsync(me, gid, "r.jpg", "image/jpeg", Jpeg);
+
+        Assert.DoesNotContain("currency_mismatch", ((ReceiptSuggestion)r.Data!).Warnings);
+    }
+
+    [Fact]
     public async Task Scan_Maps_Provider_Failure()
     {
         var (db, gid, me) = await SeedAsync();
@@ -249,7 +395,8 @@ public sealed class ReceiptScanTests
 /// Real call to the configured provider with tests/fixtures/receipt-sample.jpg (TOTAL USD 21.00).
 /// Opt-in only (costs provider credits):
 ///   set -a; . ./.env; set +a; OCR_LIVE_TEST=1 dotnet test tests --filter ReceiptScanLiveTests
-/// Reads Ocr__ApiKey, optional Ocr__BaseUrl / Ocr__Model from the environment.
+/// Reads Ocr__ApiKey, optional Ocr__BaseUrl / Ocr__Model from the environment. A loopback
+/// base URL (local Ollama) may omit the key.
 /// </summary>
 public sealed class ReceiptScanLiveTests
 {
@@ -262,20 +409,23 @@ public sealed class ReceiptScanLiveTests
     public async Task Live_Provider_Reads_Sample_Receipt_Total()
     {
         var env = new ConfigurationBuilder().AddEnvironmentVariables().Build();
-        Assert.SkipUnless(env["OCR_LIVE_TEST"] == "1" && !string.IsNullOrWhiteSpace(env["Ocr:ApiKey"]),
-            "Set OCR_LIVE_TEST=1 and Ocr__ApiKey to call the real provider.");
+        Assert.SkipUnless(env["OCR_LIVE_TEST"] == "1"
+                && (!string.IsNullOrWhiteSpace(env["Ocr:ApiKey"])
+                    || (env["Ocr:BaseUrl"] ?? "").Contains("localhost")),
+            "Set OCR_LIVE_TEST=1 and Ocr__ApiKey (or a local Ocr__BaseUrl) to call the real provider.");
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Ocr:Enabled"] = "true",
-            ["Ocr:BaseUrl"] = env["Ocr:BaseUrl"] ?? "https://opencode.ai/inference/openai/v1",
-            ["Ocr:Model"] = env["Ocr:Model"] ?? "glm-5.3-flash-free",
+            ["Ocr:BaseUrl"] = env["Ocr:BaseUrl"] ?? "https://generativelanguage.googleapis.com/v1beta/openai",
+            ["Ocr:Model"] = env["Ocr:Model"] ?? "gemini-2.5-flash",
             ["Ocr:ApiKey"] = env["Ocr:ApiKey"],
         }).Build();
         var image = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "fixtures", "receipt-sample.jpg"),
             TestContext.Current.CancellationToken);
 
         var s = await new OpenAiCompatibleOcrService(new RealFactory(), config,
-            NullLogger<OpenAiCompatibleOcrService>.Instance).ExtractAsync(image, "image/jpeg", TestContext.Current.CancellationToken);
+            NullLogger<OpenAiCompatibleOcrService>.Instance).ExtractAsync(image, "image/jpeg", null,
+            TestContext.Current.CancellationToken);
 
         Assert.Equal(21.00m, s.Total);
     }

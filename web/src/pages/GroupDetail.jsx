@@ -13,6 +13,7 @@ import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
 import { RowMenu } from '../components/Mobile.jsx';
 import { ExpenseForm, PaymentForm } from '../components/Forms.jsx';
+import { ScanReceipts } from '../components/ScanReceipts.jsx';
 import { AddExpenseFab } from '../components/QuickAddExpense.jsx';
 import { categoryLabel, categoryLabelForKey, categorySelectData } from '../categories.js';
 import { StatementPanel } from './Statement.jsx';
@@ -85,6 +86,9 @@ export function GroupDetail() {
   const [renName, setRenName] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [showExp, setShowExp] = useState(false);
+  const [expFormKey, setExpFormKey] = useState(0); // bump to reset the form after "Save & new"
+  const [scanOpen, setScanOpen] = useState(false);
+  const [ocrEnabled, setOcrEnabled] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editExisting, setEditExisting] = useState(null);
   const [editBusy, setEditBusy] = useState(false);
@@ -245,6 +249,14 @@ export function GroupDetail() {
   };
   useEffect(() => { load(); }, [id]);
   useEffect(() => { loadLedger(); }, [id, type]);
+  // Batch receipt scanning is offered only when the API has an OCR provider wired.
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/api/v1/capabilities')
+      .then((c) => { if (!cancelled) setOcrEnabled(!!c?.ocr_enabled); })
+      .catch(() => { if (!cancelled) setOcrEnabled(false); });
+    return () => { cancelled = true; };
+  }, []);
   // Mobile-simplify: debounced search replaces the Go button under sm.
   // Desktop keeps explicit Go (unchanged). Ledger GETs are idempotent;
   // the request counter in loadLedger drops stale responses.
@@ -749,6 +761,12 @@ export function GroupDetail() {
               </button>
             </div>
             <div className="gd-action-quiet">
+              {ocrEnabled && (
+                <button type="button" className="gd-action-ghost" onClick={() => setScanOpen(true)} disabled={!canWriteGroup}>
+                  <GdActionIcon name="scan" />
+                  <span>{t('scan.open')}</span>
+                </button>
+              )}
               <button type="button" className="gd-action-ghost" onClick={() => openInvite('email')}>
                 <GdActionIcon name="invite" />
                 <span>{t('groupDetail.inviteMembers')}</span>
@@ -789,6 +807,17 @@ export function GroupDetail() {
               <GdActionIcon name="pay" />
               <span>{t('groupDetail.recordPayment')}</span>
             </button>
+            {ocrEnabled && (
+              <button
+                type="button"
+                className="gd-action-btn"
+                onClick={() => setScanOpen(true)}
+                disabled={!canWriteGroup}
+              >
+                <GdActionIcon name="scan" />
+                <span>{t('scan.open')}</span>
+              </button>
+            )}
             <button type="button" className="gd-action-btn" onClick={exportPdf}>
               <GdActionIcon name="export" />
               <span>{t('groupDetail.exportPdf')}</span>
@@ -1495,13 +1524,28 @@ export function GroupDetail() {
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
       >
         <ExpenseForm
+          key={expFormKey}
           groupId={id}
           members={members}
           copyFrom={copyFrom}
           currency={detail.currency}
           onDone={() => { setShowExp(false); setCopyFrom(null); load(); loadLedger(); loadSummary(); }}
+          onSaveNew={() => { setCopyFrom(null); setExpFormKey((k) => k + 1); load(); loadLedger(); loadSummary(); }}
+          onCancel={() => { setShowExp(false); setCopyFrom(null); }}
         />
       </Modal>
+
+      <ScanReceipts
+        opened={scanOpen}
+        onClose={() => setScanOpen(false)}
+        groupId={id}
+        members={members}
+        meId={user?.user_id}
+        currency={detail.currency}
+        categories={categories}
+        existingExpenses={ledger?.items || []}
+        onCreated={() => { load(); loadLedger(); loadSummary(); }}
+      />
 
       <Modal
         opened={editOpen}
@@ -2073,6 +2117,14 @@ function GdActionIcon({ name }) {
       <svg {...common}>
         <path d="M8 7h8M8 11h8M8 15h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         <path d="M6 3.5h12A2.5 2.5 0 0 1 20.5 6v14.2l-2.8-1.6-2.7 1.6-2.8-1.6-2.7 1.6-2.8-1.6-2.7 1.6V6A2.5 2.5 0 0 1 6 3.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  if (name === 'scan') {
+    return (
+      <svg {...common}>
+        <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.2l1-1.6h6.6l1 1.6h1.2A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+        <circle cx="12" cy="12.5" r="3.2" stroke="currentColor" strokeWidth="1.8" />
       </svg>
     );
   }
