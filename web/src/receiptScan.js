@@ -52,11 +52,15 @@ export function readJpegDpi(bytes) {
  */
 export function scanToAmount(resp) {
   const warnings = Array.isArray(resp?.warnings) ? resp.warnings : [];
-  const total = Number(resp?.total);
-  const amount = resp?.total != null && Number.isFinite(total) && total > 0 && total <= 1_000_000
+  // Additive API: `receipt.total` is the batch field; older/lean responses keep
+  // the flat `total`. Prefer the nested value so both contracts read the same.
+  const rawTotal = resp?.receipt?.total ?? resp?.total;
+  const total = Number(rawTotal);
+  const amount = rawTotal != null && Number.isFinite(total) && total > 0 && total <= 1_000_000
     ? total.toFixed(2)
     : null;
-  return { amount, lowConfidence: resp?.confidence === 'low', warnings };
+  const confidence = resp?.receipt?.confidence?.total ?? resp?.confidence;
+  return { amount, lowConfidence: confidence === 'low', warnings };
 }
 
 /** i18n key for a failed scan request. */

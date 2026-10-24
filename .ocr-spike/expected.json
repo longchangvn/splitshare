@@ -1,0 +1,13 @@
+{
+  "group_currency": "USD",
+  "categories": ["food", "stay", "transport", "other"],
+  "files": {
+    "01-pho.jpg": { "is_receipt": true, "merchant": "PHO 24", "total": 19.98, "currency": null, "date": "2026-10-20", "tax": 1.48, "tip": null, "category": "food" },
+    "02-grab.jpg": { "is_receipt": true, "merchant": "GRAB RIDE", "total": 8.50, "currency": null, "date": "2026-10-18", "tax": null, "tip": null, "category": "transport" },
+    "03-hotel.jpg": { "is_receipt": true, "merchant": "SUNRISE HOTEL", "total": 142.00, "currency": null, "date": "2026-10-19", "tax": 12.00, "tip": null, "category": "stay" },
+    "04-vinmart.jpg": { "is_receipt": true, "merchant": "VINMART", "total": 375000, "currency": "VND", "date": "2026-10-21", "tax": 25000, "tip": null, "category": "food" },
+    "05-coffee.jpg": { "is_receipt": true, "merchant": "BLUE BOTTLE COFFEE", "total": 7.25, "currency": null, "date": "2026-10-22", "tax": null, "tip": 1.00, "category": "food" },
+    "06-faded.jpg": { "is_receipt": true, "merchant": "CORNER CAFE", "total": 31.40, "currency": null, "date": "2026-10-17", "tax": 3.40, "tip": null, "category": "food" },
+    "07-note.jpg": { "is_receipt": false }
+  }
+}

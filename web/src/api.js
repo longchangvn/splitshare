@@ -47,9 +47,20 @@ async function req(method, path, body, extra = {}) {
 // wrong password never triggers refresh traffic or a retry loop.
 let inflightRefresh = null;
 
+const sessionExpiredListeners = new Set();
+export function onSessionExpired(fn) {
+  sessionExpiredListeners.add(fn);
+  return () => sessionExpiredListeners.delete(fn);
+}
+function sessionExpired(status) {
+  clearTokens();
+  sessionExpiredListeners.forEach((fn) => fn());
+  return new ApiError(status, { code: 'SESSION_EXPIRED', message: 'Session expired.' });
+}
+
 async function doRefresh() {
   const rt = getRefresh();
-  if (!rt) throw new ApiError(401, { code: 'SESSION_EXPIRED', message: 'Session expired.' });
+  if (!rt) throw sessionExpired(401);
   const r = await fetch(`${BASE}/api/v1/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -57,10 +68,7 @@ async function doRefresh() {
   });
   const text = await r.text();
   const data = text ? JSON.parse(text) : null;
-  if (!r.ok) {
-    clearTokens();
-    throw new ApiError(r.status, { code: 'SESSION_EXPIRED', message: 'Session expired.' });
-  }
+  if (!r.ok) throw sessionExpired(r.status);
   setTokens(data.access_token, data.refresh_token);
 }
 
@@ -89,7 +97,8 @@ export async function apiBlob(path, init = {}) {
 
 export const api = {
   get: (p) => reqAuth('GET', p),
-  post: (p, b) => reqAuth('POST', p, b ?? {}),
+  // extra carries per-request options such as `headers: { 'Idempotency-Key': key }`.
+  post: (p, b, extra) => reqAuth('POST', p, b ?? {}, extra ?? {}),
   postForm: (p, form) => reqAuth('POST', p, undefined, { form }),
   patch: (p, b) => reqAuth('PATCH', p, b ?? {}),
   del: (p) => reqAuth('DELETE', p),
