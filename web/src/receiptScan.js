@@ -1,8 +1,8 @@
 // Receipt scan helpers for the Add expense form (specs/004). Pure functions are
 // unit-tested in web/test/receipt-scan.test.mjs; compressReceiptImage needs a browser.
 
-export const SCAN_MAX_EDGE = 1600; // px, long edge — enough for OCR, small upload
-export const SCAN_QUALITY = 0.7; // JPEG quality 70 %
+export const SCAN_MAX_EDGE = 1200; // px, long edge — totals stay legible at ~160 KB
+export const SCAN_QUALITY = 0.6; // JPEG quality 60 %
 export const SCAN_DPI = 70; // JFIF density written into the JPEG header
 export const SCAN_MOBILE_QUERY = '(max-width: 47.99em)'; // same breakpoint as the mobile layout in styles.css
 
@@ -86,7 +86,41 @@ async function decodeImage(file) {
   }
 }
 
-/** Browser only: resize to SCAN_MAX_EDGE, re-encode JPEG at SCAN_QUALITY with SCAN_DPI. */
+/**
+ * Convert RGBA pixels to grayscale and stretch the used range to 0–255. Receipts are
+ * black ink on white paper, so the colour channels are wasted bytes; stretching makes
+ * faded thermal print and shadows sit at the ends of the range before JPEG encoding.
+ * Pure and in-place, so it can be unit-tested without a canvas.
+ */
+export function grayStretch(data) {
+  if (!(data instanceof Uint8ClampedArray) || data.length < 4) return data;
+  const count = Math.floor(data.length / 4);
+  const gray = new Uint8ClampedArray(count);
+  let lo = 255;
+  let hi = 0;
+  for (let i = 0, g = 0; g < count; i += 4, g++) {
+    const v = Math.round(data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114);
+    gray[g] = v;
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  const span = hi - lo;
+  const scale = span > 0 ? 255 / span : 0;
+  for (let i = 0, g = 0; g < count; i += 4, g++) {
+    const v = scale === 0 ? gray[g] : Math.max(0, Math.min(255, Math.round((gray[g] - lo) * scale)));
+    data[i] = v;
+    data[i + 1] = v;
+    data[i + 2] = v;
+    data[i + 3] = 255; // JPEG has no alpha; the canvas is already flattened onto white
+  }
+  return data;
+}
+
+/**
+ * Browser only: resize to SCAN_MAX_EDGE, flatten to stretched grayscale, then re-encode
+ * JPEG at SCAN_QUALITY with SCAN_DPI. A 3024×4032 phone photo (~4 MB) lands near 160 KB,
+ * which is enough for OCR to read every total and item line.
+ */
 export async function compressReceiptImage(file, { maxEdge = SCAN_MAX_EDGE, quality = SCAN_QUALITY, dpi = SCAN_DPI } = {}) {
   const img = await decodeImage(file);
   const srcW = img.width || img.naturalWidth;
@@ -95,11 +129,14 @@ export async function compressReceiptImage(file, { maxEdge = SCAN_MAX_EDGE, qual
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff'; // flatten transparent PNGs
   ctx.fillRect(0, 0, width, height);
   ctx.drawImage(img, 0, 0, width, height);
   img.close?.();
+  const pixels = ctx.getImageData(0, 0, width, height);
+  grayStretch(pixels.data);
+  ctx.putImageData(pixels, 0, 0);
   const blob = await new Promise((resolve, reject) => {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('encode failed'))), 'image/jpeg', quality);
   });

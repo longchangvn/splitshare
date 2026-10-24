@@ -20,8 +20,8 @@ import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
 import { useT } from '../prefs.jsx';
 
-// Temporarily disabled: batch "Scan receipts" stays visible but cannot be used. Set to true to restore.
-const SCAN_RECEIPTS_ENABLED = false;
+// Kill switch for batch "Scan receipts": false keeps the button visible but disabled.
+const SCAN_RECEIPTS_ENABLED = true;
 
 // Mockup receipt thumbnails (docs/mobile-design.html screen 3): category →
 // emoji tile so ledger cards scan like receipts. Pure presentation.

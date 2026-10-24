@@ -99,6 +99,66 @@ public sealed class ReceiptScanTests
     }
 
     [Fact]
+    public void Parser_Reads_Several_Receipts_From_One_Photo()
+    {
+        var list = ReceiptParser.ParseMany("""
+            {"is_receipt":true,"receipts":[
+              {"summary":"India Bazaar — 14 Oct 2026","merchant":"India Bazaar","amount_spent":43.25,
+               "currency":"USD","date":"2026-10-14","category":"food","confidence":{"total":"high"}},
+              {"summary":"Harbour Market BP — 15 Oct 2026","merchant":"Harbour Market BP","amount_spent":21.55,
+               "currency":"USD","date":"2026-10-15","category":"food","confidence":{"total":"low"}}
+            ]}
+            """, UsdFood);
+
+        Assert.Equal(2, list.Count);
+        Assert.Equal("India Bazaar — 14 Oct 2026", list[0].Summary);
+        Assert.Equal(43.25m, list[0].Total);
+        Assert.Equal("high", list[0].Confidence.Total);
+        Assert.Equal("Harbour Market BP", list[1].Merchant);
+        Assert.Equal(21.55m, list[1].Total);
+        Assert.Equal("low", list[1].Confidence.Total);
+    }
+
+    [Fact]
+    public void Parser_Accepts_A_Total_Alias_And_Builds_A_Missing_Summary()
+    {
+        var s = ReceiptParser.Parse("""{"merchant":"Cafe","total":12.5,"date":"2026-10-20"}""");
+        Assert.Equal(12.50m, s.Total);
+        Assert.Equal("Cafe — 2026-10-20", s.Summary);
+    }
+
+    [Fact]
+    public void Parser_Keeps_A_Model_Summary_And_Trims_It()
+    {
+        var s = ReceiptParser.Parse("""{"total":4,"summary":"  Corner   Cafe  "}""");
+        Assert.Equal("Corner Cafe", s.Summary);
+    }
+
+    [Fact]
+    public void Parser_Treats_An_Empty_Receipt_List_As_No_Receipt()
+    {
+        var list = ReceiptParser.ParseMany("""{"is_receipt":false,"receipts":[]}""");
+        Assert.Single(list);
+        Assert.Null(list[0].Total);
+        Assert.Contains("not_a_receipt", list[0].Warnings);
+    }
+
+    [Fact]
+    public void Parser_Caps_The_Number_Of_Receipts_Per_Photo()
+    {
+        var items = string.Join(",", Enumerable.Range(1, 15).Select(i => $"{{\"total\":{i}}}"));
+        Assert.Equal(ReceiptParser.MaxReceiptsPerPhoto,
+            ReceiptParser.ParseMany($"{{\"receipts\":[{items}]}}").Count);
+    }
+
+    [Fact]
+    public void Parser_Accepts_A_Bare_Array_Of_Receipts()
+    {
+        var list = ReceiptParser.ParseMany("""[{"total":3},{"total":4}]""");
+        Assert.Equal([3m, 4m], list.Select(r => r.Total));
+    }
+
+    [Fact]
     public void Parser_Accepts_A_Nested_Receipt_Object()
     {
         var s = ReceiptParser.Parse("""{"receipt":{"merchant":"Corner Cafe","total":31.4,"category":"food"}}""", UsdFood);
@@ -186,7 +246,7 @@ public sealed class ReceiptScanTests
             {"is_receipt":true,"merchant":"Cafe","total":4.5,"currency":"USD",
              "date":"2026-10-20","category":"food","confidence":{"total":"high"}}
             """));
-        var s = await Provider(h).ExtractAsync(Jpeg, "image/jpeg", UsdFood);
+        var s = (await Provider(h).ExtractAsync(Jpeg, "image/jpeg", UsdFood)).Single();
 
         Assert.Equal(4.50m, s.Total);
         Assert.Equal("Cafe", s.Merchant);
@@ -215,7 +275,7 @@ public sealed class ReceiptScanTests
         var provider = Provider(h, OcrConfig(key: null, baseUrl: "http://localhost:11434/v1", model: "glm-ocr:latest"));
         Assert.True(provider.Enabled);
 
-        var s = await provider.ExtractAsync(Jpeg, "image/jpeg");
+        var s = (await provider.ExtractAsync(Jpeg, "image/jpeg")).Single();
         Assert.Equal(7m, s.Total);
         Assert.Null(h.Last!.Headers.Authorization);
     }
@@ -227,7 +287,7 @@ public sealed class ReceiptScanTests
         {
             Content = new StringContent("""{"choices":[{"message":{"content":[{"type":"text","text":"{\"total\":7}"}]}}]}""")
         });
-        Assert.Equal(7m, (await Provider(h).ExtractAsync(Jpeg, "image/jpeg")).Total);
+        Assert.Equal(7m, (await Provider(h).ExtractAsync(Jpeg, "image/jpeg")).Single().Total);
     }
 
     [Theory]
@@ -264,19 +324,21 @@ public sealed class ReceiptScanTests
     // ---- ReceiptScanService ----
 
     private sealed class FakeOcr(bool enabled = true, Exception? fail = null,
-        ReceiptSuggestion? suggestion = null) : IOcrService
+        ReceiptSuggestion? suggestion = null, IReadOnlyList<ReceiptSuggestion>? suggestions = null) : IOcrService
     {
         public bool Enabled => enabled;
         public byte[]? Image;
         public OcrContext? Context;
-        public Task<ReceiptSuggestion> ExtractAsync(byte[] image, string mime, OcrContext? context = null,
-            CancellationToken ct = default)
+        public Task<IReadOnlyList<ReceiptSuggestion>> ExtractAsync(byte[] image, string mime,
+            OcrContext? context = null, CancellationToken ct = default)
         {
             if (fail is not null) throw fail;
             Image = image;
             Context = context;
-            return Task.FromResult(suggestion ?? new ReceiptSuggestion(
-                9.99m, new ReceiptConfidence("high"), [], "Cafe", "USD", new DateOnly(2026, 10, 20), 1m, 0.5m, "food"));
+            IReadOnlyList<ReceiptSuggestion> found = suggestions ?? [suggestion ?? new ReceiptSuggestion(
+                9.99m, new ReceiptConfidence("high"), [], "Cafe", "USD", new DateOnly(2026, 10, 20), 1m, 0.5m,
+                "food", "Cafe — 2026-10-20")];
+            return Task.FromResult(found);
         }
     }
 
@@ -304,8 +366,12 @@ public sealed class ReceiptScanTests
         Assert.True(r.Ok);
         var options = new JsonSerializerOptions { PropertyNamingPolicy = new SnakeCaseNamingPolicy() };
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(
-            ReceiptScanEndpoints.ToDto((ReceiptSuggestion)r.Data!), options));
+            ReceiptScanEndpoints.ToDto((IReadOnlyList<ReceiptSuggestion>)r.Data!), options));
         var root = doc.RootElement;
+        Assert.Equal(1, root.GetProperty("count").GetInt32());
+        var listed = root.GetProperty("receipts").EnumerateArray().Single();
+        Assert.Equal("Cafe", listed.GetProperty("summary").GetString());
+        Assert.Equal(9.99m, listed.GetProperty("amount_spent").GetDecimal());
         Assert.Equal(9.99m, root.GetProperty("total").GetDecimal());
         Assert.Equal("high", root.GetProperty("confidence").GetString());
         Assert.Empty(root.GetProperty("warnings").EnumerateArray());
@@ -319,6 +385,36 @@ public sealed class ReceiptScanTests
         Assert.Equal(0.5m, receipt.GetProperty("tip").GetDecimal());
         Assert.Equal("food", receipt.GetProperty("category").GetString());
         Assert.Equal("high", receipt.GetProperty("confidence").GetProperty("total").GetString());
+    }
+
+    [Fact]
+    public async Task Scan_Returns_Every_Receipt_From_One_Photo()
+    {
+        var (db, gid, me) = await SeedAsync();
+        var ocr = new FakeOcr(suggestions:
+        [
+            new(43.25m, new ReceiptConfidence("high"), [], "India Bazaar", "USD",
+                new DateOnly(2026, 10, 14), null, null, "food", "India Bazaar — 2026-10-14"),
+            new(21.55m, new ReceiptConfidence("low"), [], "Harbour Market BP", "USD",
+                new DateOnly(2026, 10, 15), null, null, "food", "Harbour Market BP — 2026-10-15")
+        ]);
+        var r = await Scanner(db, ocr).ScanAsync(me, gid, "two.jpg", "image/jpeg", Jpeg);
+
+        Assert.True(r.Ok);
+        var list = (IReadOnlyList<ReceiptSuggestion>)r.Data!;
+        Assert.Equal(2, list.Count);
+        Assert.Equal([43.25m, 21.55m], list.Select(x => x.Total));
+        Assert.Equal("Harbour Market BP — 2026-10-15", list[1].Summary);
+
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = new SnakeCaseNamingPolicy() };
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(ReceiptScanEndpoints.ToDto(list), options));
+        var root = doc.RootElement;
+        Assert.Equal(2, root.GetProperty("count").GetInt32());
+        Assert.Equal(2, root.GetProperty("receipts").GetArrayLength());
+        Assert.Equal("India Bazaar — 2026-10-14",
+            root.GetProperty("receipts")[0].GetProperty("summary").GetString());
+        Assert.Equal(21.55m, root.GetProperty("receipts")[1].GetProperty("amount_spent").GetDecimal());
+        Assert.Equal(43.25m, root.GetProperty("total").GetDecimal()); // legacy = first receipt
     }
 
     [Fact]
@@ -366,7 +462,7 @@ public sealed class ReceiptScanTests
         Assert.True(r.Ok);
         Assert.Equal("USD", ocr.Context!.GroupCurrency);
         Assert.Contains("food", ocr.Context.CategoryKeys);
-        Assert.Contains("currency_mismatch", ((ReceiptSuggestion)r.Data!).Warnings);
+        Assert.Contains("currency_mismatch", ((IReadOnlyList<ReceiptSuggestion>)r.Data!)[0].Warnings);
     }
 
     [Fact]
@@ -377,7 +473,7 @@ public sealed class ReceiptScanTests
             9.99m, ReceiptConfidence.None, [], "Cafe", "USD", null, null, null, "food"));
         var r = await Scanner(db, ocr).ScanAsync(me, gid, "r.jpg", "image/jpeg", Jpeg);
 
-        Assert.DoesNotContain("currency_mismatch", ((ReceiptSuggestion)r.Data!).Warnings);
+        Assert.DoesNotContain("currency_mismatch", ((IReadOnlyList<ReceiptSuggestion>)r.Data!)[0].Warnings);
     }
 
     [Fact]
@@ -423,10 +519,10 @@ public sealed class ReceiptScanLiveTests
         var image = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "fixtures", "receipt-sample.jpg"),
             TestContext.Current.CancellationToken);
 
-        var s = await new OpenAiCompatibleOcrService(new RealFactory(), config,
+        var receipts = await new OpenAiCompatibleOcrService(new RealFactory(), config,
             NullLogger<OpenAiCompatibleOcrService>.Instance).ExtractAsync(image, "image/jpeg", null,
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(21.00m, s.Total);
+        Assert.Contains(receipts, r => r.Total == 21.00m);
     }
 }

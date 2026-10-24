@@ -13,9 +13,9 @@ public sealed record ReceiptConfidence(
 }
 
 /// <summary>
-/// Receipt scan result. Every field is nullable: the model may not read it, and the
-/// values are normalized/validated server-side before they reach a client. The batch
-/// UI pre-fills editable cards from this; nothing is saved by a scan.
+/// One receipt read from a photo. Every field is nullable: the model may not read it, and
+/// the values are normalized/validated server-side before they reach a client. A single
+/// photo can hold several receipts, so a scan returns a list of these; nothing is saved.
 /// </summary>
 public sealed record ReceiptSuggestion(
     decimal? Total,
@@ -26,7 +26,8 @@ public sealed record ReceiptSuggestion(
     DateOnly? Date = null,
     decimal? Tax = null,
     decimal? Tip = null,
-    string? Category = null)
+    string? Category = null,
+    string? Summary = null)
 {
     public static ReceiptSuggestion Empty(params string[] warnings) =>
         new(null, ReceiptConfidence.None, [.. warnings]);
@@ -51,14 +52,16 @@ public sealed class OcrProviderException(string message, Exception? inner = null
 public interface IOcrService
 {
     bool Enabled { get; }
-    Task<ReceiptSuggestion> ExtractAsync(byte[] image, string mime, OcrContext? context = null,
+
+    /// <summary>Every receipt visible in the photo, in reading order (empty when none).</summary>
+    Task<IReadOnlyList<ReceiptSuggestion>> ExtractAsync(byte[] image, string mime, OcrContext? context = null,
         CancellationToken ct = default);
 }
 
 public sealed class DisabledOcrService : IOcrService
 {
     public bool Enabled => false;
-    public Task<ReceiptSuggestion> ExtractAsync(byte[] image, string mime, OcrContext? context = null,
+    public Task<IReadOnlyList<ReceiptSuggestion>> ExtractAsync(byte[] image, string mime, OcrContext? context = null,
         CancellationToken ct = default)
-        => Task.FromResult(ReceiptSuggestion.Empty());
+        => Task.FromResult<IReadOnlyList<ReceiptSuggestion>>([]);
 }

@@ -238,8 +238,15 @@ public static class TripPackEndpoints
             await form.Files[0].CopyToAsync(ms);
             try
             {
-                var s = await ocr.ExtractAsync(ms.ToArray(), form.Files[0].ContentType);
-                return Results.Ok(new { suggestion = s.ToDictionary() });
+                var found = await ocr.ExtractAsync(ms.ToArray(), form.Files[0].ContentType);
+                var first = found.Count > 0 ? found[0] : ReceiptSuggestion.Empty();
+                return Results.Ok(new
+                {
+                    // Legacy single-receipt shape kept for the shipped client.
+                    suggestion = first.ToDictionary(),
+                    count = found.Count,
+                    receipts = found.Select(r => new { summary = r.Summary, amount_spent = r.Total, total = r.Total }).ToList()
+                });
             }
             catch (OcrProviderException)
             {
