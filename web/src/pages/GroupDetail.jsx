@@ -19,6 +19,7 @@ import { categoryLabel, categoryLabelForKey, categorySelectData } from '../categ
 import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
 import { useT } from '../prefs.jsx';
+import { normalizeDecimalInput as dec } from '../decimalInput.js';
 
 // Kill switch for batch "Scan receipts": false keeps the button visible but disabled.
 const SCAN_RECEIPTS_ENABLED = true;
@@ -959,8 +960,8 @@ export function GroupDetail() {
                 onChange={(v) => setFCat(v || '')}
                 data={categorySelectData(categories, t)}
               />
-              <TextInput size="xs" placeholder={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} />
-              <TextInput size="xs" placeholder={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} />
+              <TextInput size="xs" placeholder={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(dec(x.target.value))} />
+              <TextInput size="xs" placeholder={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(dec(x.target.value))} />
               <TextInput size="xs" type="date" aria-label={t('common.from')} value={fFrom} onChange={(x) => setFFrom(x.target.value)} />
               <TextInput size="xs" type="date" aria-label={t('common.to')} value={fTo} onChange={(x) => setFTo(x.target.value)} />
             </div>
@@ -1033,8 +1034,8 @@ export function GroupDetail() {
                   />
                 </Group>
                 <Group gap="xs" grow>
-                  <TextInput size="sm" label={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} />
-                  <TextInput size="sm" label={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} />
+                  <TextInput size="sm" label={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(dec(x.target.value))} />
+                  <TextInput size="sm" label={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(dec(x.target.value))} />
                 </Group>
                 <Group gap="xs" grow>
                   <TextInput size="sm" label={t('common.from')} type="date" value={fFrom} onChange={(x) => setFFrom(x.target.value)} />
@@ -2295,7 +2296,7 @@ export function formatRecurringAmount(value, currency = 'USD') {
 }
 
 function normalizeRecurringAmount(value) {
-  const [whole = '', ...fraction] = String(value).replace(/[^0-9.]/g, '').split('.');
+  const [whole = '', ...fraction] = dec(value).replace(/[^0-9.]/g, '').split('.');
   return fraction.length > 0 ? `${whole}.${fraction.join('')}` : whole;
 }
 

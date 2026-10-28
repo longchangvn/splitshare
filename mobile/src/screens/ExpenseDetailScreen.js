@@ -5,7 +5,7 @@ import React, { useCallback, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView, Modal } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { api, fmt, displayNameOf } from '../api/client';
+import { api, fmt, displayNameOf, normalizeDecimal } from '../api/client';
 import { colors } from '../theme';
 import { SpinButton, ErrText } from '../ui';
 
@@ -134,7 +134,7 @@ export default function ExpenseDetailScreen({ route, navigation }) {
         ) : (
           <>
             <TextInput style={s.inp} value={title} onChangeText={(v) => { setTitle(v); liveEditPreview(v, amount); }} placeholder="Title (1-100)" />
-            <TextInput style={s.inp} value={amount} onChangeText={(v) => { setAmount(v); liveEditPreview(title, v); }} placeholder="0.00" keyboardType="decimal-pad" />
+            <TextInput style={s.inp} value={amount} onChangeText={(raw) => { const v = normalizeDecimal(raw); setAmount(v); liveEditPreview(title, v); }} placeholder="0.00" keyboardType="decimal-pad" />
             {preview && <Text style={s.step}>Preview: {JSON.stringify(preview.shares || {})}{preview.unsettled_user_ids?.length ? ` · will un-settle ${preview.unsettled_user_ids.length}` : ''}</Text>}
           </>
         )}

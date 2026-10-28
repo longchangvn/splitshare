@@ -95,7 +95,7 @@ export default function GroupDetailScreen({ route, navigation }) {
           setBusy(true);
           try {
             await api.del(`/api/v1/groups/${id}`);
-            navigation.navigate('Main', { screen: 'Groups' });
+            navigation.popTo('Main', { screen: 'Groups' });
           } catch (err) { Alert.alert('Delete failed', `${err.code} ${err.message}`); }
           finally { setBusy(false); }
         },

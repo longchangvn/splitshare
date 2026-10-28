@@ -3,7 +3,7 @@
 // 403 LOCKED, recorder ∈ {from,to,owner}. Reverse owner-only 24h else counter-payment.
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView } from 'react-native';
-import { api, newIdempotencyKey, fmt, displayNameOf } from '../api/client';
+import { api, newIdempotencyKey, fmt, displayNameOf, normalizeDecimal } from '../api/client';
 import { colors } from '../theme';
 import { SpinButton, ErrText } from '../ui';
 import { queueOrSend } from '../offline/queue';
@@ -103,7 +103,7 @@ export default function PayScreen({ route, navigation }) {
             </Pressable>
           ))}
         </View>
-        <TextInput style={s.inp} value={amt} onChangeText={setAmt} keyboardType="decimal-pad" placeholder="amount" />
+        <TextInput style={s.inp} value={amt} onChangeText={(v) => setAmt(normalizeDecimal(v))} keyboardType="decimal-pad" placeholder="amount" />
         <View style={s.seg}>
           {['cash', 'transfer', 'other'].map((m) => (
             <Pressable key={m} style={[s.segI, method === m && s.segOn]} onPress={() => setMethod(m)}>

@@ -7,7 +7,8 @@ const OPT_OUT_KEY = 'ss_push_optout_v1'; // { [groupId]: true }
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: true,
   }),

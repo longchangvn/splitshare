@@ -12,6 +12,7 @@ import {
 } from '../receiptScan.js';
 import { displayNameOf } from './Net.jsx';
 import { useT } from '../prefs.jsx';
+import { normalizeDecimalInput as dec } from '../decimalInput.js';
 
 const splitVal = (s, type) => {
   if (!s) return '';
@@ -43,12 +44,12 @@ const MAX_MONEY_AMOUNT = 1_000_000;
 
 /** Keep only digits + one `.`, max 2 decimal places (currency input). */
 function sanitizeMoneyInput(raw) {
-  let s = String(raw ?? '').replace(/[^\d.]/g, '');
+  let s = dec(raw).replace(/[^\d.]/g, '');
   const dot = s.indexOf('.');
   if (dot !== -1) {
     s = `${s.slice(0, dot + 1)}${s.slice(dot + 1).replace(/\./g, '')}`;
-    const [whole, dec = ''] = s.split('.');
-    s = `${whole.slice(0, 7)}.${dec.slice(0, 2)}`;
+    const [whole, frac = ''] = s.split('.');
+    s = `${whole.slice(0, 7)}.${frac.slice(0, 2)}`;
   } else {
     s = s.slice(0, 7);
   }
@@ -186,7 +187,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
       }
     }
   };
-  const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: v }));
+  const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: dec(v) }));
 
   const build = () => {
     const body = {
@@ -656,16 +657,16 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
           <summary>{t('forms.expense.billDetails')}</summary>
           <div className="wizard-optional-body">
             <Group gap="xs" grow>
-              <TextInput label={t('forms.expense.taxOpt')} inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
-              <TextInput label={t('forms.expense.tipOpt')} inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
-              <TextInput label={t('forms.expense.feeOpt')} inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
+              <TextInput label={t('forms.expense.taxOpt')} inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(dec(x.target.value))} />
+              <TextInput label={t('forms.expense.tipOpt')} inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(dec(x.target.value))} />
+              <TextInput label={t('forms.expense.feeOpt')} inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(dec(x.target.value))} />
             </Group>
             <div className="wizard-field">
               <span className="wizard-label">{t('forms.expense.foreign')}</span>
               <Group gap="xs" grow>
                 <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
-                <TextInput placeholder={t('forms.expense.fxAmount')} inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
-                <TextInput placeholder={t('forms.expense.fxRate')} inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
+                <TextInput placeholder={t('forms.expense.fxAmount')} inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(dec(x.target.value))} />
+                <TextInput placeholder={t('forms.expense.fxRate')} inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(dec(x.target.value))} />
               </Group>
               {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
                 <Text size="xs" c="dimmed" mt={6}>
@@ -697,7 +698,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
                     inputMode="decimal"
                     value={g.amount}
                     style={{ flex: 1 }}
-                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))}
+                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: dec(x.target.value) } : gg)))}
                   />
                   <Select
                     value={g.covered_by}

@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { api, newIdempotencyKey, fmt, displayNameOf, expenseIdOf } from '../api/client';
+import { api, newIdempotencyKey, fmt, displayNameOf, expenseIdOf, normalizeDecimal } from '../api/client';
 import { colors } from '../theme';
 import { SpinButton, ErrText } from '../ui';
 import { queueOrSend } from '../offline/queue';
@@ -209,7 +209,7 @@ export default function AddExpenseScreen({ route, navigation }) {
       </View>
       <View style={s.card}>
         <TextInput style={s.inp} value={title} onChangeText={setTitle} placeholder="Title (1–100)" />
-        <TextInput style={s.inp} value={amount} onChangeText={setAmount} placeholder="0.00" keyboardType="decimal-pad" />
+        <TextInput style={s.inp} value={amount} onChangeText={(v) => setAmount(normalizeDecimal(v))} placeholder="0.00" keyboardType="decimal-pad" />
         <Text style={[s.h, { marginTop: 8 }]}>Payer (must be active member)</Text>
         <View style={s.chips}>
           {members.map((m) => (
@@ -241,7 +241,7 @@ export default function AddExpenseScreen({ route, navigation }) {
               <TextInput
                 style={[s.inp, { width: 100, marginTop: 0 }]}
                 value={values[m.user_id] ?? (split === 'SHARES' ? '1' : '')}
-                onChangeText={(v) => setValues((p) => ({ ...p, [m.user_id]: v }))}
+                onChangeText={(v) => setValues((p) => ({ ...p, [m.user_id]: normalizeDecimal(v) }))}
                 placeholder={split === 'SHARES' ? '1' : split === 'PERCENT' ? '%' : '$'}
                 keyboardType="decimal-pad"
               />

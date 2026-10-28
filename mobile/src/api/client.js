@@ -169,6 +169,16 @@ export function expenseIdOf(e) {
   return e?.expense?.expense_id || e?.expense_id || e?.id;
 }
 
+// iOS decimal-pad shows `,` instead of `.` in comma locales (vi, fr, de, ...):
+// treat the last separator typed as the decimal point.
+export function normalizeDecimal(raw) {
+  const s = String(raw ?? '');
+  const comma = s.lastIndexOf(',');
+  if (comma === -1) return s;
+  if (s.lastIndexOf('.') > comma) return s.replace(/,/g, '');
+  return s.replace(/\./g, '').replace(/,/g, '.');
+}
+
 export const fmt = (cents, currency = 'USD') =>
   `${currency} ${(cents / 100).toFixed(2)}`;
 
