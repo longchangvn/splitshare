@@ -19,6 +19,7 @@ const FILES = [
   ['receiptScan.js', 'receiptScan.js'],
   ['wizardUtils.js', 'wizardUtils.js'],
   ['i18n/messages.js', 'messages.js'],
+  ['memberRemoval.js', 'memberRemoval.js'],
 ];
 
 const banner = (src) => `// AUTO-COPIED from web/src/${src} by mobile/scripts/sync-shared.js — do not edit here.\n`

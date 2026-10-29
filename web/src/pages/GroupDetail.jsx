@@ -20,6 +20,7 @@ import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
 import { useT } from '../prefs.jsx';
 import { normalizeDecimalInput as dec } from '../decimalInput.js';
+import { fetchRemovalPreview, isStaleRemoval, removalPath, removalSummary } from '../memberRemoval.js';
 
 // Kill switch for batch "Scan receipts": false keeps the button visible but disabled.
 const SCAN_RECEIPTS_ENABLED = true;
@@ -112,6 +113,7 @@ export function GroupDetail() {
   const [removeOpen, setRemoveOpen] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState(null);
+  const [removePreview, setRemovePreview] = useState(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteTab, setInviteTab] = useState('email');
   const [inviteEmails, setInviteEmails] = useState('');
@@ -284,20 +286,34 @@ export function GroupDetail() {
   const lifecycleLabel = t(`groupStatus.${groupLifecycle}`);
   const groupCreatedSubtitle = formatGroupCreatedAt(detail?.created_at, t('report.createdOn'));
 
+  const loadRemovePreview = async (uid) => {
+    setRemovePreview(null);
+    try { setRemovePreview(await fetchRemovalPreview(api.get, id, uid)); } catch (err) { setE(err); }
+  };
   const remove = (uid, name) => {
     setRemoveTarget({ uid, name });
     setE(null);
     setRemoveOpen(true);
+    loadRemovePreview(uid);
   };
   const confirmRemove = async () => {
-    if (!removeTarget) return;
+    if (!removeTarget || !removePreview?.can_remove) return;
     setRemoveBusy(true);
     try {
-      await api.del(`/api/v1/groups/${id}/members/${removeTarget.uid}`);
+      await api.del(removalPath(id, removeTarget.uid, removePreview));
       setRemoveOpen(false);
       setRemoveTarget(null);
+      // Removal can re-split open expenses: refresh every ledger-derived view, not just the roster.
       load();
+      loadLedger();
+      loadActivityFeed();
+      setSettleTick((x) => x + 1);
     } catch (err) {
+      if (isStaleRemoval(err)) {
+        setE({ message: t('groupDetail.removeStale') });
+        loadRemovePreview(removeTarget.uid);
+        return;
+      }
       setRemoveOpen(false);
       setRemoveTarget(null);
       setE(err);
@@ -900,6 +916,7 @@ export function GroupDetail() {
                 groupId={id}
                 members={members}
                 currency={detail.currency}
+                reloadKey={settleTick}
                 embedded
               />
             </Tabs.Panel>
@@ -1740,14 +1757,54 @@ export function GroupDetail() {
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
       >
         <div className="wizard-form confirm-dialog">
-          <Text className="confirm-dialog-text">
-            Remove <b>{removeTarget?.name}</b>? Blocked while they hold a balance. History is kept.
-          </Text>
+          {(() => {
+            const nameOf = (uid) => detail?.members?.find((m) => m.user_id === uid)?.display_name || '?';
+            const cur = removePreview?.currency || detail?.currency;
+            const sum = removalSummary(removePreview, nameOf);
+            const name = removeTarget?.name;
+            if (sum.mode === 'loading') return <Text className="confirm-dialog-text">{t('groupDetail.removeLoading')}</Text>;
+            if (sum.mode === 'legacy') return <Text className="confirm-dialog-text">{t('groupDetail.removeMemberBody', { name })}</Text>;
+            if (sum.mode === 'settled') return <Text className="confirm-dialog-text">{t('groupDetail.removeSettled', { name })}</Text>;
+            if (sum.mode === 'blocked') {
+              return (
+                <div className="confirm-dialog-text">
+                  <Text>{t('groupDetail.removeBlocked', { name })}</Text>
+                  <ul>{sum.blockers.map((b) => <li key={b}><Text size="sm">{b}</Text></li>)}</ul>
+                </div>
+              );
+            }
+            return (
+              <div className="confirm-dialog-text">
+                <Text>{t('groupDetail.removeResplit', {
+                  name, amount: fmt(Math.abs(removePreview.net_cents), cur), count: sum.expenses.length,
+                })}</Text>
+                <Stack gap={8} mt="sm" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                  {sum.expenses.map((x) => (
+                    <div key={x.id}>
+                      <Text size="sm" fw={700}>
+                        {x.title} · {fmt(x.amountCents, cur)} · {t(`forms.expense.${x.method}`)}
+                      </Text>
+                      {x.rows.map((r) => (
+                        <Text key={r.userId} size="xs" c="dimmed">
+                          {r.name}: {fmt(r.fromCents, cur)} → {fmt(r.toCents, cur)}
+                        </Text>
+                      ))}
+                    </div>
+                  ))}
+                </Stack>
+              </div>
+            );
+          })()}
           <Group gap="sm" grow>
             <Button className="wizard-back" onClick={() => setRemoveOpen(false)} disabled={removeBusy}>
               Cancel
             </Button>
-            <Button className="wizard-primary is-danger" loading={removeBusy} onClick={confirmRemove}>
+            <Button
+              className="wizard-primary is-danger"
+              loading={removeBusy}
+              disabled={!removePreview?.can_remove}
+              onClick={confirmRemove}
+            >
               Remove
             </Button>
           </Group>

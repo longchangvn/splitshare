@@ -293,7 +293,7 @@ export function Sheet({ visible, onClose, title, children, footer, scroll = true
 }
 
 /** Two-button confirm sheet (web wizard confirm modal). */
-export function ConfirmSheet({ visible, title, message, confirmLabel, cancelLabel, danger, busy, onConfirm, onClose }) {
+export function ConfirmSheet({ visible, title, message, confirmLabel, cancelLabel, danger, busy, confirmDisabled, onConfirm, onClose }) {
   const t = useT();
   const close = () => { if (!busy) onClose?.(); };
   return (
@@ -301,7 +301,7 @@ export function ConfirmSheet({ visible, title, message, confirmLabel, cancelLabe
       {message ? <Text style={[type.body, { marginBottom: 12 }]}>{message}</Text> : null}
       <Row>
         <Button style={{ flex: 1 }} variant="ghost" title={cancelLabel || t('common.cancel')} onPress={close} disabled={busy} />
-        <Button style={{ flex: 1 }} variant={danger ? 'danger' : 'primary'} busy={busy} title={confirmLabel || t('common.continue')} onPress={onConfirm} />
+        <Button style={{ flex: 1 }} variant={danger ? 'danger' : 'primary'} busy={busy} disabled={confirmDisabled} title={confirmLabel || t('common.continue')} onPress={onConfirm} />
       </Row>
     </Sheet>
   );

@@ -16,6 +16,12 @@ public sealed record InvitesResult(List<string> Added, List<string> Pending);
 public sealed record JoinedGroup(Guid GroupId, bool AlreadyMember);
 public sealed record NewInviteLink(string InviteLink);
 public sealed record StatusResult(string Status);
+public sealed record ResplitChange(Guid ExpenseId, string Title, string SplitType, long AmountCents,
+    Dictionary<Guid, long> From, Dictionary<Guid, long> To);
+public sealed record RemovalPreview(Guid UserId, long NetCents, string Strategy, bool CanRemove,
+    List<string> Blockers, List<ResplitChange> Expenses, Dictionary<Guid, long> NetsAfter,
+    string InputsHash, string Currency);
+public sealed record MemberRemoved(string Status, int ResplitExpenses);
 
 public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSender email,
     IConfiguration config, CategoryService categories, GroupStatusPolicy statusPolicy)
@@ -273,11 +279,113 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         return new(true, null, null, new StatusResult(selfLeave ? "left" : "removed"));
     }
 
-    public async Task<GroupOp> RemoveMemberAsync(Guid actorId, Guid groupId, Guid targetId)
+    public const string StrategyResplit = "resplit";
+
+    private sealed record RemovalPlan(RemovalPreview Preview, List<(Expense Expense, Expenses.ResplitResult Result)> Rewrites);
+
+    /// <summary>
+    /// Dry run of removing <paramref name="targetId"/> with the re-split strategy.
+    /// A zero balance needs no rewrite (history already settled). Otherwise every open
+    /// expense they share in is re-split by its own method; blockers are open
+    /// expenses they paid and any balance left after the re-split (their payments).
+    /// </summary>
+    private async Task<RemovalPlan?> PlanRemovalAsync(Guid groupId, Guid targetId)
+    {
+        var snapshot = await ledger.ComputeNetsAsync(groupId);
+        if (snapshot is null) return null;
+        var nets = new Dictionary<Guid, long>(snapshot.Nets);
+        var net = nets.GetValueOrDefault(targetId);
+        var rewrites = new List<(Expense, Expenses.ResplitResult)>();
+        var changes = new List<ResplitChange>();
+        var blockers = new List<string>();
+        if (net != 0)
+        {
+            var open = await db.Expenses.Include(e => e.Splits).Include(e => e.Guests)
+                .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+                .OrderBy(e => e.SpentAt).ThenBy(e => e.Id).ToListAsync();
+            foreach (var e in open.Where(e => e.PayerId == targetId))
+                blockers.Add($"Paid open expense \"{e.Title}\": reassign the payer or settle first.");
+            foreach (var e in open.Where(e => e.PayerId != targetId && e.Splits.Any(s => s.UserId == targetId)))
+            {
+                var r = Expenses.MemberResplit.Resplit(e, targetId);
+                var from = e.Splits.ToDictionary(s => s.UserId, s => s.ShareCents);
+                var to = r.Lines.ToDictionary(l => l.UserId, l => l.ShareCents);
+                foreach (var (u, c) in from) nets[u] = nets.GetValueOrDefault(u) + c;
+                foreach (var (u, c) in to) nets[u] = nets.GetValueOrDefault(u) - c;
+                rewrites.Add((e, r));
+                changes.Add(new ResplitChange(e.Id, e.Title, e.SplitType.ToString().ToLowerInvariant(), e.AmountCents, from, to));
+            }
+            var residual = nets.GetValueOrDefault(targetId);
+            if (blockers.Count == 0 && residual != 0)
+                blockers.Add($"Balance left after re-split from payments: {SettlementService.Fmt(residual, snapshot.Currency)}. Settle or reverse those payments first.");
+        }
+        nets.Remove(targetId);
+        return new(new RemovalPreview(targetId, net, StrategyResplit, blockers.Count == 0, blockers, changes,
+            nets, snapshot.InputsHash, snapshot.Currency), rewrites);
+    }
+
+    public async Task<GroupOp> RemovalPreviewAsync(Guid actorId, Guid groupId, Guid targetId)
     {
         var guard = await GuardAsync(groupId, actorId, ownerOnly: true);
         if (!guard.Ok) return guard;
-        return await DetachAsync(groupId, targetId, selfLeave: false);
+        if (await db.GroupMembers.FindAsync(groupId, targetId) is null) return new(false, "NOT_FOUND", "Not a group member.");
+        var plan = await PlanRemovalAsync(groupId, targetId);
+        return plan is null ? new(false, "NOT_FOUND", "Group not found.") : new(true, null, null, plan.Preview);
+    }
+
+    public async Task<GroupOp> RemoveMemberAsync(Guid actorId, Guid groupId, Guid targetId,
+        string? strategy = null, string? expectedHash = null)
+    {
+        var guard = await GuardAsync(groupId, actorId, ownerOnly: true);
+        if (!guard.Ok) return guard;
+        if (string.IsNullOrWhiteSpace(strategy)) return await DetachAsync(groupId, targetId, selfLeave: false);
+        if (!string.Equals(strategy.Trim(), StrategyResplit, StringComparison.OrdinalIgnoreCase))
+            return new(false, "VALIDATION", "strategy must be resplit.");
+
+        var member = await db.GroupMembers.FindAsync(groupId, targetId);
+        if (member is null) return new(false, "NOT_FOUND", "Not a group member.");
+        if (member.Role == "owner"
+            && !await db.GroupMembers.AnyAsync(m => m.GroupId == groupId && m.UserId != targetId && m.Role == "owner"))
+            return new(false, "VALIDATION", "Transfer ownership first: sole owner cannot leave.");
+        var plan = await PlanRemovalAsync(groupId, targetId);
+        if (plan is null) return new(false, "NOT_FOUND", "Group not found.");
+        if (expectedHash is not null && expectedHash != plan.Preview.InputsHash)
+            return new(false, "STALE_LEDGER", "The ledger changed since the preview; review again.");
+        if (!plan.Preview.CanRemove)
+            return new(false, "HAS_OPEN_BALANCE", string.Join(" ", plan.Preview.Blockers));
+
+        foreach (var (e, r) in plan.Rewrites)
+        {
+            var from = e.Splits.ToDictionary(s => s.UserId, s => s.ShareCents);
+            db.ExpenseGuests.RemoveRange(e.Guests.Where(g => r.DroppedGuestIds.Contains(g.Id)));
+            foreach (var s in e.Splits.Where(s => r.Lines.All(l => l.UserId != s.UserId)).ToList())
+                db.ExpenseSplits.Remove(s);
+            foreach (var l in r.Lines)
+            {
+                var s = e.Splits.FirstOrDefault(x => x.UserId == l.UserId);
+                if (s is null) db.ExpenseSplits.Add(s = new ExpenseSplit { ExpenseId = e.Id, UserId = l.UserId });
+                s.ShareCents = l.ShareCents;
+                s.ExactCents = l.ExactCents;
+                s.Percent = l.Percent;
+                s.Shares = l.Shares;
+            }
+            e.Version++;
+            e.UpdatedAt = DateTime.UtcNow;
+            db.ExpenseAudits.Add(new ExpenseAudit
+            {
+                ExpenseId = e.Id, ActorId = actorId,
+                DiffJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    member_removed = targetId,
+                    splits = new { from, to = r.Lines.ToDictionary(l => l.UserId, l => l.ShareCents) }
+                })
+            });
+        }
+        db.GroupMembers.Remove(member);
+        db.MembershipArchives.Add(new MembershipArchive { GroupId = groupId, UserId = targetId });
+        await db.SaveChangesAsync();
+        if (plan.Rewrites.Count > 0) await ledger.RecomputeAsync(groupId);
+        return new(true, null, null, new MemberRemoved("removed", plan.Rewrites.Count));
     }
 
     public async Task<GroupOp> LeaveAsync(Guid userId, Guid groupId)

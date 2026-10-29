@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View, Text, Pressable, FlatList, RefreshControl, StyleSheet } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, fmt, getCapabilities } from '../api/client';
+import { fetchRemovalPreview, isStaleRemoval, removalPath } from '../shared/memberRemoval';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
@@ -226,14 +227,16 @@ export default function GroupDetailScreen({ route, navigation }) {
     await api.patch(`/api/v1/groups/${id}/members/${uid}/deposit`, { paid });
     await load();
   };
-  const removeMember = async (m) => {
+  const removalPreview = (m) => fetchRemovalPreview(api.get, id, m.user_id);
+  const removeMember = async (m, preview) => {
     try {
-      await api.del(`/api/v1/groups/${id}/members/${m.user_id}`);
-      await load();
+      await api.del(removalPath(id, m.user_id, preview));
+      await refreshAll(); // removal can re-split open expenses: ledger shares change too
     } catch (err) {
+      if (isStaleRemoval(err)) throw err; // PeopleTab keeps the sheet open and reloads the preview
       toast({
         title: t('groupDetail.removeMember'),
-        message: err.code === 'HAS_OPEN_BALANCE' ? t('m.group.removeBlocked', { name: m.display_name }) : err.message,
+        message: err.code === 'HAS_OPEN_BALANCE' ? err.message || t('m.group.removeBlocked', { name: m.display_name }) : err.message,
         color: 'red',
       });
     }
@@ -400,7 +403,7 @@ export default function GroupDetailScreen({ route, navigation }) {
         />
       ) : null}
       {tab === 'people' ? (
-        <PeopleTab detail={detail} members={members} meId={meId} onSetRole={setRole} onSetDeposit={setDeposit} onRemove={removeMember} />
+        <PeopleTab detail={detail} members={members} meId={meId} onSetRole={setRole} onSetDeposit={setDeposit} onRemove={removeMember} onRemovalPreview={removalPreview} />
       ) : null}
       {tab === 'activity' ? (
         <ActivityTab

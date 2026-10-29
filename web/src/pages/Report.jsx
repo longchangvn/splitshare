@@ -551,7 +551,7 @@ export function ReportPanel({
       setE(null);
     }).catch((err) => { if (!cancel) setE(err); });
     return () => { cancel = true; };
-  }, [groupId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [groupId, settleTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!detail) return <Text size="sm" c="dimmed">{t('common.loading')}<Err e={e} /></Text>;
 

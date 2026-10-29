@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SplitShare.Api.Auth;
 using SplitShare.Api.Common;
@@ -18,6 +19,7 @@ public static class GroupEndpoints
             "GROUP_FULL" => 403,
             "INVITE_ROTATED" => 410,
             "HAS_OPEN_BALANCE" => 422,
+            "STALE_LEDGER" => 409,
             _ => 422
         });
 
@@ -121,9 +123,16 @@ public static class GroupEndpoints
         api.MapPost("/groups/{id:guid}/rotate-invite", async (Guid id, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.RotateInviteAsync(Me(p), id)));
 
-        api.MapDelete("/groups/{id:guid}/members/{uid:guid}",
+        api.MapGet("/groups/{id:guid}/members/{uid:guid}/removal-preview",
             async (Guid id, Guid uid, ClaimsPrincipal p, GroupService svc) =>
-                ToResult(await svc.RemoveMemberAsync(Me(p), id, uid)));
+                ToResult(await svc.RemovalPreviewAsync(Me(p), id, uid)));
+
+        // ?strategy=resplit re-splits the member's open expenses by each expense's
+        // method; without it removal stays blocked while they hold a balance.
+        api.MapDelete("/groups/{id:guid}/members/{uid:guid}",
+            async (Guid id, Guid uid, [FromQuery] string? strategy, [FromQuery(Name = "expected_hash")] string? expectedHash,
+                ClaimsPrincipal p, GroupService svc) =>
+                ToResult(await svc.RemoveMemberAsync(Me(p), id, uid, strategy, expectedHash)));
 
         api.MapPost("/groups/{id:guid}/leave", async (Guid id, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.LeaveAsync(Me(p), id)));

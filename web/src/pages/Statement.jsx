@@ -39,14 +39,14 @@ export function StatementMobileList({ entries = [], closingCents, currency = '' 
   );
 }
 
-export function StatementPanel({ groupId, members = [], currency = '', embedded = false }) {
+export function StatementPanel({ groupId, members = [], currency = '', embedded = false, reloadKey = 0 }) {
   const t = useT();
   const [uid, setUid] = useState(members[0]?.user_id || '');
   const [stmt, setStmt] = useState(null);
   const [e, setE] = useState(null);
 
   useEffect(() => {
-    if (!uid && members[0]?.user_id) setUid(members[0].user_id);
+    if ((!uid || !members.some((m) => m.user_id === uid)) && members[0]?.user_id) setUid(members[0].user_id);
   }, [members, uid]);
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export function StatementPanel({ groupId, members = [], currency = '', embedded 
       .then((d) => { if (!cancel) { setStmt(d); setE(null); } })
       .catch((err) => { if (!cancel) setE(err); });
     return () => { cancel = true; };
-  }, [groupId, uid]);
+  }, [groupId, uid, reloadKey]);
 
   return (
     <Stack gap="sm">

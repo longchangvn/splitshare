@@ -319,9 +319,10 @@ namespace SplitShare.Api.Migrations.Postgres
 
                     b.Property<string>("Status")
                         .IsRequired()
+                        .ValueGeneratedOnAdd()
                         .HasMaxLength(16)
-                        .HasDefaultValue("opening")
-                        .HasColumnType("character varying(16)");
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("opening");
 
                     b.HasKey("Id");
 
@@ -330,7 +331,6 @@ namespace SplitShare.Api.Migrations.Postgres
 
                     b.ToTable("Groups", "splitshare");
                 });
-
 
             modelBuilder.Entity("SplitShare.Api.Models.GroupCategory", b =>
                 {
@@ -626,6 +626,45 @@ namespace SplitShare.Api.Migrations.Postgres
                         .IsUnique();
 
                     b.ToTable("PendingInvites", "splitshare");
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.PushDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("MutedGroupIdsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("UserId", "Token")
+                        .IsUnique();
+
+                    b.ToTable("PushDevices", "splitshare");
                 });
 
             modelBuilder.Entity("SplitShare.Api.Models.RecurringRule", b =>
