@@ -1,25 +1,39 @@
-// Verifies every mobile-design frame + V1 endpoints map to a screen file.
+// Verifies every web-parity feature + its endpoints map to a mobile file.
 // Run: npm test (node ./scripts/mapping-check.js)
 const fs = require('fs');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
 const checks = [
-  ['Frame 1 Auth (login/register/biometric/google/forgot/reset)', 'src/screens/AuthScreen.js', ['/auth/login', '/auth/google', '/auth/forgot', '/auth/reset', 'LocalAuthentication', 'savedCredentials']],
-  ['Frame 2 Home (balances by currency, skeleton, whole-card)', 'src/screens/HomeScreen.js', ['/me/balances', 'SkeletonCard', 'delinquent']],
-  ['Frame 3 Group ledger + members + invite + settings', 'src/screens/GroupScreen.js', ['/ledger', '/groups/${id}/me', 'InviteSheet', 'Group settings']],
-  ['Frame 4 Add expense (preview-split, idempotency, compress)', 'src/screens/AddExpenseScreen.js', ['preview-split', '/expenses', 'Idempotency', 'ImageManipulator']],
-  ['Frame 4b Expense detail (edit/preview-edit/delete/copy)', 'src/screens/ExpenseDetailScreen.js', ['preview-edit', 'expected_version', 'STALE_VERSION', 'EXPENSE_LOCKED']],
-  ['Frame 5 Settlement Why-box', 'src/screens/SettlementScreen.js', ['/settlement', 'before_nets', 'History']],
-  ['Frame 6 Pay + reverse', 'src/screens/PayScreen.js', ['/payments', 'OVERPAYMENT', '/reverse']],
-  ['Frame 7 New group wizard', 'src/screens/NewGroupScreen.js', ['/groups', '/invites', '/contacts']],
-  ['Frame 8a Activity (offline queue + push)', 'src/screens/SystemScreen.js', ['drainQueue', 'registerPush', 'setGroupOptOut']],
-  ['Frame 8b Profile', 'src/screens/ProfileScreen.js', ['/api/v1/me', '/me/password', 'HAS_OPEN_BALANCE']],
-  ['API client (SecureStore + single-flight refresh)', 'src/api/client.js', ['SecureStore', 'refreshOnce', 'Idempotency-Key']],
+  // Auth: login/register/google live in AuthContext; screens cover forgot/reset/biometric.
+  ['Auth context (login/register/google)', 'src/auth/AuthContext.js', ['/auth/login', '/auth/register', '/auth/google']],
+  ['Auth screens (biometric/forgot/reset/google fallback)', 'src/screens/AuthScreen.js', ['/auth/forgot', '/auth/reset', 'LocalAuthentication', 'savedCredentials', 'GoogleToken']],
+  ['Home dashboard (my balance, skeleton, recent activity)', 'src/screens/HomeScreen.js', ['SkeletonCard', 'setOwedBadge']],
+  ['Balances loader', 'src/components/home/data.js', ['/me/balances', '/activity']],
+  ['Groups board', 'src/screens/GroupsScreen.js', ['GroupTile', 'groupStatus.']],
+  ['Activity feed', 'src/screens/ActivityScreen.js', ['fetchActivity', 'activityPageTokens']],
+  ['Quick add (web QuickAddExpense)', 'src/screens/QuickAddScreen.js', ['resolveQuickAddFlow', 'defaultGroupName', 'mergeMembers']],
+  ['New group wizard', 'src/screens/NewGroupScreen.js', ['/groups', '/invites', '/contacts', 'from-template', 'share-link']],
+  ['Group detail (tabs + settings + scan entry)', 'src/screens/GroupScreen.js', ['/groups/${id}/me', 'LedgerTab', 'BalancesTab', 'PeopleTab', 'RecurringTab', 'GroupSettingsSheet', 'ScanReceipts']],
+  ['Ledger filters + archive scope', 'src/components/group/LedgerTab.js', ["status: 'LOCKED'", 'viewArchive']],
+  ['Invite (email/contacts/link)', 'src/screens/InviteScreen.js', ['/invites', '/contacts', '/rotate-invite']],
+  ['Add/Edit expense', 'src/components/expense/ExpenseForm.js', ['preview-split', 'preview-edit', 'expected_version', 'queueOrSend', '/categories', 'onSaveNew', 'postScan']],
+  ['Receipt helpers (compress + scan + upload)', 'src/receipt.js', ['ImageManipulator', '/expenses/scan', '/images']],
+  ['Batch scan receipts', 'src/screens/ScanReceiptsScreen.js', ['cardsFromSuggestion', 'runPool', 'findDuplicates', 'idempotencyKey']],
+  ['Expense detail (edit/delete/copy/receipts/comments)', 'src/screens/ExpenseDetailScreen.js', ['EXPENSE_LOCKED', 'AuthImage', '/comments']],
+  ['Settlement', 'src/screens/SettlementScreen.js', ['/settlement', 'before_nets', '/settlement/history']],
+  ['Pay + reverse + handles', 'src/screens/PayScreen.js', ['/payments', 'OVERPAYMENT', '/reverse', '/handles']],
+  ['Statement', 'src/screens/StatementScreen.js', ['/statement/']],
+  ['Report', 'src/screens/ReportScreen.js', ['/summary', '/breakdown']],
+  ['Offline & notifications', 'src/screens/SystemScreen.js', ['drainQueue', 'registerPush', 'setGroupOptOut']],
+  ['Settings (language + templates)', 'src/screens/SettingsScreen.js', ['setLocale', 'saveTemplate']],
+  ['Profile (account/password/handles/danger)', 'src/screens/ProfileScreen.js', ['/api/v1/me', '/me/password', '/me/handles', 'HAS_OPEN_BALANCE']],
+  ['API client (SecureStore + single-flight refresh)', 'src/api/client.js', ['SecureStore', 'refreshOnce', 'Idempotency-Key', 'getCapabilities']],
   ['Offline queue (AsyncStorage + same key)', 'src/offline/queue.js', ['AsyncStorage', 'idempotencyKey', 'drainQueue']],
   ['Push (notifications + opt-out + badge)', 'src/push/notifications.js', ['registerPush', 'setGroupOptOut', 'setBadgeCountAsync']],
-  ['UX polish shared UI', 'src/ui.js', ['Skeleton', 'SpinButton', 'NetBadge']],
-  ['Deep link splitshare://g/<token>', 'App.js', ['Join', 'splitshare', 'ExpenseDetail']],
+  ['Shared UI', 'src/ui.js', ['Skeleton', 'Sheet', 'toast', 'AuthImage', 'pastelFor']],
+  ['i18n (web keys + mobile keys)', 'src/i18n/index.js', ['shared/messages', 'MOBILE_MESSAGES']],
+  ['Navigation (dock + FAB + deep links)', 'App.js', ['Join', 'splitshare', 'ExpenseDetail', 'QuickAdd', 'ScanReceipts']],
 ];
 
 let fail = 0;
@@ -33,4 +47,4 @@ for (const [label, file, needles] of checks) {
   }
 }
 if (fail) { console.error(`\n${fail} mapping gap(s)`); process.exit(1); }
-console.log('\nAll frames mapped 1:1 ✓ (V1 + UX polish, trip-pack excluded)');
+console.log('\nAll features mapped ✓ (web parity)');

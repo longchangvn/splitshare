@@ -8,11 +8,53 @@
 // - Idempotency-Key OPTIONAL server-side; client ALWAYS sends it on expenses/payments.
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import uuid from 'react-native-uuid';
 
 const AT_KEY = 'ss_at';
 const RT_KEY = 'ss_rt';
+const API_URL_OVERRIDE_KEY = 'ss_dev_api_url';
+
+export const DEV_DEFAULT_API_URL = 'https://api-container---stage.bravehill-4fe02ad0.southcentralus.azurecontainerapps.io';
+export const isDevBuild = typeof __DEV__ !== 'undefined' && __DEV__;
+
+let apiUrlOverride = null;
+
+const stripSlash = (u) => String(u || '').trim().replace(/\/+$/, '');
+
+export function normalizeApiUrl(raw) {
+  const u = stripSlash(raw);
+  return /^https?:\/\/[^\s/?#]+(\/[^\s]*)?$/i.test(u) ? u : null;
+}
+
+export async function loadApiUrlOverride() {
+  if (!isDevBuild) return;
+  try { apiUrlOverride = normalizeApiUrl(await AsyncStorage.getItem(API_URL_OVERRIDE_KEY)); } catch { /* ignore */ }
+}
+
+export async function setApiUrlOverride(raw) {
+  if (!isDevBuild) return null;
+  const u = normalizeApiUrl(raw);
+  if (!u) throw new ApiError(0, 'VALIDATION', 'Enter a valid http(s) URL');
+  await AsyncStorage.setItem(API_URL_OVERRIDE_KEY, u);
+  apiUrlOverride = u;
+  return u;
+}
+
+export async function resetApiUrlOverride() {
+  apiUrlOverride = null;
+  await AsyncStorage.removeItem(API_URL_OVERRIDE_KEY).catch(() => {});
+}
+
+export function configuredApiUrl() {
+  if (isDevBuild) return apiUrlOverride || DEV_DEFAULT_API_URL;
+  return stripSlash(
+    Constants?.expoConfig?.extra?.apiUrl ||
+    process.env.EXPO_PUBLIC_API_URL ||
+    'http://localhost:8081'
+  );
+}
 
 function isLoopback(hostname) {
   return !hostname || hostname === 'localhost' || hostname === '127.0.0.1';
@@ -30,11 +72,7 @@ function packagerLanHost() {
 }
 
 export function baseUrl() {
-  const configured = (
-    Constants?.expoConfig?.extra?.apiUrl ||
-    process.env.EXPO_PUBLIC_API_URL ||
-    'http://localhost:8081'
-  ).replace(/\/+$/, '');
+  const configured = configuredApiUrl();
 
   let parsed;
   try { parsed = new URL(configured); } catch { parsed = null; }
@@ -179,8 +217,34 @@ export function normalizeDecimal(raw) {
   return s.replace(/\./g, '').replace(/,/g, '.');
 }
 
-export const fmt = (cents, currency = 'USD') =>
-  `${currency} ${(cents / 100).toFixed(2)}`;
+const CURRENCY_SYMBOL = { USD: '$', EUR: '€', GBP: '£', VND: '₫' };
+
+/** Format cents → money string with grouping (same as web/src/api.js). USD → `$1,789.32`. */
+export function fmt(cents, currency = 'USD') {
+  const code = String(currency || 'USD').toUpperCase();
+  const value = Number(cents || 0) / 100;
+  const amount = (Number.isFinite(value) ? value : 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const sym = CURRENCY_SYMBOL[code];
+  return sym ? `${sym}${amount}` : `${code} ${amount}`;
+}
+
+/** Bearer header for authenticated binaries (RN <Image source={{ uri, headers }}>). */
+export async function authHeaders() {
+  const { at } = await getTokens();
+  return at ? { Authorization: `Bearer ${at}` } : {};
+}
+
+// GET /capabilities → { ocr_enabled }. Cached per session; failures read as "off".
+let capsPromise = null;
+export function getCapabilities() {
+  if (!capsPromise) {
+    capsPromise = api.get('/api/v1/capabilities').catch(() => {
+      capsPromise = null;
+      return { ocr_enabled: false };
+    });
+  }
+  return capsPromise;
+}
 
 export const displayNameOf = (members, id) =>
   members?.find((m) => (m.user_id || m.id) === id)?.display_name ||

@@ -6,7 +6,8 @@
     "start": "expo start --port 8082",
     "android": "expo start --android --port 8082",
     "ios": "expo start --ios --port 8082",
-    "test": "node ./scripts/mapping-check.js"
+    "sync:shared": "node ./scripts/sync-shared.js",
+    "test": "node ./scripts/sync-shared.js --check && node ./scripts/mapping-check.js && node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",
@@ -14,6 +15,7 @@
     "@react-navigation/bottom-tabs": "^7.21.0",
     "@react-navigation/native": "^7.5.1",
     "@react-navigation/native-stack": "^7.21.0",
+    "babel-preset-expo": "~58.0.0",
     "expo": "^58.0.20",
     "expo-asset": "~58.0.18",
     "expo-auth-session": "~58.0.15",

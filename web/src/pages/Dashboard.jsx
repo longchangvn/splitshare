@@ -135,8 +135,9 @@ export function Dashboard() {
   const groups = data?.groups || [];
   // Group settled = no open balances among members (not personal net).
   const settledCount = groups.filter((g) => !groupNeedsSettlement(g)).length;
-  const openGroupCount = Math.max(0, groups.length - settledCount);
   const settledPct = groups.length ? Math.round((settledCount / groups.length) * 100) : 0;
+  const activeGroups = groups.filter((g) => (g.status || 'opening') === 'opening');
+  const activeSettled = activeGroups.filter((g) => !groupNeedsSettlement(g)).length;
 
   // Netted "My balance": server nets per currency (never across currencies);
   // the panel lists each open group with its optimized (fewest) transfers.
@@ -223,9 +224,9 @@ export function Dashboard() {
             <div>
               <div className="dash-kicker">{t('dashboard.activeGroups')}</div>
               {!data && !e && <Skeleton height={36} mt={8} radius="md" />}
-              {data && <div className="dash-value">{groups.length}</div>}
+              {data && <div className="dash-value">{activeGroups.length}</div>}
               <div className="dash-delta">
-                {!data ? '…' : t('dashboard.settledOpen', { settled: settledCount, open: openGroupCount })}
+                {!data ? '…' : t('dashboard.settledOpen', { settled: activeSettled, open: activeGroups.length - activeSettled })}
               </div>
             </div>
             <span className="dash-stat-icon" aria-hidden><StatIconGroups /></span>

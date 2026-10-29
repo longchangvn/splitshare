@@ -22,6 +22,11 @@ npm start          # Expo Metro on :8082
 API URL: `app.json` `extra.apiUrl` (default `http://localhost:8081`). On a physical
 device the client rewrites loopback to the Metro LAN IP; Android emulator uses `10.0.2.2`.
 
+Dev builds (`__DEV__`, i.e. non-release) ignore `extra.apiUrl` and default to
+`https://api-container---stage.bravehill-4fe02ad0.southcentralus.azurecontainerapps.io`. Change it at runtime via the
+"Developer · API base URL" card on the Login and You screens (persisted in
+AsyncStorage; "Reset to default" clears it). Release builds hide the card.
+
 Deep link test: `npx uri-scheme open splitshare://g/<token> --ios`.
 
 ## 1:1 mapping (frame → file → endpoints)

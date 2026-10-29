@@ -2,7 +2,7 @@
 // backed by SecureStore (Keychain/Keystore) + biometric unlock.
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { api, setTokens, clearTokens, getTokens } from '../api/client';
+import { api, setTokens, clearTokens, getTokens, loadApiUrlOverride } from '../api/client';
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -38,6 +38,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     (async () => {
+      await loadApiUrlOverride();
       const { at } = await getTokens();
       if (!at) return setLoading(false);
       try {

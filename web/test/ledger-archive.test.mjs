@@ -11,10 +11,13 @@ const messagesSrc = await readFile(new URL('../src/i18n/messages.js', import.met
 const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 const { MESSAGES } = await import('../src/i18n/messages.js');
 
-const MOBILE_GROUP = await readFile(
-  new URL('../../mobile/src/screens/GroupScreen.js', import.meta.url), 'utf8');
-const MOBILE_EXPENSE = await readFile(
-  new URL('../../mobile/src/screens/ExpenseDetailScreen.js', import.meta.url), 'utf8');
+// Mobile (React Native) mirrors the archive model; it reuses the web i18n keys.
+const mobileFile = (rel) => readFile(new URL(`../../mobile/src/${rel}`, import.meta.url), 'utf8');
+const MOBILE_GROUP = await mobileFile('screens/GroupScreen.js');
+const MOBILE_HELPERS = await mobileFile('components/group/helpers.js');
+const MOBILE_LEDGER = await mobileFile('components/group/LedgerTab.js');
+const MOBILE_EXPENSE = await mobileFile('screens/ExpenseDetailScreen.js');
+const MOBILE_FORM_LOGIC = await mobileFile('components/expense/formLogic.js');
 
 test('web ledger defaults to the active (OPEN) scope', () => {
   assert.match(groupDetail, /const \[fStatus, setFStatus\] = useState\('OPEN'\)/);
@@ -88,21 +91,25 @@ test('ledger empty-state block has styling (incl. dark theme)', () => {
 });
 
 test('mobile ledger defaults to active scope with Active/Archived chips', () => {
-  assert.match(MOBILE_GROUP, /useState\('OPEN'\)/);
-  assert.match(MOBILE_GROUP, /\[\['OPEN', 'Active'\], \['LOCKED', 'Archived'\]\]/);
-  assert.doesNotMatch(MOBILE_GROUP, /\['', 'OPEN', 'LOCKED'\]/, 'mixed "All" chip removed');
-  // Status dot indicator only flags the non-default scope.
-  assert.match(MOBILE_GROUP, /fStatus && fStatus !== 'OPEN' \? '•' : ''/);
-  // Locked rows labelled Archived, all-settled empty state present.
-  assert.match(MOBILE_GROUP, /'Archived · snapshot'/);
-  assert.match(MOBILE_GROUP, /\{it\.status === 'LOCKED' \? 'ARCHIVED' : 'ACTIVE'\}/);
-  assert.match(MOBILE_GROUP, />View archive</);
-  assert.match(MOBILE_GROUP, />All settled 🎉</);
+  assert.match(MOBILE_GROUP, /useState\(\{ \.\.\.DEFAULT_FILTERS, status: 'OPEN' \}\)/);
+  assert.match(MOBILE_HELPERS, /status: 'OPEN'/);
+  // Only OPEN / LOCKED scopes — no mixed "All" option.
+  assert.match(MOBILE_LEDGER, /\{ value: 'OPEN', label: t\('groupDetail\.statusOpen'\) \}, \{ value: 'LOCKED', label: t\('groupDetail\.statusLocked'\) \}/);
+  assert.doesNotMatch(MOBILE_LEDGER, /value: '', label: t\('common\.all'\)/);
+  // Filter badge only counts the non-default scope.
+  assert.match(MOBILE_HELPERS, /f\.status && f\.status !== 'OPEN' \? 1 : 0/);
+  // Locked rows labelled Archived; archive / all-settled empty states with explicit scope.
+  assert.match(MOBILE_LEDGER, /locked \? t\('groupDetail\.statusLocked'\) : t\('groupDetail\.statusOpen'\)/);
+  assert.match(MOBILE_LEDGER, /t\('groupDetail\.viewArchive'\)/);
+  assert.match(MOBILE_LEDGER, /t\('groupDetail\.ledgerAllSettled'\)/);
+  assert.match(MOBILE_LEDGER, /status: 'LOCKED' \}\)/);
+  assert.match(MOBILE_LEDGER, /status: 'OPEN' \}\)/);
+  assert.equal(MESSAGES.en['groupDetail.statusLocked'], 'Archived');
 });
 
 test('mobile detail badge and error copy use Archived wording', () => {
-  assert.match(MOBILE_EXPENSE, /\{locked \? 'ARCHIVED' : 'ACTIVE'\}/);
-  assert.match(MOBILE_EXPENSE, /Alert\.alert\('Archived', '403 — settled snapshot/);
-  assert.match(MOBILE_EXPENSE, /ACTIVE only/);
+  assert.match(MOBILE_EXPENSE, /isLocked \? t\('groupDetail\.statusLocked'\)/);
+  assert.match(MOBILE_EXPENSE, /t\('m\.expense\.lockedTitle'\)/);
+  assert.match(MOBILE_FORM_LOGIC, /case 'EXPENSE_LOCKED': return 'm\.expense\.err\.locked'/);
   assert.doesNotMatch(MOBILE_EXPENSE, /Alert\.alert\('Locked', '403/);
 });
