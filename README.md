@@ -133,6 +133,25 @@ set -a; . ./.env; set +a; OCR_LIVE_TEST=1 dotnet test tests --filter ReceiptScan
 Compose: `OCR_ENABLED`, `OCR_API_KEY`, `OCR_MODEL`. CD: vars `OCR__ENABLED`, `OCR__MODEL`,
 secret `OCR__APIKEY`. Spec: `specs/004-multi-receipt-expenses/`.
 
+## Mobile (Expo) — web parity
+
+`mobile/` is an Expo (React Native) client that mirrors the web app feature for
+feature: same endpoints, same payloads, same money rules, same permission model.
+Run the API on `:8081` and Expo on `:8082`:
+
+```sh
+dotnet run --project api --urls http://localhost:8081
+cd mobile && npm install && npm start     # i = iOS simulator, a = Android
+npm test                                  # mapping check + unit tests
+```
+
+Screens, endpoints and the three accepted gaps (export stays web-only, light
+palette only, group navigation via tabs + one `⋯` sheet) are documented in
+[mobile/README.md](mobile/README.md). Plan and parity matrix:
+`specs/005-mobile-parity/`. Two API additions back the mobile client —
+`GET /me/activity` (global feed) and `POST/PATCH/DELETE /me/devices` (Expo push
+tokens + per-group mute); both degrade gracefully on older app builds.
+
 ## API contract
 
 - Base `/api/v1`, **snake_case both directions**, errors `{code, message, fields?}`.

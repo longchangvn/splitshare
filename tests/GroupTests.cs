@@ -80,6 +80,33 @@ public sealed class GroupTests
     }
 
     [Fact]
+    public async Task Close_BlockedUntilAllBalancesSettled()
+    {
+        var (db, auth, groups) = Setup();
+        var a = await Reg(auth, "close-owner");
+        var b = await Reg(auth, "close-member");
+        var g = await groups.CreateAsync(a.Id, "Close group", "USD", [b.Id], []);
+        Guid gid = ((GroupCreated)g.Data!).Group.Id;
+        db.Expenses.Add(new Expense
+        {
+            GroupId = gid, Title = "T", AmountCents = 2000, PayerId = a.Id, CreatedBy = a.Id,
+            Splits = [new ExpenseSplit { UserId = a.Id, ShareCents = 1000 },
+                      new ExpenseSplit { UserId = b.Id, ShareCents = 1000 }]
+        });
+        await db.SaveChangesAsync();
+
+        Assert.Equal("HAS_OPEN_BALANCE", (await groups.UpdateStatusAsync(a.Id, gid, "closed")).ErrorCode);
+        Assert.True((await groups.UpdateStatusAsync(a.Id, gid, "locked")).Ok);
+        Assert.Equal("HAS_OPEN_BALANCE", (await groups.UpdateStatusAsync(a.Id, gid, "closed")).ErrorCode);
+        Assert.Equal("locked", (await db.Groups.FindAsync(gid))!.Status);
+
+        db.Payments.Add(new Payment
+            { GroupId = gid, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 1000, CreatedBy = b.Id });
+        await db.SaveChangesAsync();
+        Assert.True((await groups.UpdateStatusAsync(a.Id, gid, "closed")).Ok);
+    }
+
+    [Fact]
     public async Task DefaultCategories_CannotBeRenamedOrDeleted()
     {
         var (db, auth, groups) = Setup();

@@ -206,6 +206,7 @@ const en = {
   'groupStatus.confirmTitle': 'Change group access?',
   'groupStatus.confirmBody': 'Change access from {from} to {to}?',
   'groupStatus.confirmAction': 'Update access',
+  'groupStatus.closeUnsettled': 'This group can only be closed once all balances are settled. Settle up first, then try again.',
 
   'activity.title': 'Activity',
   'activity.subtitle': 'Latest updates across your groups',
@@ -568,6 +569,7 @@ const en = {
   'scan.title': 'Scan receipts',
   'scan.addPhotos': 'Add photos',
   'scan.takePhotos': 'Take photos',
+  'scan.fromLibrary': 'Choose from library',
   'scan.hint': 'Each photo is read once, then you review every card before anything is saved.',
   'scan.thirdParty': 'Receipt photos are processed by a third-party AI provider.',
   'scan.scanning': 'Reading receipt…',
@@ -954,6 +956,7 @@ const vi = {
   'groupStatus.confirmTitle': 'Đổi quyền truy cập nhóm?',
   'groupStatus.confirmBody': 'Đổi quyền truy cập từ {from} sang {to}?',
   'groupStatus.confirmAction': 'Cập nhật quyền',
+  'groupStatus.closeUnsettled': 'Chỉ có thể đóng nhóm khi mọi khoản nợ đã được tất toán. Hãy tất toán trước rồi thử lại.',
 
   'activity.title': 'Hoạt động',
   'activity.subtitle': 'Cập nhật mới nhất trên các nhóm của bạn',
@@ -1316,6 +1319,7 @@ const vi = {
   'scan.title': 'Quét hóa đơn',
   'scan.addPhotos': 'Thêm ảnh',
   'scan.takePhotos': 'Chụp ảnh',
+  'scan.fromLibrary': 'Chọn từ thư viện',
   'scan.hint': 'Mỗi ảnh được đọc một lần, sau đó bạn kiểm tra từng thẻ trước khi lưu.',
   'scan.thirdParty': 'Ảnh hóa đơn được xử lý bởi dịch vụ AI của bên thứ ba.',
   'scan.scanning': 'Đang đọc hóa đơn…',

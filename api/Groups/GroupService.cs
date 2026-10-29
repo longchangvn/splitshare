@@ -71,6 +71,13 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         if (ValidateStatus(next) is { } error)
             return new(false, "VALIDATION", error);
 
+        if (next == "closed" && g.Status != "closed")
+        {
+            var snapshot = await ledger.ComputeNetsAsync(groupId);
+            if (snapshot is null || snapshot.Nets.Values.Any(v => v != 0))
+                return new(false, "HAS_OPEN_BALANCE", "Close only when all balances are settled.");
+        }
+
         g.Status = next;
         await db.SaveChangesAsync();
         return new(true, null, null, new StatusResult(next));
@@ -139,6 +146,9 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         var g = (Group)guard.Data!;
         var added = new List<string>();
         var pending = new List<string>();
+        var outbox = new List<(string To, string Subject, string Body)>();
+        var inviter = await db.Users.Where(u => u.Id == actorId).Select(u => u.DisplayName).FirstOrDefaultAsync()
+            ?? "A friend";
         foreach (var raw in emails.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             var em = raw.Trim().ToLowerInvariant();
@@ -151,8 +161,9 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
                 var r = await AddMembersAsync(actorId, groupId, [user.Id]);
                 if (!r.Ok) return r;
                 added.Add(em);
-                await email.SendAsync(em, $"Added to {g.Name}",
-                    $"{g.Name} on SplitShare — open {BaseUrl} to view it.");
+                outbox.Add((em, $"{inviter} added you to {g.Name} on SplitShare",
+                    $"Hi {user.DisplayName},\n\n{inviter} added you to the group \"{g.Name}\" on SplitShare.\n" +
+                    $"Open it here: {BaseUrl}/groups/{g.Id}"));
             }
             else
             {
@@ -165,11 +176,19 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
                     return new(false, "GROUP_FULL", $"Group is full (max {MaxMembers}).");
                 db.PendingInvites.Add(new PendingInvite { GroupId = groupId, Email = em, InvitedBy = actorId });
                 pending.Add(em);
-                await email.SendAsync(em, $"Join {g.Name} on SplitShare",
-                    $"Join here: {InviteLink(BaseUrl, g.InviteToken)} (register with this email within 30 days).");
+                outbox.Add((em, $"{inviter} invited you to {g.Name} on SplitShare",
+                    $"Hi,\n\n{inviter} invited you to split expenses in \"{g.Name}\" on SplitShare.\n" +
+                    $"Join here: {InviteLink(BaseUrl, g.InviteToken)}\n\n" +
+                    "Sign up with this email address within 30 days and you'll be added automatically."));
             }
         }
         await db.SaveChangesAsync();
+        // Only after the invite rows are committed; sender is best-effort per address.
+        foreach (var m in outbox)
+        {
+            try { await email.SendAsync(m.To, m.Subject, m.Body); }
+            catch { /* invite mail must not fail the invite */ }
+        }
         return new(true, null, null, new InvitesResult(added, pending));
     }
 

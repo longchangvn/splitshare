@@ -1,132 +1,192 @@
-// Expense detail — FR-8 (edit/resplit/delete + un-settle guard + frozen removed-member).
-// Web parity: ExpenseDetail.jsx (V1 subset, no trip-pack comments).
-// PATCH +expected_version, 409 STALE_VERSION, LOCKED 403 + correction affordance.
+// Expense detail — web ExpenseDetail.jsx parity: summary line, receipt
+// preview/delete, audit list, comments, full edit through ExpenseForm,
+// archived rows offer a prefilled correction.
 import React, { useCallback, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView, Modal } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { api, fmt, displayNameOf, normalizeDecimal } from '../api/client';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { api, imageSource, normalizeDecimal } from '../api/client';
 import { colors } from '../theme';
-import { SpinButton, ErrText } from '../ui';
+import {
+  Card, ErrorBanner, Money, SkeletonCard, SpinButton, uiStyles,
+} from '../ui';
+import { useT } from '../prefs';
+import { useAuth } from '../auth/AuthContext';
+import { fmt } from '../lib/money';
+import { categoryLabelForKey } from '../lib/categories';
+import ExpenseForm from '../components/ExpenseForm';
+import Comments from '../components/Comments';
 
 export default function ExpenseDetailScreen({ route, navigation }) {
-  const { groupId, expenseId } = route.params;
+  const { groupId, expenseId } = route.params || {};
+  const t = useT();
+  const { user } = useAuth();
   const [detail, setDetail] = useState(null);
   const [group, setGroup] = useState(null);
+  const [categories, setCategories] = useState([]);
+  const [images, setImages] = useState({});
   const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState('');
-  const [amount, setAmount] = useState('');
-  const [preview, setPreview] = useState(null);
-  const [confirm, setConfirm] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [e, setE] = useState(null);
+  const [error, setError] = useState(null);
 
   const load = useCallback(async () => {
+    setError(null);
     try {
-      const [d, g] = await Promise.all([
+      const [d, g, cats] = await Promise.all([
         api.get(`/api/v1/expenses/${expenseId}`),
         api.get(`/api/v1/groups/${groupId}`).catch(() => null),
+        api.get(`/api/v1/groups/${groupId}/categories`).catch(() => []),
       ]);
-      const exp = d.expense || d;
-      setDetail({ ...d, expense: exp });
-      setTitle(exp.title || '');
-      setAmount(((exp.amount_cents ?? 0) / 100).toFixed(2));
+      const expense = d.expense || d;
+      setDetail({ ...d, expense });
       setGroup(g?.group || g);
-    } catch (err) { setE(err); }
+      setCategories(Array.isArray(cats) ? cats : []);
+      const entries = await Promise.all((expense.images || []).map(async (im) => {
+        const id = im.image_id || im.id;
+        try { return [id, await imageSource(id)]; } catch { return [id, null]; }
+      }));
+      setImages(Object.fromEntries(entries.filter(([, v]) => v)));
+    } catch (err) { setError(err); }
   }, [expenseId, groupId]);
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const exp = detail?.expense || {};
+  if (!detail) {
+    return (
+      <View style={s.wrap}>
+        <SkeletonCard />
+        <SkeletonCard />
+        <ErrorBanner error={error} onRetry={load} />
+      </View>
+    );
+  }
+
+  const exp = detail.expense || {};
   const members = group?.members || [];
   const currency = group?.currency || 'USD';
   const locked = exp.status === 'LOCKED';
-  const audit = detail?.audit || exp.audit || [];
+  const audit = detail.audit || exp.audit || [];
+  const myId = user?.user_id || user?.id;
+  const isOwner = group?.my_role === 'owner';
+  const canEdit = !locked && (exp.created_by === myId || exp.payer_id === myId || isOwner);
+  const nameOf = (id) => members.find((m) => m.user_id === id)?.display_name || String(id || '').slice(0, 8);
 
-  const liveEditPreview = async (nt = title, na = amount) => {
-    if (!nt || !na) return;
-    try {
-      const p = await api.post(`/api/v1/expenses/${expenseId}/preview-edit`, {
-        title: nt, amount: Number(na), payer_id: exp.payer_id, split_type: exp.split_type,
-        participant_ids: (exp.splits || []).map((x) => x.user_id),
-      });
-      setPreview(p);
-    } catch { /* best-effort */ }
-  };
-
-  const saveEdit = async () => {
-    setBusy(true); setE(null);
-    try {
-      // Pre-save un-settle check: blocking confirm if preview non-empty.
-      const names = preview?.unsettled_user_ids || [];
-      if (names.length > 0 && !confirm) {
-        setConfirm(names.map((uid) => {
-          const sh = preview.shares?.[uid] != null ? ` → ${fmt(preview.shares[uid], currency)}` : '';
-          return `${displayNameOf(members, uid)} ($0.00${sh})`;
-        }));
-        setBusy(false);
-        return;
-      }
-      setConfirm(null);
-      const r = await api.patch(`/api/v1/expenses/${expenseId}`, {
-        expected_version: exp.version, title, amount: Number(amount),
-      });
-      if ((r.unsettled_user_ids || []).length) {
-        Alert.alert('Settlement updated', `v${exp.version} → v${r.settlement_version}, ${(r.unsettled_user_ids || []).join(', ')} un-settled. See Why-box.`);
-      }
-      setEditing(false);
-      load();
-    } catch (err) {
-      if (err.code === 'STALE_VERSION') Alert.alert('Stale version', '409 — reload and retry.');
-      else if (err.code === 'EXPENSE_LOCKED') Alert.alert('Archived', '403 — settled snapshot. Create a correction instead.');
-      else if (err.code === 'INVOLVES_REMOVED_MEMBER') Alert.alert('Removed member', 'Owner must re-add the member first.');
-      else setE(err);
-    } finally { setBusy(false); }
-  };
-
-  const doDelete = () => {
-    Alert.alert('Delete expense?', 'Soft-delete, OPEN only.', [
-      { text: 'Cancel', style: 'cancel' },
+  const deleteExpense = () => {
+    Alert.alert(t('expense.deleteTitle'), t('expense.deleteBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Delete', style: 'destructive', onPress: async () => {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          setBusy(true);
           try {
-            const r = await api.del(`/api/v1/expenses/${expenseId}`);
-            if ((r?.unsettled_user_ids || []).length) Alert.alert('Un-settled', (r.unsettled_user_ids || []).join(', '));
+            await api.del(`/api/v1/expenses/${expenseId}`);
             navigation.goBack();
           } catch (err) {
-            Alert.alert('Delete failed', `${err.code} ${err.message}`);
-          }
+            Alert.alert(t('expense.deleteTitle'), err.code === 'EXPENSE_LOCKED' ? t('m.errors.expenseLocked') : err.message);
+          } finally { setBusy(false); }
         },
       },
     ]);
   };
 
-  const doCopy = () => {
-    navigation.navigate('AddExpense', { id: groupId, copyFrom: exp });
-  };
-
   const uploadReceipt = async () => {
-    const r = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: false });
-    if (r.canceled) return;
-    const a = (r.assets || [])[0];
-    if (!a) return;
-    if ((a.fileSize || 0) > 10 * 1024 * 1024) return Alert.alert('Too large', '≤10MB.');
-    const fd = new FormData();
-    fd.append('files', { uri: a.uri, name: 'receipt.jpg', type: 'image/jpeg' });
+    if ((exp.images || []).length >= 5) {
+      Alert.alert(t('expense.receipts'), t('forms.expense.receiptsCount', { count: 5 }));
+      return;
+    }
+    const res = await ImagePicker.launchImageLibraryAsync({ allowsMultipleSelection: false });
+    if (res.canceled) return;
+    const asset = (res.assets || [])[0];
+    if (!asset) return;
+    if ((asset.fileSize || 0) > 10 * 1024 * 1024) {
+      Alert.alert(t('expense.receiptTooBig'), '');
+      return;
+    }
+    setBusy(true);
     try {
-      await api.postForm(`/api/v1/expenses/${expenseId}/images`, fd);
-      load();
-    } catch (err) { Alert.alert('Upload failed', `${err.code} ${err.message}`); }
+      const compressed = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        asset.width ? [{ resize: { width: Math.min(asset.width, 1600) } }] : [],
+        { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+      ).catch(() => asset);
+      const form = new FormData();
+      form.append('files', { uri: compressed.uri, name: 'receipt.jpg', type: 'image/jpeg' });
+      await api.postForm(`/api/v1/expenses/${expenseId}/images`, form);
+      await load();
+      Alert.alert(t('expense.receiptUploaded'), '');
+    } catch (err) {
+      Alert.alert(t('expense.uploadReceipt'), err.message);
+    } finally { setBusy(false); }
   };
 
-  if (!detail) return <View style={s.wrap}><Text style={s.muted}>Loading…</Text>{e && <ErrText e={e} />}</View>;
+  const deleteImage = (imageId) => {
+    Alert.alert(t('common.delete'), '', [
+      { text: t('common.cancel'), style: 'cancel' },
+      {
+        text: t('common.delete'),
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.del(`/api/v1/images/${imageId}`);
+            await load();
+          } catch (err) { Alert.alert(t('common.delete'), err.message); }
+        },
+      },
+    ]);
+  };
+
+  if (editing) {
+    return (
+      <ScrollView style={s.wrap} keyboardShouldPersistTaps="handled">
+        <ExpenseForm
+          groupId={groupId}
+          group={group}
+          members={members}
+          currency={currency}
+          categories={categories}
+          initial={exp}
+          onReload={load}
+          onCancel={() => setEditing(false)}
+          onSaved={() => { setEditing(false); load(); }}
+          enableScan={false}
+        />
+        <View style={{ height: 30 }} />
+      </ScrollView>
+    );
+  }
+
+  const guests = exp.guests || [];
+  const splits = exp.splits || [];
 
   return (
     <ScrollView style={s.wrap}>
-      <View style={s.card}>
-        <View style={s.row}>
+      <Card>
+        <View style={s.rowBetween}>
           <Text style={s.title}>{exp.title}</Text>
-          <Text style={locked ? s.bLock : s.bOpen}>{locked ? 'ARCHIVED' : 'ACTIVE'}</Text>
+          <Text style={locked ? s.bLock : s.bOpen}>
+            {locked ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}
+          </Text>
         </View>
+        <Money cents={exp.amount_cents || 0} currency={currency} size="lg" style={{ marginTop: 6 }} />
+        <Text style={uiStyles.muted}>
+          {t('expense.paidBy')} {nameOf(exp.payer_id)}
+          {exp.category ? ` · ${categoryLabelForKey(exp.category, categories, t)}` : ''}
+        </Text>
+        {!!exp.spent_at && <Text style={uiStyles.muted}>{t('forms.expense.spentOn')} {String(exp.spent_at).slice(0, 10)}</Text>}
+        {(exp.tax_cents || exp.tip_cents || exp.fee_cents) ? (
+          <Text style={uiStyles.muted}>
+            {[
+              exp.tax_cents ? `${t('expense.tax')} ${fmt(exp.tax_cents, currency)}` : null,
+              exp.tip_cents ? `${t('expense.tip')} ${fmt(exp.tip_cents, currency)}` : null,
+              exp.fee_cents ? `${t('expense.fee')} ${fmt(exp.fee_cents, currency)}` : null,
+            ].filter(Boolean).join(' · ')}
+          </Text>
+        ) : null}
+        {!!exp.orig_currency && (
+          <Text style={uiStyles.muted}>
+            {fmt(exp.orig_amount_cents || 0, exp.orig_currency)} × {exp.fx_rate} ≈ {fmt(exp.amount_cents || 0, currency)}
+          </Text>
         {!!exp.description && <Text style={s.muted}>{exp.description}</Text>}
         <Text style={s.h}>Paid by {displayNameOf(members, exp.payer_id)} · {fmt(exp.amount_cents || 0, currency)}</Text>
         {!editing ? (
@@ -138,88 +198,119 @@ export default function ExpenseDetailScreen({ route, navigation }) {
             {preview && <Text style={s.step}>Preview: {JSON.stringify(preview.shares || {})}{preview.unsettled_user_ids?.length ? ` · will un-settle ${preview.unsettled_user_ids.length}` : ''}</Text>}
           </>
         )}
-        <View style={s.row3}>
-          {!locked ? (
+        {!!exp.description && <Text style={[uiStyles.muted, { marginTop: 6 }]}>{exp.description}</Text>}
+
+        <View style={s.actions}>
+          {canEdit ? (
             <>
-              {!editing
-                ? <Pressable style={s.ghost} onPress={() => { setEditing(true); liveEditPreview(); }}><Text>Edit</Text></Pressable>
-                : <Pressable style={s.ghost} onPress={() => setEditing(false)}><Text>Cancel</Text></Pressable>}
-              {editing
-                ? <SpinButton title="Save" busy={busy} onPress={saveEdit} />
-                : <Pressable style={s.ghost} onPress={doDelete}><Text>Delete</Text></Pressable>}
+              <Pressable style={s.ghost} onPress={() => setEditing(true)} accessibilityRole="button">
+                <Text style={s.ghostT}>{t('common.edit')}</Text>
+              </Pressable>
+              <Pressable style={s.ghost} onPress={deleteExpense} disabled={busy} accessibilityRole="button">
+                <Text style={s.dangerT}>{t('common.delete')}</Text>
+              </Pressable>
             </>
-          ) : (
-            <Pressable style={s.ghost} onPress={doCopy}><Text>Create correction (prefilled reversed)</Text></Pressable>
-          )}
-          <Pressable style={s.ghost} onPress={doCopy}><Text>Copy</Text></Pressable>
+          ) : null}
+          <Pressable
+            style={s.ghost}
+            onPress={() => navigation.navigate('AddExpense', { id: groupId, copyFrom: exp })}
+            accessibilityRole="button"
+          >
+            <Text style={s.ghostT}>{t('groupDetail.copyExpense')}</Text>
+          </Pressable>
         </View>
-        <ErrText e={e} />
-      </View>
+      </Card>
 
-      <View style={s.card}>
-        <Text style={s.h}>Splits</Text>
-        {(exp.splits || []).map((x) => (
-          <Text key={x.user_id} style={s.muted}>{displayNameOf(members, x.user_id)}: {fmt(x.share_cents ?? 0, currency)}</Text>
-        ))}
-      </View>
-
-      <View style={s.card}>
-        <Text style={s.h}>Receipts ({(exp.images || []).length}/5)</Text>
-        {(exp.images || []).map((im) => (
-          <View key={im.image_id || im.id} style={s.row}>
-            <Text style={s.muted}>🧾 {im.image_id || im.id}</Text>
-            {!locked && (
-              <Pressable onPress={async () => {
-                try { await api.del(`/api/v1/images/${im.image_id || im.id}`); load(); }
-                catch (err) { Alert.alert('Delete failed', err.message); }
-              }}><Text style={s.danger}>Delete</Text></Pressable>
-            )}
+      <Card>
+        <Text style={uiStyles.h}>{t('expense.splits')}</Text>
+        {splits.map((sp) => (
+          <View key={sp.user_id} style={s.rowBetween}>
+            <Text style={s.small}>{nameOf(sp.user_id)}{myId === sp.user_id ? ` · ${t('groupDetail.mine')}` : ''}</Text>
+            <Money cents={sp.share_cents || 0} currency={currency} size="sm" />
           </View>
         ))}
-        {!locked && <Pressable style={s.ghost} onPress={uploadReceipt}><Text>＋ Upload receipt (jpg/png/webp/heic ≤10MB)</Text></Pressable>}
-      </View>
+        {guests.length > 0 && (
+          <>
+            <Text style={[uiStyles.h, { marginTop: 10 }]}>{t('expense.guests')}</Text>
+            {guests.map((g, i) => (
+              <View key={`${g.label}-${i}`} style={s.rowBetween}>
+                <Text style={s.small}>{g.label} · {nameOf(g.covered_by)}</Text>
+                <Money cents={g.share_cents || 0} currency={currency} size="sm" />
+              </View>
+            ))}
+          </>
+        )}
+      </Card>
 
-      {audit.length > 0 && (
-        <View style={s.card}>
-          <Text style={s.h}>History</Text>
-          {audit.map((a, i) => (
-            <Text key={i} style={s.muted}>{a.at || ''} · {typeof a.diff === 'string' ? a.diff : JSON.stringify(a.diff || a)}</Text>
-          ))}
-        </View>
-      )}
+      <Card>
+        <Text style={uiStyles.h}>{t('expense.receipts')} ({(exp.images || []).length})</Text>
+        {(exp.images || []).length === 0 && <Text style={uiStyles.muted}>{t('expense.noReceipts')}</Text>}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {(exp.images || []).map((im) => {
+            const imageId = im.image_id || im.id;
+            const source = images[imageId];
+            return (
+              <View key={imageId} style={s.thumbWrap}>
+                {source
+                  ? <Image source={source} style={s.thumb} accessible accessibilityLabel={t('expense.receipts')} />
+                  : <View style={[s.thumb, s.thumbEmpty]}><Text style={s.small}>🧾</Text></View>}
+                {!locked && (
+                  <Pressable
+                    style={s.thumbDelete}
+                    onPress={() => deleteImage(imageId)}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.delete')}
+                  >
+                    <Text style={s.thumbDeleteT}>✕</Text>
+                  </Pressable>
+                )}
+              </View>
+            );
+          })}
+        </ScrollView>
+        {!locked && (
+          <SpinButton title={t('expense.uploadReceipt')} variant="ghost" onPress={uploadReceipt} busy={busy} />
+        )}
+      </Card>
 
-      <Modal visible={!!confirm} transparent animationType="slide" onRequestClose={() => setConfirm(null)}>
-        <View style={s.scrim}>
-          <View style={s.sheet}>
-            <Text style={s.h}>⚠️ This will un-settle {(confirm || []).join(', ')}</Text>
-            <Text style={s.muted}>Push + email to affected. Continue?</Text>
-            <View style={s.row3}>
-              <Pressable style={s.ghost} onPress={() => setConfirm(null)}><Text>Back</Text></Pressable>
-              <Pressable style={s.dangerBtn} onPress={() => saveEdit()}><Text style={s.dangerBtnT}>Un-settle & save</Text></Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <Card>
+        <Text style={uiStyles.h}>{t('expense.history', { count: audit.length })}</Text>
+        {audit.length === 0 && <Text style={uiStyles.muted}>{t('expense.noHistory')}</Text>}
+        {audit.map((a, i) => (
+          <Text key={i} style={s.audit}>
+            {a.at ? `${new Date(a.at).toLocaleString()} · ` : ''}
+            {typeof a.diff === 'string' ? a.diff : JSON.stringify(a.diff || a)}
+          </Text>
+        ))}
+      </Card>
+
+      <Comments expenseId={expenseId} groupOwnerId={members.find((m) => m.role === 'owner')?.user_id} />
+      <View style={{ height: 24 }} />
     </ScrollView>
   );
 }
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.screen, padding: 14 },
-  card: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 10 },
-  title: { fontSize: 16, fontWeight: '800' },
-  h: { fontSize: 13, fontWeight: '800', marginTop: 6 },
-  muted: { fontSize: 12, color: colors.secondary, marginTop: 4 },
-  danger: { color: colors.debtorText, fontWeight: '700' },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  row3: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  inp: { backgroundColor: '#fff', borderColor: colors.inputBorder, borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8 },
-  step: { backgroundColor: colors.paleTealBg, borderRadius: 10, padding: 8, fontSize: 11, color: colors.darkTealText, marginTop: 8 },
-  ghost: { flex: 1, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12, padding: 12, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
-  dangerBtn: { flex: 1, backgroundColor: colors.debtorText, borderRadius: 12, padding: 13, alignItems: 'center' },
-  dangerBtnT: { color: '#fff', fontWeight: '700' },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
+  title: { fontSize: 16, fontWeight: '800', flex: 1, marginRight: 8 },
+  small: { fontSize: 12, color: colors.text },
+  audit: { fontSize: 11, color: colors.secondary, marginTop: 6 },
+  actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  ghost: {
+    borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12, paddingHorizontal: 14,
+    paddingVertical: 11, minHeight: 44, justifyContent: 'center', backgroundColor: '#fff', flexGrow: 1, alignItems: 'center',
+  },
+  ghostT: { fontSize: 12, fontWeight: '700', color: colors.text },
+  dangerT: { fontSize: 12, fontWeight: '700', color: colors.debtorText },
+  thumbWrap: { marginRight: 10, marginTop: 8 },
+  thumb: { width: 120, height: 120, borderRadius: 12, backgroundColor: colors.lockedBg },
+  thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
+  thumbDelete: {
+    position: 'absolute', top: 4, right: 4, width: 28, height: 28, borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,.9)', alignItems: 'center', justifyContent: 'center',
+  },
+  thumbDeleteT: { fontWeight: '800', color: colors.debtorText },
   bOpen: { fontSize: 10, fontWeight: '800', backgroundColor: colors.openBg, color: colors.openText, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   bLock: { fontSize: 10, fontWeight: '800', backgroundColor: colors.lockedBg, color: colors.lockedText, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
-  scrim: { flex: 1, backgroundColor: 'rgba(15,23,42,.55)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
 });

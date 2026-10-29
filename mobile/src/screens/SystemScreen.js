@@ -1,126 +1,196 @@
-// Frame 8a · Activity/System — offline queue + push + settled-lock note.
-// V1 NFR: offline draft queue auto-sync (same key), push per-group opt-out,
-// deep link splitshare://g/<token>, badge = total owed.
+// Activity tab (spec 005 task 3.9) — one request per page from GET /me/activity
+// when the capability flag is present, otherwise a per-group fan-out. Also the
+// home of the offline queue and push notification controls.
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Switch } from 'react-native';
+import { Alert, RefreshControl, ScrollView, Switch, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../api/client';
 import { colors } from '../theme';
-import { getQueue, drainQueue, subscribeReconnect } from '../offline/queue';
-import { registerPush, getOptOuts, setGroupOptOut } from '../push/notifications';
-import { SpinButton } from '../ui';
+import {
+  Card, Chip, EmptyState, ErrorBanner, ListFooter, PressableRow, SkeletonCard, SpinButton,
+  uiStyles,
+} from '../ui';
+import { useT } from '../prefs';
+import {
+  buildGlobalActivityQuery, fanOutGlobalActivity, hasGlobalActivity, nextCursor,
+} from '../lib/activity';
+import { drainQueue, getQueue, subscribeReconnect } from '../offline/queue';
+import { getOptOuts, registerPush, setGroupOptOut } from '../push/notifications';
 
 export default function SystemScreen({ navigation }) {
+  const t = useT();
+  const [items, setItems] = useState([]);
+  const [cursor, setCursor] = useState(null);
+  const [groupId, setGroupId] = useState('');
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState(null);
+  const [capabilities, setCapabilities] = useState(null);
   const [queue, setQueue] = useState([]);
   const [draining, setDraining] = useState(false);
-  const [push, setPush] = useState({ status: 'unknown' });
-  const [optOuts, setOptOuts] = useState({});
-  const [groups, setGroups] = useState([]);
+  const [pushState, setPushState] = useState('unknown');
+  const [muted, setMuted] = useState({});
 
-  const [feed, setFeed] = useState([]);
+  const loadPage = useCallback(async (before = null, replace = true) => {
+    if (before) setMoreLoading(true); else setLoading(true);
+    setError(null);
+    try {
+      const caps = capabilities || await api.get('/api/v1/capabilities').catch(() => null);
+      setCapabilities(caps);
+      const balances = await api.get('/api/v1/me/balances').catch(() => ({ groups: [] }));
+      const allGroups = balances.groups || [];
+      setGroups(allGroups);
+
+      let rows;
+      let next = null;
+      if (hasGlobalActivity(caps)) {
+        const res = await api.get(buildGlobalActivityQuery({ limit: 20, before, groupId }));
+        rows = res.items || [];
+        next = res.next_before || null;
+      } else {
+        // Older API build: fan out across groups and page the merged list locally.
+        const feeds = await Promise.all(allGroups.map(async (g) => {
+          const feed = await api.get(`/api/v1/groups/${g.group_id}/activity?limit=50`).catch(() => []);
+          return { group_id: g.group_id, group_name: g.name, rows: feed };
+        }));
+        const merged = fanOutGlobalActivity(feeds)
+          .filter((r) => !groupId || r.group_id === groupId);
+        rows = merged.slice(0, 50);
+        next = null;
+      }
+      setItems((prev) => (replace ? rows : [...prev, ...rows]));
+      setCursor(next);
+    } catch (err) {
+      setError(err);
+    } finally {
+      setLoading(false);
+      setMoreLoading(false);
+    }
+  }, [capabilities, groupId]);
+
+  const refreshExtras = useCallback(async () => {
+    setQueue(await getQueue());
+    setMuted(await getOptOuts());
+  }, []);
 
   const refresh = useCallback(async () => {
-    setQueue(await getQueue());
-    setOptOuts(await getOptOuts());
-    try {
-      const gs = (await api.get('/api/v1/me/balances')).groups || [];
-      setGroups(gs);
-      const lists = await Promise.all(gs.map(async (g) => {
-        try {
-          const rows = await api.get(`/api/v1/groups/${g.group_id}/activity?limit=10`);
-          return (rows || []).map((r) => ({ ...r, group_name: g.name, group_id: g.group_id }));
-        } catch { return []; }
-      }));
-      setFeed(lists.flat().sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 20));
-    } catch { /* offline */ }
-  }, []);
+    setRefreshing(true);
+    await loadPage(null, true);
+    await refreshExtras();
+    setRefreshing(false);
+  }, [loadPage, refreshExtras]);
+
   useFocusEffect(useCallback(() => {
     refresh();
-    const unsub = subscribeReconnect(async () => {
+    const unsubscribe = subscribeReconnect(async () => {
       await drainQueue().catch(() => {});
       refresh();
     });
-    return unsub;
-  }, [refresh]));
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId]));
 
-  const doDrain = async () => {
+  const drain = async () => {
     setDraining(true);
     try {
-      const r = await drainQueue();
-      Alert.alert('Sync', `Drained ${r.drained}, remaining ${r.remaining}${r.errors?.length ? `: ${r.errors.join('; ')}` : ''}`);
-      refresh();
+      const res = await drainQueue();
+      Alert.alert(t('common.refresh'), `${res.drained} · ${res.remaining}`);
+      await refreshExtras();
     } finally { setDraining(false); }
   };
 
-  const doPush = async () => {
-    const r = await registerPush();
-    setPush(r);
-    if (r.status === 'granted') Alert.alert('Push enabled', (r.token || '').slice(0, 24) + '…');
-    else Alert.alert('Push', r.status);
+  const enablePush = async () => {
+    const res = await registerPush();
+    setPushState(res.status);
+    if (res.status === 'granted') Alert.alert(t('m.push.title'), t('m.push.hint'));
+    else Alert.alert(t('m.push.title'), res.status);
   };
 
   return (
-    <ScrollView style={s.wrap}>
-      <View style={s.card}>
-        <Text style={s.h}>Recent activity</Text>
-        {feed.length === 0 && <Text style={s.muted}>Nothing yet. Add an expense in a group to see it here.</Text>}
-        {feed.map((a, i) => (
-          <Pressable
-            key={`${a.group_id}-${a.kind}-${a.at}-${i}`}
-            style={s.row}
-            onPress={() => navigation.navigate('GroupDetail', { id: a.group_id })}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={s.muted}>{a.text || a.kind}</Text>
-              <Text style={s.muted}>{a.group_name}</Text>
-            </View>
-          </Pressable>
-        ))}
-      </View>
-      <View style={s.card}>
-        <View style={s.row}><Text style={s.h}>Offline queue ({queue.length})</Text><Text style={s.bWarn}>AUTO-SYNC</Text></View>
-        <Text style={s.muted}>Expense + Payment → same Idempotency-Key, no duplicate</Text>
-        {queue.map((d) => (
-          <Text key={d.key} style={s.muted}>• {d.type} → {String(d.group_id).slice(0, 8)} · {d.created_at}</Text>
-        ))}
-        <SpinButton title="Sync now" busy={draining} onPress={doDrain} />
-      </View>
-      <View style={s.card}>
-        <Text style={s.h}>Push ({push.status})</Text>
-        <Text style={s.muted}>"Ana recorded $200 — you owe $50" · "Ben un-settled (−$15)" · per-group opt-out</Text>
-        <SpinButton title="Enable push" busy={false} variant="ghost" onPress={doPush} />
+    <ScrollView
+      style={s.wrap}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+    >
+      <Text style={s.title}>{t('activity.title')}</Text>
+      <Text style={uiStyles.muted}>{t('activity.subtitle')}</Text>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.chips}>
+        <Chip label={t('m.activity.groupFilter')} selected={!groupId} onPress={() => setGroupId('')} />
         {groups.map((g) => (
-          <View key={g.group_id} style={s.row}>
-            <Text style={s.muted}>{g.name}</Text>
+          <Chip key={g.group_id} label={g.name} selected={groupId === g.group_id} onPress={() => setGroupId(g.group_id)} />
+        ))}
+      </ScrollView>
+
+      {loading && <SkeletonCard />}
+      {!loading && items.length === 0 && (
+        <EmptyState title={t('activity.empty')} />
+      )}
+
+      {items.map((a, i) => (
+        <Card
+          key={`${a.group_id || ''}-${a.at}-${i}`}
+          onPress={() => (a.group_id ? navigation.navigate('GroupActivity', { id: a.group_id }) : null)}
+          accessibilityLabel={a.text || a.kind}
+        >
+          <Text style={s.itemText}>{a.text || a.kind}</Text>
+          <Text style={uiStyles.muted}>
+            {a.group_name || ''}{a.at ? ` · ${new Date(a.at).toLocaleString()}` : ''}
+          </Text>
+        </Card>
+      ))}
+
+      {loading && items.length === 0 && <ListFooter loading />}
+      {!!cursor && (
+        <SpinButton
+          title={t('m.activity.nextPage')}
+          variant="ghost"
+          busy={moreLoading}
+          onPress={() => loadPage(cursor, false)}
+        />
+      )}
+      {!cursor && items.length > 0 && <Text style={s.done}>{t('m.activity.noMore')}</Text>}
+
+      <ErrorBanner error={error} onRetry={() => loadPage(null, true)} />
+
+      <Card>
+        <Text style={uiStyles.h}>{t('settings.title')} · {t('common.total')} {queue.length}</Text>
+        <Text style={uiStyles.muted}>{t('forms.expense.uploadsOnSave', { action: t('common.save') })}</Text>
+        <SpinButton title={t('common.refresh')} variant="ghost" busy={draining} onPress={drain} />
+      </Card>
+
+      <Card>
+        <Text style={uiStyles.h}>{t('m.push.title')}</Text>
+        <Text style={uiStyles.muted}>{t('m.push.hint')}</Text>
+        <SpinButton title={t('m.push.title')} onPress={enablePush} />
+        {groups.map((g) => (
+          <View key={g.group_id} style={s.muteRow}>
+            <Text style={s.muteLabel} numberOfLines={1}>{g.name}</Text>
             <Switch
-              value={!optOuts[g.group_id]}
+              value={!muted[g.group_id]}
               onValueChange={async (on) => {
-                await setGroupOptOut(g.group_id, !on);
-                refresh();
+                const map = await setGroupOptOut(g.group_id, !on);
+                setMuted({ ...map });
               }}
+              accessibilityLabel={`${t('m.push.mute')} ${g.name}`}
             />
           </View>
         ))}
-      </View>
-      <View style={[s.card, s.tealCard]}>
-        <Text style={s.hTeal}>Settled group</Text>
-        <Text style={s.muted}>All nets $0 → LOCKED snapshot · reverse owner-only 24h else counter-payment</Text>
-      </View>
-      <Pressable style={s.ghost} onPress={() => navigation.navigate('You')}>
-        <Text>Open profile ›</Text>
-      </Pressable>
+      </Card>
+
+      <PressableRow title={t('profile.title')} onPress={() => navigation.navigate('You')} />
+      <View style={{ height: 24 }} />
     </ScrollView>
   );
 }
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.screen, padding: 14 },
-  card: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 10 },
-  tealCard: { backgroundColor: colors.paleTealBg, borderColor: colors.borderTeal },
-  h: { fontSize: 13, fontWeight: '800' },
-  hTeal: { fontSize: 13, fontWeight: '800', color: colors.primary },
-  muted: { fontSize: 12, color: colors.secondary, marginTop: 4 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 },
-  ghost: { borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12, padding: 12, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
-  bWarn: { fontSize: 10, fontWeight: '800', backgroundColor: colors.warnBg, color: colors.warnText, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  title: { fontSize: 17, fontWeight: '800' },
+  chips: { gap: 6, paddingVertical: 10 },
+  itemText: { fontSize: 13, color: colors.text, fontWeight: '600' },
+  done: { fontSize: 11, color: colors.muted, textAlign: 'center', marginVertical: 8 },
+  muteRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, minHeight: 44 },
+  muteLabel: { fontSize: 12, color: colors.text, flex: 1, marginRight: 8 },
 });

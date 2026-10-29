@@ -34,6 +34,7 @@ export function ScanReceipts({
 }) {
   const t = useT();
   const fileRef = useRef(null);
+  const libraryRef = useRef(null);
   const [cards, setCards] = useState([]);
   const [busy, setBusy] = useState(false);
   const scanning = cards.filter((c) => c.status === 'scanning').length;
@@ -181,13 +182,28 @@ export function ScanReceipts({
             hidden
             onChange={onPickFiles}
           />
+          <input
+            ref={libraryRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={onPickFiles}
+          />
           <Button
             variant="light"
             onClick={() => fileRef.current?.click()}
             disabled={busy || cards.length >= MAX_BATCH}
             loading={scanning > 0}
           >
-            {cards.length === 0 ? t('scan.addPhotos') : t('scan.takePhotos')}
+            {t('scan.takePhotos')}
+          </Button>
+          <Button
+            variant="default"
+            onClick={() => libraryRef.current?.click()}
+            disabled={busy || cards.length >= MAX_BATCH || scanning > 0}
+          >
+            {t('scan.fromLibrary')}
           </Button>
           {scanning > 0 && <Text size="xs" c="dimmed">{t('scan.scanning')}</Text>}
           {cards.length > 0 && (

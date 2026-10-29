@@ -49,6 +49,7 @@ if (string.IsNullOrWhiteSpace(conn))
 builder.Services.AddSingleton<IDatabaseProvider>(provider);
 builder.Services.AddDbContext<AppDbContext>(o => provider.Configure(o, conn));
 builder.Services.AddScoped<LedgerService>();
+builder.Services.AddScoped<ActivityService>();
 builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<AuthService>();
@@ -59,8 +60,17 @@ builder.Services.AddScoped<ExpenseService>();
 builder.Services.AddScoped<PaymentService>();
 builder.Services.AddScoped<RecurringService>();
 // Receipt OCR (specs/004): Ocr:Provider "openai-compatible" (OpenCode Console by default) or disabled.
-builder.Services.AddHttpClient(OpenAiCompatibleOcrService.HttpClientName,
+var ocrHttp = builder.Services.AddHttpClient(OpenAiCompatibleOcrService.HttpClientName,
     c => c.Timeout = TimeSpan.FromSeconds(builder.Configuration.GetValue("Ocr:TimeoutSeconds", 30)));
+// A local model (Ollama) can take >10 s per photo and handles one request at a time: drop the
+// service-defaults handler (10 s attempt timeout + retries that re-send the image) so
+// Ocr:TimeoutSeconds is the only limit. Hosted providers keep the standard handler.
+if (OpenAiCompatibleOcrService.IsLoopback(builder.Configuration["Ocr:BaseUrl"]))
+{
+#pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers is the documented opt-out of ConfigureHttpClientDefaults
+    ocrHttp.RemoveAllResilienceHandlers();
+#pragma warning restore EXTEXP0001
+}
 if (string.Equals(builder.Configuration["Ocr:Provider"], "openai-compatible", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddSingleton<IOcrService, OpenAiCompatibleOcrService>();
 else
@@ -68,15 +78,25 @@ else
 builder.Services.AddScoped<ReceiptScanService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
-builder.Services.AddSingleton<IEmailSender, StubEmailSender>();
+// Email: Email:Provider unset = logging stub, "onesignal" = OneSignal email channel.
+builder.Services.AddHttpClient(OneSignalEmailSender.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<IEmailSender>(sp => EmailSenderFactory.Create(
+    builder.Configuration,
+    sp.GetRequiredService<IHttpClientFactory>(),
+    sp.GetRequiredService<ILogger<OneSignalEmailSender>>(),
+    sp.GetRequiredService<ILogger<StubEmailSender>>()));
 // Push notifications (add-onesignal-group-notifications): provider is config-driven
 // (Notification:Provider — unset = null provider, "onesignal" = OneSignal REST).
 builder.Services.AddHttpClient(OneSignalProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
-builder.Services.AddSingleton<INotificationProvider>(sp => NotificationProviderFactory.Create(
+builder.Services.AddHttpClient(ExpoPushProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+// Scoped because the Expo provider reads push devices through the request's DbContext.
+builder.Services.AddScoped<INotificationProvider>(sp => NotificationProviderFactory.Create(
     builder.Configuration,
     sp.GetRequiredService<IHttpClientFactory>(),
     sp.GetRequiredService<ILogger<OneSignalProvider>>(),
-    sp.GetRequiredService<ILogger<NullNotificationProvider>>()));
+    sp.GetRequiredService<ILogger<NullNotificationProvider>>(),
+    sp.GetRequiredService<ILogger<ExpoPushProvider>>(),
+    sp.GetRequiredService<AppDbContext>()));
 builder.Services.AddScoped<GroupNotifier>();
 
 // --- Auth (tasks 3.1-3.4): JWT access (15 min) + opaque rotating refresh (30 d).
@@ -113,6 +133,14 @@ builder.Services.AddRateLimiter(o =>
     o.AddPolicy("auth-ip", ctx =>
     RateLimitPartition.GetFixedWindowLimiter(
         ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 5, Window = TimeSpan.FromMinutes(1), QueueLimit = 0
+        }));
+    // Push token registration is cheap but write-heavy: cap per user (IP fallback).
+    o.AddPolicy(DeviceEndpoints.RateLimitPolicy, ctx =>
+    RateLimitPartition.GetFixedWindowLimiter(
+        AuthEndpoints.CurrentUserId(ctx.User)?.ToString() ?? ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = 5, Window = TimeSpan.FromMinutes(1), QueueLimit = 0
@@ -199,6 +227,8 @@ LedgerEndpoints.Map(api);
 RecurringEndpoints.Map(api);
 TripPackEndpoints.Map(api);
 ReceiptScanEndpoints.Map(api);
+ActivityEndpoints.Map(api);
+DeviceEndpoints.Map(api);
 
 // Migrations own the schema (task 1.2); startup stays up when DB is down.
 using (var scope = app.Services.CreateScope())

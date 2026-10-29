@@ -1,81 +1,56 @@
-// Frame 6 · Pay + reverse + lock — FR-9. Web parity: PaymentForm (V1 subset).
-// POST /groups/:id/payments + Idempotency-Key, 422 OVERPAYMENT + max,
-// 403 LOCKED, recorder ∈ {from,to,owner}. Reverse owner-only 24h else counter-payment.
-import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet, Alert, ScrollView } from 'react-native';
-import { api, newIdempotencyKey, fmt, displayNameOf, normalizeDecimal } from '../api/client';
+// Pay — records a payment (PaymentForm) and offers the reverse action when
+// opened from a completed transfer. Web parity: PaymentForm + reverse.
+import React, { useCallback, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { api, normalizeDecimal } from '../api/client';
 import { colors } from '../theme';
-import { SpinButton, ErrText } from '../ui';
-import { queueOrSend } from '../offline/queue';
+import { Card, ErrorBanner, SkeletonCard, SpinButton, uiStyles } from '../ui';
+import { useT } from '../prefs';
+import PaymentForm from '../components/PaymentForm';
 
 export default function PayScreen({ route, navigation }) {
-  const { id, to, from, amount, paymentId } = route.params || {};
-  const [members, setMembers] = useState([]);
-  const [currency, setCurrency] = useState('USD');
-  const [fromId, setFromId] = useState(from || '');
-  const [toId, setToId] = useState(to || '');
-  const [amt, setAmt] = useState(amount ? (amount / 100).toFixed(2) : '');
-  const [method, setMethod] = useState('transfer');
-  const [note, setNote] = useState('');
+  const { id, to, from, amount, paymentId, maxCents } = route.params || {};
+  const t = useT();
+  const [group, setGroup] = useState(null);
+  const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [e, setE] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const g = await api.get(`/api/v1/groups/${id}`);
-        const m = g.group?.members || g.members || [];
-        setMembers(m.filter((x) => !x.removed));
-        setCurrency(g.group?.currency || g.currency || 'USD');
-        if (!fromId && m[0]) setFromId(m[0].user_id);
-      } catch { /* ignore */ }
-    })();
-  }, [id]);
-
-  const record = async () => {
-    setBusy(true); setE(null);
-    const body = {
-      from_user_id: fromId, to_user_id: toId, amount: Number(amt), method,
-      ...(note.trim() ? { note: note.trim() } : {}),
-    };
-    const key = newIdempotencyKey();
+  const load = useCallback(async () => {
+    setError(null);
     try {
-      const send = () => api.post(`/api/v1/groups/${id}/payments`, body, { idempotencyKey: key });
-      let res;
-      try {
-        res = await send();
-      } catch (err) {
-        if (!err.status) {
-          await queueOrSend('payment', id, send, body, key);
-          Alert.alert('Queued offline', 'Payment will auto-sync with the same Idempotency-Key.');
-          navigation.goBack();
-          return;
-        }
-        throw err;
-      }
-      Alert.alert(
-        'Recorded',
-        res.fully_settled ? 'Fully settled — group locked (Settled badge).' : `Settlement updated${res.settlement_version ? ` v${res.settlement_version}` : ''} — see Why-box.`
-      );
-      navigation.goBack();
-    } catch (err) {
-      if (err.code === 'OVERPAYMENT') { setE(err); Alert.alert('Overpayment blocked', err.message); }
-      else { setE(err); Alert.alert('Payment failed', `${err.code || ''} ${err.message || ''}`); }
-    } finally { setBusy(false); }
-  };
+      const g = await api.get(`/api/v1/groups/${id}`);
+      setGroup(g.group || g);
+    } catch (err) { setError(err); }
+  }, [id]);
+  useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  const reverse = async () => {
-    Alert.alert('Reverse payment?', 'Owner-only, within 24h. Otherwise create a counter-payment.', [
-      { text: 'Cancel', style: 'cancel' },
+  if (!group) {
+    return (
+      <View style={s.wrap}>
+        <SkeletonCard />
+        <ErrorBanner error={error} onRetry={load} />
+      </View>
+    );
+  }
+
+  const toName = (group.members || []).find((m) => m.user_id === to)?.display_name || '';
+
+  const reverse = () => {
+    Alert.alert(t('m.settlement.reverseTitle'), t('m.settlement.reverseBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Reverse', style: 'destructive', onPress: async () => {
+        text: t('groupDetail.reverse'),
+        style: 'destructive',
+        onPress: async () => {
           setBusy(true);
           try {
-            const r = await api.post(`/api/v1/payments/${paymentId}/reverse`, {});
-            Alert.alert('Reversed', `Settlement v${r.settlement_version || '?'}`);
+            await api.post(`/api/v1/payments/${paymentId}/reverse`, {});
+            Alert.alert(t('groupDetail.paymentReversed'), '');
             navigation.goBack();
-          } catch (err) { Alert.alert('Reverse failed', `${err.code} ${err.message}`); }
-          finally { setBusy(false); }
+          } catch (err) {
+            Alert.alert(t('groupDetail.reverse'), err.message);
+          } finally { setBusy(false); }
         },
       },
     ]);
@@ -118,24 +93,30 @@ export default function PayScreen({ route, navigation }) {
           <Pressable style={s.ghost} onPress={reverse}><Text>Reverse (owner, 24h)</Text></Pressable>
         )}
       </View>
+    <ScrollView style={s.wrap} keyboardShouldPersistTaps="handled">
+      <PaymentForm
+        group={group}
+        initial={{ from, to, amount, toName }}
+        maxCents={maxCents}
+        onCancel={() => navigation.goBack()}
+        onSaved={(_, state) => {
+          if (state === 'settled') Alert.alert(t('groupDetail.fullySettled'), '');
+          else if (state === 'open') Alert.alert(t('groupDetail.paymentRecorded'), '');
+          navigation.goBack();
+        }}
+      />
+      {paymentId && (
+        <Card>
+          <Text style={uiStyles.h}>{t('groupDetail.reverse')}</Text>
+          <Text style={uiStyles.muted}>{t('m.settlement.reverseBody')}</Text>
+          <SpinButton title={t('groupDetail.reverse')} variant="ghost" busy={busy} onPress={reverse} />
+        </Card>
+      )}
+      <View style={{ height: 24 }} />
     </ScrollView>
   );
 }
 
 const s = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: colors.screen, padding: 14 },
-  card: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: 16, padding: 13 },
-  h: { fontSize: 13, fontWeight: '800', marginTop: 8 },
-  muted: { fontSize: 12, color: colors.secondary, marginVertical: 6 },
-  big: { fontSize: 32, fontWeight: '800', textAlign: 'center', marginVertical: 8 },
-  inp: { borderColor: colors.inputBorder, borderWidth: 1, borderRadius: 12, padding: 12, marginTop: 8, backgroundColor: '#fff' },
-  seg: { flexDirection: 'row', backgroundColor: colors.lockedBg, borderRadius: 10, padding: 3, marginTop: 8 },
-  segI: { flex: 1, padding: 7, borderRadius: 8, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
-  segOn: { backgroundColor: '#fff' },
-  segT: { fontSize: 11, fontWeight: '700' },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
-  chip: { backgroundColor: colors.openBg, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  chipOn: { backgroundColor: colors.lightTealBg },
-  chipT: { fontSize: 11, fontWeight: '700' },
-  ghost: { borderWidth: 1, borderColor: colors.inputBorder, borderRadius: 12, padding: 13, alignItems: 'center', marginTop: 8 },
 });

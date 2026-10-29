@@ -123,31 +123,16 @@ public static class TripPackEndpoints
 
         // ---- Activity ----
         api.MapGet("/groups/{id:guid}/activity", async (Guid id, int? limit, ClaimsPrincipal p,
-            AppDbContext db, LedgerService ledger, Groups.GroupService svc) =>
+            LedgerService ledger, Services.ActivityService activity) =>
         {
             if (!await ledger.CanViewAsync(id, Me(p)))
                 return ApiResults.Error("FORBIDDEN", "Not a group member.", 403);
             var take = Math.Clamp(limit ?? 50, 1, 200);
-            var names = await NamesAsync(db, id);
-            string N(Guid u) => names.TryGetValue(u, out var n) ? n : "Unknown";
-            var feed = new List<object>();
-            foreach (var e in await db.Expenses.Where(e => e.GroupId == id && e.DeletedAt == null)
-                         .OrderByDescending(e => e.CreatedAt).Take(take).ToListAsync())
-                feed.Add(new { kind = "expense", at = e.CreatedAt, text = $"{N(e.CreatedBy)} added “{e.Title}”", @ref = e.Id });
-            foreach (var pay in await db.Payments.Where(x => x.GroupId == id)
-                         .OrderByDescending(x => x.CreatedAt).Take(take).ToListAsync())
-                feed.Add(new { kind = "payment", at = pay.CreatedAt, text = $"{N(pay.FromUserId)} paid {N(pay.ToUserId)} {(pay.AmountCents / 100m):0.00}", @ref = pay.Id });
-            var expIds = await db.Expenses.Where(e => e.GroupId == id).Select(e => e.Id).ToListAsync();
-            foreach (var c in await db.ExpenseComments.Where(c => expIds.Contains(c.ExpenseId))
-                         .OrderByDescending(c => c.CreatedAt).Take(take).ToListAsync())
-                feed.Add(new { kind = "comment", at = c.CreatedAt, text = $"{N(c.AuthorId)} commented", @ref = c.ExpenseId });
-            foreach (var n in await db.Nudges.Where(n => n.GroupId == id)
-                         .OrderByDescending(n => n.CreatedAt).Take(take).ToListAsync())
-                feed.Add(new { kind = "nudge", at = n.CreatedAt, text = $"{N(n.FromUserId)} nudged {N(n.ToUserId)}", @ref = (Guid?)null });
-            foreach (var m in await db.GroupMembers.Where(m => m.GroupId == id)
-                         .OrderByDescending(m => m.JoinedAt).Take(take).ToListAsync())
-                feed.Add(new { kind = "join", at = m.JoinedAt, text = $"{N(m.UserId)} joined", @ref = (Guid?)null });
-            return Results.Ok(feed.OrderByDescending(f => ((dynamic)f).at).Take(take).ToList());
+            var rows = await activity.GroupFeedAsync(id, take);
+            return Results.Ok(rows.Select(r => new
+            {
+                kind = r.Kind, at = r.At, text = r.Text, @ref = r.Ref
+            }).ToList());
         });
 
         // ---- Statement ----
@@ -261,7 +246,13 @@ public static class TripPackEndpoints
     public static void MapPublic(RouteGroupBuilder v1)
     {
         v1.MapGet("/capabilities", (IOcrService ocr) =>
-            Results.Ok(new { ocr_enabled = ocr.Enabled }));
+            Results.Ok(new
+            {
+                ocr_enabled = ocr.Enabled,
+                // Opt-in client capabilities: older app builds ignore unknown keys and
+                // fall back to per-group requests / local-only push UI (spec 005 §8).
+                features = new { activity_feed = true, push_devices = true }
+            }));
 
         v1.MapGet("/shared/{token}", async (string token, AppDbContext db, LedgerService ledger) =>
         {

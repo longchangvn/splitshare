@@ -10,8 +10,12 @@ namespace SplitShare.Api.Auth;
 public sealed record AuthResult(bool Ok, string? ErrorCode, string? Error, User? User, TokenPair? Tokens,
     Dictionary<string, string[]>? Fields = null);
 
-public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSender email, LedgerService ledger)
+public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSender email, LedgerService ledger,
+    IConfiguration? config = null)
 {
+    // Web origin for links in emails (same App:BaseUrl as invite links).
+    private string BaseUrl => (config?["App:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
+
     private const int MaxFailed = 10;
     private static readonly TimeSpan LockoutFor = TimeSpan.FromMinutes(15);
     private static readonly Regex UsernameRe = new("^[a-z0-9_.-]{3,30}$", RegexOptions.Compiled);
@@ -92,7 +96,8 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         });
         await db.SaveChangesAsync();
         await email.SendAsync(emailAddr, "Verify your SplitShare email",
-            $"Verify with token: {raw} via POST /api/v1/auth/verify-email");
+            $"Hi {user.DisplayName},\n\nConfirm your email address for SplitShare:\n{BaseUrl}/verify/{raw}\n\n" +
+            "If you didn't create a SplitShare account, you can ignore this email.", transactional: true);
 
         return new(true, null, null, user, await IssueTokensAsync(user));
     }
@@ -192,7 +197,9 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         });
         await db.SaveChangesAsync();
         await email.SendAsync(em, "Reset your SplitShare password",
-            $"Reset with token: {raw} via POST /api/v1/auth/reset (15 min, single use).");
+            $"Hi {user.DisplayName},\n\nReset your SplitShare password here (valid 15 minutes, single use):\n" +
+            $"{BaseUrl}/reset/{raw}\n\nIf you didn't request a password reset, you can ignore this email.",
+            transactional: true);
     }
 
     public async Task<AuthResult> ResetAsync(string token, string newPassword)

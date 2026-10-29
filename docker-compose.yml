@@ -57,6 +57,11 @@ services:
       Notification__Provider: ${NOTIFICATION_PROVIDER:-}
       Notification__OneSignal__AppId: ${ONESIGNAL_APP_ID:-}
       Notification__OneSignal__ApiKey: ${ONESIGNAL_REST_API_KEY:-}
+      # Email (verify, reset password, invites, nudges): unset = log only; "onesignal"
+      # sends via OneSignal's email channel (reuses the OneSignal app id/key above).
+      Email__Provider: ${EMAIL_PROVIDER:-}
+      Email__FromName: ${EMAIL_FROM_NAME:-}
+      Email__FromAddress: ${EMAIL_FROM_ADDRESS:-}
       # Receipt scan (OpenCode Console by default; local Ollama works keyless).
       # Off unless OCR_ENABLED=true + OCR_API_KEY (or a loopback OCR_BASE_URL).
       Ocr__Enabled: ${OCR_ENABLED:-false}

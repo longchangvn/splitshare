@@ -89,20 +89,19 @@ test('ledger empty-state block has styling (incl. dark theme)', () => {
 
 test('mobile ledger defaults to active scope with Active/Archived chips', () => {
   assert.match(MOBILE_GROUP, /useState\('OPEN'\)/);
-  assert.match(MOBILE_GROUP, /\[\['OPEN', 'Active'\], \['LOCKED', 'Archived'\]\]/);
-  assert.doesNotMatch(MOBILE_GROUP, /\['', 'OPEN', 'LOCKED'\]/, 'mixed "All" chip removed');
-  // Status dot indicator only flags the non-default scope.
-  assert.match(MOBILE_GROUP, /fStatus && fStatus !== 'OPEN' \? '•' : ''/);
-  // Locked rows labelled Archived, all-settled empty state present.
-  assert.match(MOBILE_GROUP, /'Archived · snapshot'/);
-  assert.match(MOBILE_GROUP, /\{it\.status === 'LOCKED' \? 'ARCHIVED' : 'ACTIVE'\}/);
-  assert.match(MOBILE_GROUP, />View archive</);
-  assert.match(MOBILE_GROUP, />All settled 🎉</);
+  assert.match(MOBILE_GROUP, /label=\{t\('groupDetail\.statusOpen'\)\} selected=\{status === 'OPEN'\}/);
+  assert.match(MOBILE_GROUP, /label=\{t\('groupDetail\.statusLocked'\)\} selected=\{status === 'LOCKED'\}/);
+  assert.doesNotMatch(MOBILE_GROUP, /setStatus\(''\)/, 'mixed "All" scope removed');
+  // Filter affordance only lights up when a non-default filter is applied.
+  assert.match(MOBILE_GROUP, /activeFilters > 0 && s\.filterBtnOn/);
+  // Locked rows are labelled Archived; all-settled empty state stays reachable.
+  assert.match(MOBILE_GROUP, /\{locked \? t\('groupDetail\.statusLocked'\) : t\('groupDetail\.statusOpen'\)\}/);
+  assert.match(MOBILE_GROUP, /t\('groupDetail\.viewArchive'\)/);
+  assert.match(MOBILE_GROUP, /t\('groupDetail\.ledgerAllSettled'\)/);
 });
 
-test('mobile detail badge and error copy use Archived wording', () => {
-  assert.match(MOBILE_EXPENSE, /\{locked \? 'ARCHIVED' : 'ACTIVE'\}/);
-  assert.match(MOBILE_EXPENSE, /Alert\.alert\('Archived', '403 — settled snapshot/);
-  assert.match(MOBILE_EXPENSE, /ACTIVE only/);
-  assert.doesNotMatch(MOBILE_EXPENSE, /Alert\.alert\('Locked', '403/);
+test('mobile detail badge uses Archived wording', () => {
+  assert.match(MOBILE_EXPENSE, /\{locked\s*\? t\('groupDetail\.statusLocked'\)\s*: t\('groupDetail\.statusOpen'\)\}/);
+  assert.doesNotMatch(MOBILE_EXPENSE, /t\('common\.locked'\)/, 'expense status is Archived, not Locked');
+  assert.doesNotMatch(MOBILE_EXPENSE, /'ARCHIVED' : 'ACTIVE'/, 'copy comes from the shared catalogue');
 });

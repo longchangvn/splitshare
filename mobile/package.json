@@ -6,7 +6,8 @@
     "start": "expo start --port 8082",
     "android": "expo start --android --port 8082",
     "ios": "expo start --ios --port 8082",
-    "test": "node ./scripts/mapping-check.js"
+    "test": "node ./scripts/mapping-check.js && node --test test/*.test.cjs",
+    "sync:i18n": "node ./scripts/sync-i18n.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

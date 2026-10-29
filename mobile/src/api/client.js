@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import uuid from 'react-native-uuid';
+import { readCache, writeCache, isStale } from '../cache/store';
 
 const AT_KEY = 'ss_at';
 const RT_KEY = 'ss_rt';
@@ -83,6 +84,12 @@ export async function clearTokens() {
   ]);
 }
 
+/** Auth headers for binary/multipart calls and <Image source={{headers}}>. */
+export async function authHeaders(extra) {
+  const { at } = await getTokens();
+  return { ...(at ? { Authorization: `Bearer ${at}` } : {}), ...(extra || {}) };
+}
+
 export function newIdempotencyKey() {
   return uuid.v4();
 }
@@ -113,12 +120,13 @@ async function refreshOnce() {
   return refreshPromise;
 }
 
-async function request(method, path, { body, form, idempotencyKey, retry = true } = {}) {
-  const { at } = await getTokens();
-  const headers = {};
-  if (at) headers.Authorization = `Bearer ${at}`;
+async function request(method, path, { body, form, idempotencyKey, headers: extraHeaders, retry = true } = {}) {
+  const headers = { ...(extraHeaders || {}) };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+
+  const { at } = await getTokens();
+  if (at && !headers.Authorization) headers.Authorization = `Bearer ${at}`;
 
   const r = await fetch(`${baseUrl()}${path}`, {
     method,
@@ -129,7 +137,7 @@ async function request(method, path, { body, form, idempotencyKey, retry = true 
   const isAuthPath = path.includes('/auth/');
   if (r.status === 401 && retry && !isAuthPath) {
     const fresh = await refreshOnce().catch(() => null);
-    if (fresh) return request(method, path, { body, form, idempotencyKey, retry: false });
+    if (fresh) return request(method, path, { body, form, idempotencyKey, headers: extraHeaders, retry: false });
     throw new ApiError(401, 'SESSION_EXPIRED', 'Session expired');
   }
 
@@ -143,23 +151,48 @@ async function request(method, path, { body, form, idempotencyKey, retry = true 
 }
 
 export const api = {
-  get: (p) => request('GET', p),
+  get: (p, opts) => request('GET', p, opts),
   post: (p, body, opts) => request('POST', p, { body, ...opts }),
-  patch: (p, body) => request('PATCH', p, { body }),
-  del: (p) => request('DELETE', p),
+  patch: (p, body, opts) => request('PATCH', p, { body, ...opts }),
+  del: (p, opts) => request('DELETE', p, opts),
   postForm: (p, formData, opts) => request('POST', p, { form: formData, ...opts }),
   getBlob: async (p) => {
-    const { at } = await getTokens();
-    const r = await fetch(`${baseUrl()}${p}`, {
-      headers: at ? { Authorization: `Bearer ${at}` } : {},
-    });
+    const r = await fetch(`${baseUrl()}${p}`, { headers: await authHeaders() });
     if (!r.ok) throw new ApiError(r.status, 'NOT_FOUND', 'Download failed');
     return r.blob();
   },
-  // Authenticated image URI for <Image source>: RN Image can't set headers,
-  // so download to blob + object URL where supported, else caller uses fetch.
-  imageUrl: (imageId) => `${baseUrl()}/api/v1/images/${imageId}`,
+
+  /**
+   * Read-through cache: returns the last good payload immediately (with a
+   * `stale` flag) and refreshes in the background. Errors are swallowed when a
+   * cached copy exists so offline reads keep rendering.
+   */
+  getCached: async (p, { ttlMs, onData } = {}) => {
+    const cached = await readCache(p);
+    if (cached) onData?.({ data: cached.data, stale: isStale(cached, ttlMs) });
+    try {
+      const data = await request('GET', p);
+      await writeCache(p, data);
+      onData?.({ data, stale: false });
+      return { data, stale: false };
+    } catch (err) {
+      if (cached) return { data: cached.data, stale: true, error: err };
+      throw err;
+    }
+  },
 };
+
+/** Authenticated image source for RN <Image source={...} />. */
+export async function imageSource(imageId) {
+  const headers = await authHeaders();
+  return { uri: `${baseUrl()}/api/v1/images/${imageId}`, headers };
+}
+
+/** Sync URL form (used only where headers are not needed, e.g. logs). */
+export const imageUrl = (imageId) => `${baseUrl()}/api/v1/images/${imageId}`;
+
+// Screens format money through lib/money; re-exported here for legacy imports.
+export { fmt, signPrefix, toneForNet } from '../lib/money';
 
 // Server returns snake_case; normalize common id aliases.
 export function groupIdOf(g) {
@@ -179,8 +212,18 @@ export function normalizeDecimal(raw) {
   return s.replace(/\./g, '').replace(/,/g, '.');
 }
 
+// iOS decimal-pad shows `,` instead of `.` in comma locales (vi, fr, de, ...):
+// treat the last separator typed as the decimal point.
+export function normalizeDecimal(raw) {
+  const s = String(raw ?? '');
+  const comma = s.lastIndexOf(',');
+  if (comma === -1) return s;
+  if (s.lastIndexOf('.') > comma) return s.replace(/,/g, '');
+  return s.replace(/\./g, '').replace(/,/g, '.');
+}
 export const fmt = (cents, currency = 'USD') =>
   `${currency} ${(cents / 100).toFixed(2)}`;
+
 
 export const displayNameOf = (members, id) =>
   members?.find((m) => (m.user_id || m.id) === id)?.display_name ||
