@@ -21,20 +21,28 @@ public sealed class OpenAiCompatibleOcrService(
     private string? Model => config["Ocr:Model"];
     private string? ApiKey => config["Ocr:ApiKey"];
 
+    /// <summary>
+    /// <c>Ocr:ResponseMode</c>: "json" (default, structured prompt) or "text" for OCR-only
+    /// models such as Ollama <c>glm-ocr</c> that transcribe but cannot follow the JSON prompt.
+    /// </summary>
+    private bool TextMode => string.Equals(config["Ocr:ResponseMode"], "text", StringComparison.OrdinalIgnoreCase);
+
     public bool Enabled => config.GetValue<bool>("Ocr:Enabled")
         && !string.IsNullOrWhiteSpace(BaseUrl)
         && !string.IsNullOrWhiteSpace(Model)
         && (!string.IsNullOrWhiteSpace(ApiKey) || IsLoopback(BaseUrl));
 
     /// <summary>Local providers (Ollama, LM Studio) need no API key.</summary>
-    private static bool IsLoopback(string? url)
+    public static bool IsLoopback(string? url)
         => Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.IsLoopback;
 
     public async Task<IReadOnlyList<ReceiptSuggestion>> ExtractAsync(byte[] image, string mime, OcrContext? context = null,
         CancellationToken ct = default)
     {
         if (!Enabled) throw new OcrProviderException("OCR provider is not configured.");
-        var payload = JsonSerializer.Serialize(BuildRequest(Model!, image, mime, context));
+        var payload = JsonSerializer.Serialize(TextMode
+            ? BuildTextRequest(Model!, image, mime)
+            : BuildRequest(Model!, image, mime, context));
         using var req = new HttpRequestMessage(HttpMethod.Post, $"{BaseUrl!.TrimEnd('/')}/chat/completions")
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json")
@@ -60,7 +68,9 @@ public sealed class OpenAiCompatibleOcrService(
             throw new OcrProviderException("Provider unreachable or timed out.", ex);
         }
 
-        var receipts = ReceiptParser.ParseMany(ReadContent(body), context);
+        var receipts = TextMode
+            ? ReceiptTextParser.ParseMany(ReadContent(body))
+            : ReceiptParser.ParseMany(ReadContent(body), context);
         logger.LogInformation("OCR provider {Model} ok in {Ms} ms ({Count} receipts, {Warnings} warnings)",
             Model, sw.ElapsedMilliseconds, receipts.Count, receipts.Sum(r => r.Warnings.Count));
         return receipts;
@@ -115,6 +125,26 @@ public sealed class OpenAiCompatibleOcrService(
                     content = new object[]
                     {
                         new { type = "text", text = "Extract the receipt fields." },
+                        new { type = "image_url", image_url = new { url = $"data:{mime};base64,{Convert.ToBase64String(image)}" } }
+                    }
+                }
+            }
+        };
+
+    /// <summary>OCR-only models: their native transcription prompt, no system prompt, no JSON mode.</summary>
+    public static object BuildTextRequest(string model, byte[] image, string mime)
+        => new
+        {
+            model,
+            temperature = 0,
+            messages = new object[]
+            {
+                new
+                {
+                    role = "user",
+                    content = new object[]
+                    {
+                        new { type = "text", text = "Text Recognition:" },
                         new { type = "image_url", image_url = new { url = $"data:{mime};base64,{Convert.ToBase64String(image)}" } }
                     }
                 }

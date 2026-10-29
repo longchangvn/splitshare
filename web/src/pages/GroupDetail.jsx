@@ -530,7 +530,11 @@ export function GroupDetail() {
       setStatusConfirmOpen(false);
       setPendingGroupStatus(null);
       notifications.show({ message: t('groupStatus.updated'), color: 'teal' });
-    } catch (err) { setE(err); } finally { setStatusBusy(false); }
+    } catch (err) {
+      setE(err?.code === 'HAS_OPEN_BALANCE' && next === 'closed'
+        ? { message: t('groupStatus.closeUnsettled') }
+        : err);
+    } finally { setStatusBusy(false); }
   };
   // Ledger totals over the loaded page.
   const totals = useMemo(() => {

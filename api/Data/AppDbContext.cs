@@ -27,6 +27,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<RecurringRule> RecurringRules => Set<RecurringRule>();
     public DbSet<PaymentHandle> PaymentHandles => Set<PaymentHandle>();
     public DbSet<PaymentProof> PaymentProofs => Set<PaymentProof>();
+    public DbSet<PushDevice> PushDevices => Set<PushDevice>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -174,6 +175,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.PaymentId);
             e.Property(x => x.StorageKey).HasMaxLength(512);
             e.Property(x => x.Mime).HasMaxLength(64);
+        });
+        b.Entity<PushDevice>(e =>
+        {
+            e.HasKey(x => x.Id);
+            // One row per install: re-registering the same token updates it.
+            e.HasIndex(x => new { x.UserId, x.Token }).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.Property(x => x.Token).HasMaxLength(256);
+            e.Property(x => x.Platform).HasMaxLength(16);
         });
     }
 }

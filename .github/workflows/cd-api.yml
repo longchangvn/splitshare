@@ -79,6 +79,9 @@ jobs:
           GH_NOTIFICATION__PROVIDER: ${{ vars.NOTIFICATION__PROVIDER }}
           GH_NOTIFICATION__ONESIGNAL__APPID: ${{ vars.NOTIFICATION__ONESIGNAL__APPID }}
           GH_NOTIFICATION__ONESIGNAL__APIKEY: ${{ secrets.NOTIFICATION__ONESIGNAL__APIKEY }}
+          GH_EMAIL__PROVIDER: ${{ vars.EMAIL__PROVIDER }}
+          GH_EMAIL__FROMNAME: ${{ vars.EMAIL__FROMNAME }}
+          GH_EMAIL__FROMADDRESS: ${{ vars.EMAIL__FROMADDRESS }}
           GH_DATABASE__SQLSERVER: ${{ secrets.DATABASE__SQLSERVER }}
           GH_DATABASE__PROVIDER: ${{ vars.DATABASE__PROVIDER || 'sqlserver' }}
           GH_ASPNETCORE_ENVIRONMENT: ${{ vars.ASPNETCORE_ENVIRONMENT || 'Production' }}
@@ -367,6 +370,9 @@ jobs:
             "Notification__Provider:GH_NOTIFICATION__PROVIDER:false"
             "Notification__OneSignal__AppId:GH_NOTIFICATION__ONESIGNAL__APPID:false"
             "Notification__OneSignal__ApiKey:GH_NOTIFICATION__ONESIGNAL__APIKEY:true"
+            "Email__Provider:GH_EMAIL__PROVIDER:false"
+            "Email__FromName:GH_EMAIL__FROMNAME:false"
+            "Email__FromAddress:GH_EMAIL__FROMADDRESS:false"
             "Database__SqlServer:GH_DATABASE__SQLSERVER:true"
             "Database__Provider:GH_DATABASE__PROVIDER:false"
             "ASPNETCORE_ENVIRONMENT:GH_ASPNETCORE_ENVIRONMENT:false"

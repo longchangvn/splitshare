@@ -33,6 +33,7 @@ import InviteScreen from './src/screens/InviteScreen';
 import { api, groupIdOf } from './src/api/client';
 import { colors, shadow } from './src/theme';
 import { ToastHost } from './src/ui';
+import { registerPush, addNotificationResponseListener } from './src/push/notifications';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -140,9 +141,14 @@ function Main() {
   );
 }
 
-function Root() {
+function Root({ navigationRef }) {
   const { user, loading } = useAuth();
   const t = useT();
+  React.useEffect(() => {
+    if (!user) return undefined;
+    registerPush().catch(() => {});
+    return addNotificationResponseListener((name, params) => navigationRef.current?.navigate(name, params));
+  }, [user?.id]);
   if (loading) return <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator /></View>;
   const header = {
     headerShadowVisible: false,
@@ -191,12 +197,13 @@ function Root() {
 }
 
 export default function App() {
+  const navigationRef = React.useRef(null);
   return (
     <SafeAreaProvider>
       <PrefsProvider>
         <AuthProvider>
-          <NavigationContainer linking={linking} fallback={<Text>…</Text>}>
-            <Root />
+          <NavigationContainer ref={navigationRef} linking={linking} fallback={<Text>…</Text>}>
+            <Root navigationRef={navigationRef} />
           </NavigationContainer>
           <ToastHost />
         </AuthProvider>

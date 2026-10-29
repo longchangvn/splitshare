@@ -32,21 +32,18 @@
       "name": ".NET: API (launch profile http)",
       "type": "coreclr",
       "request": "launch",
-      "program": "dotnet",
-      "args": [
-        "run",
-        "--project",
-        "${workspaceFolder}/api/SplitShare.Api.csproj",
-        "--launch-profile",
-        "http"
-      ],
+      "preLaunchTask": "build-api",
+      "program": "${workspaceFolder}/api/bin/Debug/net10.0/SplitShare.Api.dll",
+      "args": [],
       "cwd": "${workspaceFolder}/api",
       "stopAtEntry": false,
+      "justMyCode": true,
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "ASPNETCORE_ENVIRONMENT": "Development"
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:8081"
       },
       "serverReadyAction": {
         "action": "openExternally",

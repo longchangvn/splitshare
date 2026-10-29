@@ -89,6 +89,14 @@ export function AuthProvider({ children }) {
       await saveSession(d);
       return d;
     },
+    // Reset returns a fresh token pair, so the app lands signed in (web parity).
+    resetPassword: async (token, new_password) => {
+      const d = await api.post('/api/v1/auth/reset', { token, new_password });
+      await saveSession(d);
+      return d;
+    },
+    verifyEmail: async (token) => api.post('/api/v1/auth/verify-email', { token }),
+    forgot: async (email) => api.post('/api/v1/auth/forgot', { email }),
     logout: async () => {
       const t = await getTokens();
       try {
