@@ -19,8 +19,9 @@ name: CD Mobile — Expo Go dev server on Azure Container Apps
 #
 # Expo account: Expo Go on a physical iPhone only opens a dev-server project
 # whose manifest is signed for the account Expo Go is signed in to. Required:
-#   secrets.EXPO_TOKEN       — access token of that account (expo.dev >
-#                              Account settings > Access tokens)
+#   secrets.EXPO_TOKEN       — PERSONAL access token of that user (expo.dev >
+#                              User settings > Access tokens); robot tokens
+#                              don't work (Expo Go can't sign in as a robot)
 #   vars.EXPO_PROJECT_ID     — EAS project id (else app.json extra.eas.projectId)
 # Testers must sign in to Expo Go with that same account (or one with access).
 #
@@ -116,7 +117,14 @@ jobs:
             jq -c '.errors // .' /tmp/expo-me.json 2>/dev/null | head -c 600 || head -c 300 /tmp/expo-me.json
             exit 1
           fi
-          echo "Expo actor: $ACTOR ($(jq -r '.data.meActor.__typename' /tmp/expo-me.json)); accounts: $(jq -r '[.data.meActor.accounts[].name] | join(", ")' /tmp/expo-me.json)"
+          ACTOR_TYPE=$(jq -r '.data.meActor.__typename' /tmp/expo-me.json)
+          echo "Expo actor: $ACTOR ($ACTOR_TYPE); accounts: $(jq -r '[.data.meActor.accounts[].name] | join(", ")' /tmp/expo-me.json)"
+          # Expo Go requires the CLI account == the Expo Go account, and nobody
+          # can sign in to Expo Go as a robot.
+          if [ "$ACTOR_TYPE" = "Robot" ]; then
+            echo "::error::EXPO_TOKEN belongs to robot '$ACTOR' — Expo Go would ask testers to sign in as it, which is impossible. Use a personal access token of the user testers sign in to Expo Go with (expo.dev > User settings > Access tokens)."
+            exit 1
+          fi
           expo_gql 'query ($appId: String!) { app { byId(appId: $appId) { fullName ownerAccount { id name } } } }' /tmp/expo-app.json
           OWNER_ID=$(jq -r '.data.app.byId.ownerAccount.id // ""' /tmp/expo-app.json)
           if [ -z "$OWNER_ID" ]; then
