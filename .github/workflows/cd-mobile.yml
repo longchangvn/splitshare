@@ -94,6 +94,37 @@ jobs:
             echo "::error::No EAS project id: set vars.EXPO_PROJECT_ID or extra.eas.projectId in mobile/app.json."
             exit 1
           fi
+          # A pasted secret often carries a trailing newline -> invalid Bearer header.
+          EXPO_TOKEN=$(printf '%s' "$EXPO_TOKEN" | tr -d '[:space:]')
+          echo "::add-mask::$EXPO_TOKEN"
+
+          echo "=== Expo token preflight ==="
+          # Same checks Expo CLI makes before signing a dev manifest (it silently
+          # serves an unsigned @anonymous manifest when any of them fails).
+          Q='query ($appId: String!) { meActor { __typename ... on UserActor { username } ... on Robot { firstName } accounts { id name viewerUserPermission2 { effectivePermissions } } } app { byId(appId: $appId) { fullName scopeKey ownerAccount { id name } } } }'
+          jq -n --arg q "$Q" --arg id "$EXPO_PROJECT_ID" '{query: $q, variables: {appId: $id}}' \
+            | curl -sS -m 30 -H "Authorization: Bearer $EXPO_TOKEN" -H 'content-type: application/json' \
+                --data @- https://api.expo.dev/graphql > /tmp/expo-me.json || true
+          ACTOR=$(jq -r '.data.meActor | if . == null then "" else (.username // .firstName // .__typename) end' /tmp/expo-me.json 2>/dev/null || true)
+          if [ -z "$ACTOR" ]; then
+            echo "::error::EXPO_TOKEN is not accepted by Expo (no actor). Recreate it at expo.dev > Account settings > Access tokens."
+            jq -c '.errors // .' /tmp/expo-me.json 2>/dev/null | head -c 600 || true
+            exit 1
+          fi
+          echo "Expo actor: $ACTOR ($(jq -r '.data.meActor.__typename' /tmp/expo-me.json))"
+          OWNER_ID=$(jq -r '.data.app.byId.ownerAccount.id // ""' /tmp/expo-me.json)
+          if [ -z "$OWNER_ID" ]; then
+            echo "::error::'$ACTOR' cannot read EAS project $EXPO_PROJECT_ID (token from another account/org?)."
+            jq -c '.errors // empty' /tmp/expo-me.json | head -c 600 || true
+            exit 1
+          fi
+          echo "Project: $(jq -r '.data.app.byId.fullName' /tmp/expo-me.json) (owner $(jq -r '.data.app.byId.ownerAccount.name' /tmp/expo-me.json))"
+          if ! jq -e --arg o "$OWNER_ID" '.data.meActor.accounts[] | select(.id == $o)
+                 | .viewerUserPermission2.effectivePermissions | index("RUN")' /tmp/expo-me.json >/dev/null; then
+            echo "::error::'$ACTOR' lacks RUN permission on the project's owner account — Expo CLI won't sign manifests."
+            exit 1
+          fi
+          echo "Token OK: can sign development manifests."
 
           if ! [[ "$CA_NAME" =~ ^[a-z][a-z0-9-]{0,30}[a-z0-9]$ ]] || [[ "$CA_NAME" == *--* ]]; then
             echo "::error::Container app name '$CA_NAME' is invalid (lowercase letters, digits, single '-', 2-32 chars)."
