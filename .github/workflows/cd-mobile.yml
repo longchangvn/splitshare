@@ -234,6 +234,12 @@ jobs:
             echo "::error::Manifest points at '$LAUNCH' / '$HOST_URI' instead of $FQDN — EXPO_PACKAGER_PROXY_URL is not applied."
             exit 1
           fi
+          # Unsigned manifest + projectId => signed-in Expo Go refuses it
+          # ("not signed in to Expo CLI"); mobile/docker/app.config.js strips it.
+          if jq -e '.extra.eas.projectId // empty' /tmp/manifest.json >/dev/null; then
+            echo "::error::Manifest is unsigned but carries extra.eas.projectId — Expo Go will refuse it."
+            exit 1
+          fi
 
           echo "=== 2/4 exps:// manifest (https://$FQDN) ==="
           code=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "${HDRS[@]}" "https://$FQDN/")

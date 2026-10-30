@@ -21,6 +21,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY . ./
+COPY docker/app.config.js ./app.config.js
 
 EXPOSE 8081
 CMD ["sh", "-c", "exec npx expo start --lan --port \"$PORT\""]
