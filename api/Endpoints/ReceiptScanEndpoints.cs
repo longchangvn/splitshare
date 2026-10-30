@@ -4,7 +4,11 @@ using SplitShare.Api.Expenses;
 
 namespace SplitShare.Api.Endpoints;
 
-/// <summary>Receipt scan: photo → receipt total for the Add expense form (nothing is saved).</summary>
+/// <summary>
+/// Receipt scan: one photo → every receipt it shows (nothing is saved). A photo may hold
+/// several receipts, so the response carries a <c>receipts</c> array; the flat and nested
+/// single-receipt fields stay for the shipped single-scan form.
+/// </summary>
 public static class ReceiptScanEndpoints
 {
     public const string RateLimitPolicy = "ocr-user";
@@ -34,29 +38,41 @@ public static class ReceiptScanEndpoints
                     "OCR_PROVIDER_ERROR" => 503,
                     _ => 422
                 });
-            return Results.Ok(ToDto((ReceiptSuggestion)r.Data!));
+            return Results.Ok(ToDto((IReadOnlyList<ReceiptSuggestion>)r.Data!));
         }).DisableAntiforgery().RequireRateLimiting(RateLimitPolicy);
     }
 
     /// <summary>
-    /// Additive shape: the flat total/confidence/warnings fields keep the shipped
-    /// single-scan client working, while <c>receipt</c> carries the batch fields.
+    /// <c>receipts</c> lists every receipt found in the photo, each with a one-line
+    /// <c>summary</c> and its <c>amount_spent</c>. <c>total</c> / <c>confidence</c> /
+    /// <c>warnings</c> / <c>receipt</c> describe the first one (legacy single-scan shape).
     /// </summary>
-    public static object ToDto(ReceiptSuggestion s) => new
+    public static object ToDto(IReadOnlyList<ReceiptSuggestion> receipts)
     {
-        total = s.Total,
-        confidence = s.Confidence.Total,
-        warnings = s.Warnings,
-        receipt = new
+        var first = receipts.Count > 0 ? receipts[0] : ReceiptSuggestion.Empty("not_a_receipt");
+        return new
         {
-            merchant = s.Merchant,
-            total = s.Total,
-            currency = s.Currency,
-            date = s.Date,
-            tax = s.Tax,
-            tip = s.Tip,
-            category = s.Category,
-            confidence = s.Confidence
-        }
+            count = receipts.Count,
+            receipts = receipts.Select(ReceiptDto).ToList(),
+            total = first.Total,
+            confidence = first.Confidence.Total,
+            warnings = first.Warnings,
+            receipt = ReceiptDto(first)
+        };
+    }
+
+    public static object ReceiptDto(ReceiptSuggestion s) => new
+    {
+        summary = s.Summary,
+        amount_spent = s.Total,
+        total = s.Total, // alias kept for the pre-batch card helper
+        merchant = s.Merchant,
+        currency = s.Currency,
+        date = s.Date,
+        tax = s.Tax,
+        tip = s.Tip,
+        category = s.Category,
+        confidence = s.Confidence,
+        warnings = s.Warnings
     };
 }

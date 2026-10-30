@@ -22,7 +22,26 @@ npm start          # Expo Metro on :8082
 API URL: `app.json` `extra.apiUrl` (default `http://localhost:8081`). On a physical
 device the client rewrites loopback to the Metro LAN IP; Android emulator uses `10.0.2.2`.
 
+Dev builds (`__DEV__`, i.e. non-release) ignore `extra.apiUrl` and default to
+`https://api-container---stage.bravehill-4fe02ad0.southcentralus.azurecontainerapps.io`. Change it at runtime via the
+"Developer · API base URL" card on the Login and You screens (persisted in
+AsyncStorage; "Reset to default" clears it). Release builds hide the card.
+
 Deep link test: `npx uri-scheme open splitshare://g/<token> --ios`.
+
+## Hosted Expo Go dev server (Azure Container Apps)
+
+`.github/workflows/cd-mobile.yml` (manual) builds `mobile/Dockerfile` — a Metro dev
+server, not a store build — and runs it as container app `mobile-expo[-<label>]`.
+Open `exp://<app>.<env-domain>` (or `exps://…`) in Expo Go; the run summary prints
+the URL + QR. Ingress allows plain HTTP because `exp://` is HTTP to Expo Go, and
+`EXPO_PACKAGER_PROXY_URL` points the manifest at the public origin. Local check:
+
+```sh
+docker build -t splitshare-mobile mobile
+docker run --rm -p 8081:8081 -e EXPO_PACKAGER_PROXY_URL=http://<mac-lan-ip>:8081 splitshare-mobile
+# Expo Go: exp://<mac-lan-ip>:8081
+```
 
 ## 1:1 mapping (frame → file → endpoints)
 

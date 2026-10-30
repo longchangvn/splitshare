@@ -3,7 +3,7 @@ using SplitShare.Api.Groups;
 
 namespace SplitShare.Api.Expenses;
 
-/// <summary>Scan one receipt photo for a group and return its fields (nothing is saved).</summary>
+/// <summary>Scan one photo for a group and return every receipt it shows (nothing is saved).</summary>
 public sealed class ReceiptScanService(AppDbContext db, IOcrService ocr, CategoryService categories,
     ILogger<ReceiptScanService> logger)
 {
@@ -28,20 +28,22 @@ public sealed class ReceiptScanService(AppDbContext db, IOcrService ocr, Categor
         try
         {
             var categoryKeys = (await categories.EnsureAsync(groupId)).Select(c => c.Key).ToList();
-            var suggestion = await ocr.ExtractAsync(
+            var receipts = await ocr.ExtractAsync(
                 ImageSanitizer.Sanitize(bytes, norm), norm,
                 new OcrContext(group.Currency, categoryKeys), ct);
 
             // A foreign receipt is still returned; the client asks for the FX triple
             // (web) or a group-currency amount (mobile) before creating the expense.
-            if (suggestion.Currency is not null
-                && !string.Equals(suggestion.Currency, group.Currency, StringComparison.OrdinalIgnoreCase)
-                && !suggestion.Warnings.Contains("currency_mismatch"))
-                suggestion = suggestion with { Warnings = [.. suggestion.Warnings, "currency_mismatch"] };
+            var flagged = receipts.Select(r =>
+                r.Currency is not null
+                && !string.Equals(r.Currency, group.Currency, StringComparison.OrdinalIgnoreCase)
+                && !r.Warnings.Contains("currency_mismatch")
+                    ? r with { Warnings = [.. r.Warnings, "currency_mismatch"] }
+                    : r).ToList();
 
-            logger.LogInformation("Receipt scan ok group {GroupId} user {UserId} warnings {Warnings}",
-                groupId, actorId, string.Join(",", suggestion.Warnings));
-            return new(true, null, null, suggestion);
+            logger.LogInformation("Receipt scan ok group {GroupId} user {UserId} receipts {Count} warnings {Warnings}",
+                groupId, actorId, flagged.Count, string.Join(",", flagged.SelectMany(r => r.Warnings).Distinct()));
+            return new(true, null, null, flagged);
         }
         catch (OcrProviderException ex)
         {

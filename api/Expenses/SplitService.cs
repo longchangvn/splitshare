@@ -51,6 +51,12 @@ public static class SplitService
         return (LargestRemainder(total, weights), null);
     }
 
+    /// <summary>Distribute <paramref name="total"/> by weights; all-zero weights fall back to Equal.</summary>
+    public static Dictionary<Guid, long> Allocate(long total, List<(Guid UserId, decimal Weight)> weights)
+        => weights.Sum(w => w.Weight) > 0
+            ? LargestRemainder(total, weights)
+            : Equal(total, weights.Select(w => w.UserId).ToList());
+
     private static Dictionary<Guid, long> LargestRemainder(long total, List<(Guid UserId, decimal Weight)> weights)
     {
         var sum = weights.Sum(w => w.Weight);

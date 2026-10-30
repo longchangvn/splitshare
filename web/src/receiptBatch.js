@@ -85,21 +85,33 @@ function fallbackTitle(name) {
 }
 
 /**
- * Merge a `POST /groups/{id}/expenses/scan` response into a card. The API is
- * additive: `receipt` carries batch fields, the flat total/confidence/warnings
- * keep the old single-scan client working.
+ * Receipt entries of a scan response. A photo can hold several receipts, so the API
+ * returns `receipts: [...]`; older/lean responses carry a single `receipt` or flat fields.
+ */
+export function receiptsFromResponse(resp) {
+  if (Array.isArray(resp?.receipts) && resp.receipts.length > 0) {
+    return resp.receipts.filter((r) => r && typeof r === 'object');
+  }
+  if (resp?.receipt && typeof resp.receipt === 'object') return [resp.receipt];
+  return resp && typeof resp === 'object' ? [resp] : [];
+}
+
+/**
+ * Merge one receipt entry of a `POST /groups/{id}/expenses/scan` response into a card.
+ * Amount comes from `amount_spent` (batch contract) or `total` (legacy shapes).
  */
 export function cardFromSuggestion(card, resp, group = {}) {
   const receipt = resp?.receipt && typeof resp.receipt === 'object' ? resp.receipt : {};
-  const rawTotal = receipt.total ?? resp?.total ?? null;
+  const rawTotal = receipt.amount_spent ?? receipt.total ?? resp?.amount_spent ?? resp?.total ?? null;
   const total = Number(rawTotal);
   const hasTotal = rawTotal != null && Number.isFinite(total) && total > 0 && total <= MAX_AMOUNT_CENTS / 100;
   const confidence = receipt.confidence?.total ?? resp?.confidence ?? null;
   const warnings = [...new Set([
-    ...(Array.isArray(resp?.warnings) ? resp.warnings : []),
     ...(Array.isArray(receipt.warnings) ? receipt.warnings : []),
+    ...(receipt.warnings ? [] : (Array.isArray(resp?.warnings) ? resp.warnings : [])),
   ])];
   const merchant = typeof receipt.merchant === 'string' ? receipt.merchant.trim() : '';
+  const summary = typeof receipt.summary === 'string' ? receipt.summary.trim() : '';
   const receiptCurrency = typeof receipt.currency === 'string' ? receipt.currency.trim().toUpperCase() : '';
   const groupCurrency = String(group?.currency || '').trim().toUpperCase();
   const mismatch = !!receiptCurrency && !!groupCurrency && receiptCurrency !== groupCurrency;
@@ -110,7 +122,7 @@ export function cardFromSuggestion(card, resp, group = {}) {
   return {
     ...card,
     status: hasTotal || (mismatch && receipt.total != null) ? 'ready' : 'manual',
-    title: merchant.slice(0, 100) || card.title || fallbackTitle(card.name),
+    title: (merchant || summary).slice(0, 100) || card.title || fallbackTitle(card.name),
     amount: hasTotal && !mismatch ? total.toFixed(2) : '',
     spentAt: isoDay(receipt.date) || card.spentAt,
     category: category || card.category,
@@ -124,6 +136,21 @@ export function cardFromSuggestion(card, resp, group = {}) {
     fxRate: mismatch ? '' : card.fxRate,
     error: null,
   };
+}
+
+/**
+ * Cards for every receipt found in one photo. The first keeps the scan card's id/key;
+ * extra receipts are clones with their own id and Idempotency-Key. Same photo file on all.
+ */
+export function cardsFromSuggestion(card, resp, group = {}) {
+  const receipts = receiptsFromResponse(resp);
+  if (receipts.length === 0) return [cardFromSuggestion(card, resp, group)];
+  return receipts.map((receipt, index) => {
+    const seed = index === 0
+      ? card
+      : { ...card, id: uid(), key: uid(), fieldErrors: [] };
+    return cardFromSuggestion(seed, { ...resp, receipt }, group);
+  });
 }
 
 /** Field-level error codes for the review card; empty means ready to create. */

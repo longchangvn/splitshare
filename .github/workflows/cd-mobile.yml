@@ -1,0 +1,292 @@
+name: CD Mobile — Expo Go dev server on Azure Container Apps
+
+# MANUAL ONLY (workflow_dispatch). Builds mobile/Dockerfile (an Expo/Metro dev
+# server, NOT a store build), pushes it to the ACR in RG `splitshare` and runs
+# it as a container app so a phone with Expo Go can open
+#   exp://<app>.<env-domain>      (plain HTTP on :80 — ingress allowInsecure)
+#   exps://<app>.<env-domain>     (HTTPS on :443)
+# without a laptop or `expo start --tunnel`.
+#
+# exp:// is http:// to Expo Go, so the ingress must accept plain HTTP
+# (allowInsecure=true; ACA otherwise 301s to https, which Expo Go won't
+# follow). EXPO_PACKAGER_PROXY_URL makes the manifest point the bundle at the
+# public https origin instead of the pod IP.
+#
+# Reuses the registry and the Container Apps environment of the API (the
+# subscription allows 1 environment per region). Creates the container app if
+# it's missing and updates it in place otherwise. The JS bundle is warmed and
+# verified by the smoke test at the end, which emulates Expo Go's requests.
+#
+# Label: vars.SPLITSHARE_SWA_NAME (e.g. `stage`) of the selected environment
+# suffixes the app name: `mobile-expo-<label>` (or `mobile-expo` without it).
+#
+# The dev server exposes the app's JS source to anyone with the URL — keep it
+# to test environments. The app's dev build talks to the API URL baked into
+# src/api/client.js (DEV_DEFAULT_API_URL) unless changed in-app.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select deployment environment"
+        required: true
+        type: environment
+
+# Same group as cd-api.yml / cd-web.yml so they never mutate Azure concurrently.
+concurrency:
+  group: deploy-azure-main
+  cancel-in-progress: false
+
+permissions:
+  id-token: write        # OIDC token for azure/login
+  contents: read         # checkout
+
+env:
+  RG: splitshare
+  API_CA_NAME: ${{ vars.SPLITSHARE_CONTAINER_APP_NAME || 'api-container' }}
+  LOCATION_DEFAULT: ${{ vars.SPLITSHARE_LOCATION || 'southcentralus' }}
+  REG_URL_VAR: ${{ vars.SPLITSHARE_REGISTRY_URL }}
+
+jobs:
+  deploy-mobile:
+    name: Build & deploy Expo dev server
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Job-level so environment-scoped vars resolve.
+    env:
+      CA_NAME: ${{ vars.SPLITSHARE_MOBILE_CONTAINER_APP_NAME || (vars.SPLITSHARE_SWA_NAME && format('mobile-expo-{0}', vars.SPLITSHARE_SWA_NAME)) || 'mobile-expo' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.SPLITSHARE_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.SPLITSHARE_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.SPLITSHARE_AZURE_SUBSCRIPTION_ID }}
+
+      # Single step so the registry password never passes through step outputs.
+      - name: Provision & deploy container app
+        id: deploy
+        run: |
+          set -euo pipefail
+
+          if ! [[ "$CA_NAME" =~ ^[a-z][a-z0-9-]{0,30}[a-z0-9]$ ]] || [[ "$CA_NAME" == *--* ]]; then
+            echo "::error::Container app name '$CA_NAME' is invalid (lowercase letters, digits, single '-', 2-32 chars)."
+            exit 1
+          fi
+
+          echo "=== 1/5 Resource group ==="
+          if [ "$(az group exists --name "$RG")" = "true" ]; then
+            echo "Resource group '$RG' already exists."
+          else
+            az group create --name "$RG" --location "$LOCATION_DEFAULT" --output none
+            echo "Created resource group '$RG'."
+          fi
+          LOC=$(az group show --name "$RG" --query location -o tsv)
+          SUB_ID=$(az account show --query id -o tsv)
+
+          echo "=== 2/5 Container registry ==="
+          # Same resolution order as cd-api.yml: vars -> existing in RG -> create.
+          ACR_NAME=""
+          if [ -n "$REG_URL_VAR" ]; then
+            CAND=$(echo "$REG_URL_VAR" | cut -d. -f1 | tr '[:upper:]' '[:lower:]')
+            if az acr show --name "$CAND" --resource-group "$RG" --output none 2>/dev/null; then
+              ACR_NAME="$CAND"
+            fi
+          fi
+          if [ -z "$ACR_NAME" ]; then
+            FIRST=$(az acr list --resource-group "$RG" --query "[0].name" -o tsv 2>/dev/null || true)
+            if [ -n "${FIRST:-}" ] && [ "$FIRST" != "None" ] && [ "$FIRST" != "null" ]; then
+              ACR_NAME="$FIRST"
+            fi
+          fi
+          if [ -z "$ACR_NAME" ]; then
+            ACR_NAME="splitshare$(echo "$SUB_ID" | tr -d '-' | cut -c1-8)"
+            az acr create --name "$ACR_NAME" --resource-group "$RG" \
+              --sku Basic --admin-enabled true --output none
+            echo "Created registry '$ACR_NAME'."
+          fi
+          az acr update --name "$ACR_NAME" --resource-group "$RG" --admin-enabled true --output none
+          REG_SERVER=$(az acr show --name "$ACR_NAME" --resource-group "$RG" --query loginServer -o tsv)
+          ACR_USER="$ACR_NAME"
+          ACR_PASS=""
+          for i in 1 2 3 4 5; do
+            ACR_PASS=$(az acr credential show --name "$ACR_NAME" --resource-group "$RG" \
+              --query "passwords[0].value" -o tsv 2>/dev/null || true)
+            if [ -n "$ACR_PASS" ]; then break; fi
+            sleep 3
+          done
+          if [ -z "$ACR_PASS" ]; then
+            echo "::error::Could not read admin credentials for '$ACR_NAME'."
+            exit 1
+          fi
+          echo "::add-mask::$ACR_PASS"
+          echo "Registry: $REG_SERVER"
+
+          echo "=== 3/5 Build & push mobile image ==="
+          # Built on the runner (ACR Tasks are not allowed on this subscription).
+          docker login "$REG_SERVER" --username "$ACR_USER" --password-stdin <<< "$ACR_PASS"
+          IMAGE="$REG_SERVER/splitshare-mobile:$GITHUB_SHA"
+          docker build -f mobile/Dockerfile -t "$IMAGE" mobile
+          docker push "$IMAGE"
+
+          echo "=== 4/5 Container Apps environment ==="
+          # Prefer: this app's env -> the API app's env -> any env in RG/region -> create.
+          ENV_ID=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+            --query properties.managedEnvironmentId -o tsv 2>/dev/null || true)
+          APP_EXISTS=""
+          [ -n "$ENV_ID" ] && APP_EXISTS=1
+          if [ -z "$ENV_ID" ]; then
+            ENV_ID=$(az containerapp show --name "$API_CA_NAME" --resource-group "$RG" \
+              --query properties.managedEnvironmentId -o tsv 2>/dev/null || true)
+          fi
+          missing() { [ -z "$ENV_ID" ] || [ "$ENV_ID" = "None" ] || [ "$ENV_ID" = "null" ]; }
+          if missing; then
+            ENV_ID=$(az containerapp env list --resource-group "$RG" --query "[?location=='$LOC'].id | [0]" -o tsv 2>/dev/null || true)
+          fi
+          if missing; then
+            ENV_ID=$(az containerapp env list --resource-group "$RG" --query "[0].id" -o tsv 2>/dev/null || true)
+          fi
+          if missing; then
+            ENV_ID=$(az containerapp env list --query "[?location=='$LOC'].id | [0]" -o tsv 2>/dev/null || true)
+          fi
+          if missing; then
+            az containerapp env create --name splitshare-env --resource-group "$RG" \
+              --location "$LOC" --logs-destination none --output none
+            ENV_ID=$(az containerapp env show --name splitshare-env --resource-group "$RG" --query id -o tsv)
+            echo "Created environment 'splitshare-env'."
+          fi
+          ENV_DOMAIN=$(az containerapp env show --ids "$ENV_ID" --query properties.defaultDomain -o tsv)
+          # FQDN is deterministic, so the proxy URL can be set on the first revision.
+          FQDN="$CA_NAME.$ENV_DOMAIN"
+          PROXY_URL="https://$FQDN"
+          echo "Environment: ${ENV_ID##*/} ($ENV_DOMAIN)"
+
+          echo "=== 5/5 Container app: $CA_NAME ==="
+          # Metro is stateful (in-memory bundle cache, HMR sockets): exactly one
+          # always-on replica. 1 vCPU / 2Gi is the minimum that bundles reliably.
+          SUFFIX="r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          COMMON=(--image "$IMAGE" --cpu 1 --memory 2Gi --min-replicas 1 --max-replicas 1
+                  --revision-suffix "$SUFFIX")
+          if [ -n "$APP_EXISTS" ]; then
+            echo "Container app exists — updating registry, image and env in place."
+            az containerapp registry set --name "$CA_NAME" --resource-group "$RG" \
+              --server "$REG_SERVER" --username "$ACR_USER" --password "$ACR_PASS" --output none
+            az containerapp update --name "$CA_NAME" --resource-group "$RG" "${COMMON[@]}" \
+              --set-env-vars "EXPO_PACKAGER_PROXY_URL=$PROXY_URL" --output none
+          else
+            echo "Container app does not exist — creating it."
+            az containerapp create --name "$CA_NAME" --resource-group "$RG" \
+              --environment "$ENV_ID" "${COMMON[@]}" \
+              --registry-server "$REG_SERVER" --registry-username "$ACR_USER" --registry-password "$ACR_PASS" \
+              --ingress external --target-port 8081 --transport http \
+              --env-vars "EXPO_PACKAGER_PROXY_URL=$PROXY_URL" --output none
+          fi
+          # exp:// == plain HTTP to Expo Go -> accept HTTP without redirecting.
+          az containerapp ingress update --name "$CA_NAME" --resource-group "$RG" \
+            --type external --target-port 8081 --transport http --allow-insecure true --output none
+
+          ACTUAL=$(az containerapp show --name "$CA_NAME" --resource-group "$RG" \
+            --query properties.configuration.ingress.fqdn -o tsv)
+          if [ "$ACTUAL" != "$FQDN" ]; then
+            echo "::error::Ingress FQDN '$ACTUAL' != expected '$FQDN' (EXPO_PACKAGER_PROXY_URL would be wrong)."
+            exit 1
+          fi
+          echo "fqdn=$FQDN" >> "$GITHUB_OUTPUT"
+          echo "Deployed: exp://$FQDN"
+
+      # Emulates Expo Go: exp://host == http://host:80 manifest request, then
+      # downloads the bundle the manifest points at (also warms Metro's cache
+      # so the first scan on a phone is fast).
+      - name: Smoke test (Expo Go protocol)
+        env:
+          FQDN: ${{ steps.deploy.outputs.fqdn }}
+        run: |
+          set -euo pipefail
+          HDRS=(-H "expo-platform: ios" -H "Accept: application/expo+json,application/json")
+
+          echo "=== 1/4 exp:// manifest (http://$FQDN, no redirect) ==="
+          ok=""
+          code=""
+          for i in $(seq 1 40); do
+            code=$(curl -sS -m 20 -o /tmp/manifest.json -w '%{http_code}' "${HDRS[@]}" "http://$FQDN/" 2>/dev/null || true)
+            if [ "$code" = "200" ] && jq -e '.launchAsset.url' /tmp/manifest.json >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 10
+          done
+          if [ -z "$ok" ]; then
+            echo "::error::exp://$FQDN did not serve an Expo manifest within ~7 minutes (last HTTP code: ${code:-none}; 301/308 = allowInsecure not applied)."
+            az containerapp revision list --name "$CA_NAME" --resource-group "$RG" --output table || true
+            az containerapp logs show --name "$CA_NAME" --resource-group "$RG" --tail 50 || true
+            exit 1
+          fi
+          LAUNCH=$(jq -r '.launchAsset.url' /tmp/manifest.json)
+          HOST_URI=$(jq -r '.extra.expoClient.hostUri // ""' /tmp/manifest.json)
+          echo "runtimeVersion: $(jq -r '.runtimeVersion' /tmp/manifest.json)"
+          echo "hostUri:        $HOST_URI"
+          echo "launchAsset:    $LAUNCH"
+          if [[ "$LAUNCH" != "https://$FQDN/"* ]] || [[ "$HOST_URI" != "$FQDN"* ]]; then
+            echo "::error::Manifest points at '$LAUNCH' / '$HOST_URI' instead of $FQDN — EXPO_PACKAGER_PROXY_URL is not applied."
+            exit 1
+          fi
+
+          echo "=== 2/4 exps:// manifest (https://$FQDN) ==="
+          code=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "${HDRS[@]}" "https://$FQDN/")
+          [ "$code" = "200" ] || { echo "::error::https manifest returned $code"; exit 1; }
+          echo "OK"
+
+          echo "=== 3/4 Expo Go Accept header (multipart manifest) ==="
+          code=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' -H "expo-platform: android" \
+            -H "Accept: multipart/mixed,application/expo+json,application/json" "http://$FQDN/")
+          [ "$code" = "200" ] || { echo "::error::multipart manifest returned $code"; exit 1; }
+          echo "OK"
+
+          echo "=== 4/4 JS bundles (first build can take a few minutes) ==="
+          for plat in ios android; do
+            url="${LAUNCH/platform=ios/platform=$plat}"
+            ok=""
+            for i in 1 2 3; do
+              # ACA ingress times out a request at 240s; a retry hits the
+              # partially warmed Metro cache.
+              code=$(curl -sS -m 235 -o "/tmp/bundle-$plat.js" -w '%{http_code}' "$url" 2>/dev/null || true)
+              size=$(stat -c %s "/tmp/bundle-$plat.js" 2>/dev/null || echo 0)
+              if [ "$code" = "200" ] && [ "$size" -gt 1000000 ] && head -c 200 "/tmp/bundle-$plat.js" | grep -q '__BUNDLE_START_TIME__'; then
+                ok=1
+                break
+              fi
+              echo "$plat attempt $i: HTTP ${code:-none}, ${size}B — retrying"
+              sleep 10
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::$plat bundle failed (HTTP ${code:-none}). First 500 bytes:"
+              head -c 500 "/tmp/bundle-$plat.js" || true
+              exit 1
+            fi
+            echo "$plat bundle OK (${size}B)"
+          done
+
+      - name: Publish Expo Go URL
+        env:
+          FQDN: ${{ steps.deploy.outputs.fqdn }}
+        run: |
+          set -euo pipefail
+          (sudo apt-get update -qq && sudo apt-get install -y -qq qrencode) >/dev/null 2>&1 || true
+          {
+            echo "## Expo Go"
+            echo
+            echo "- \`exp://$FQDN\`"
+            echo "- \`exps://$FQDN\` (HTTPS)"
+            echo
+            echo "Open in Expo Go (SDK must match the project's Expo SDK), or scan:"
+            echo
+            echo '```'
+            qrencode -t UTF8 -m 2 "exp://$FQDN" 2>/dev/null || echo "(qrencode unavailable)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          qrencode -t UTF8 -m 2 "exp://$FQDN" 2>/dev/null || true
+          echo "Expo Go URL: exp://$FQDN"

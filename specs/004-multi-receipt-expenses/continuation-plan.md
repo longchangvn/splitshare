@@ -47,7 +47,8 @@ model; delivery order **web first, mobile after**; accuracy gate judged on a **7
 - Provider + parser + service: `OpenAiCompatibleOcrService.cs`, `ReceiptParser.cs`,
   `ReceiptScanService.cs`; EXIF/GPS stripping in `ImageSanitizer` (`FileStore.cs`).
 - Web: mobile-width **Scan receipt** button in `ExpenseForm` (`web/src/components/Forms.jsx`),
-  `web/src/receiptScan.js` compressor (1600 px long edge, JPEG q0.7, 70 DPI),
+  `web/src/receiptScan.js` compressor (1200 px long edge, stretched grayscale, JPEG q0.6,
+  70 DPI — ~160 KB for a 4 MB phone photo),
   16 backend tests in `tests/ReceiptScanTests.cs`, 9 web tests in
   `web/test/receipt-scan.test.mjs`.
 - Config: `Ocr` defaults in `api/appsettings.json`, `Ocr__*` in `docker-compose.yml`,

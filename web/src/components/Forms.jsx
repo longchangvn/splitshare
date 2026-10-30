@@ -6,13 +6,13 @@ import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
-import { Err, useAuth } from '../auth.jsx';
 import { categorySelectData } from '../categories.js';
 import {
   SCAN_MOBILE_QUERY, compressReceiptImage, scanErrorKey, scanToAmount,
 } from '../receiptScan.js';
 import { displayNameOf } from './Net.jsx';
 import { useT } from '../prefs.jsx';
+import { normalizeDecimalInput as dec } from '../decimalInput.js';
 
 const splitVal = (s, type) => {
   if (!s) return '';
@@ -44,12 +44,12 @@ const MAX_MONEY_AMOUNT = 1_000_000;
 
 /** Keep only digits + one `.`, max 2 decimal places (currency input). */
 function sanitizeMoneyInput(raw) {
-  let s = String(raw ?? '').replace(/[^\d.]/g, '');
+  let s = dec(raw).replace(/[^\d.]/g, '');
   const dot = s.indexOf('.');
   if (dot !== -1) {
     s = `${s.slice(0, dot + 1)}${s.slice(dot + 1).replace(/\./g, '')}`;
-    const [whole, dec = ''] = s.split('.');
-    s = `${whole.slice(0, 7)}.${dec.slice(0, 2)}`;
+    const [whole, frac = ''] = s.split('.');
+    s = `${whole.slice(0, 7)}.${frac.slice(0, 2)}`;
   } else {
     s = s.slice(0, 7);
   }
@@ -80,11 +80,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const activeIds = new Set(members.map((m) => m.user_id));
-  // Payer options always show the display name (username only as last resort).
-  const payerData = members.map((m) => ({
-    value: m.user_id,
-    label: m.display_name || m.username || String(m.user_id).slice(0, 8),
-  }));
 
   const initSel = () => {
     if (existing) return existing.splits.map((s) => s.user_id);
@@ -153,14 +148,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
   })));
   const [onlyPresent, setOnlyPresent] = useState(false);
 
-  // Members (and/or the session user) can land after mount — backfill the payer
-  // with me, else the first member, so the field is never stuck empty.
-  useEffect(() => {
-    if (payer || activeIds.size === 0) return;
-    setPayer(activeIds.has(meId) ? meId : members[0]?.user_id || '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payer, meId, members]);
-
   const dropped = copyFrom
     ? copyFrom.splits.map((s) => s.user_id).filter((id) => !activeIds.has(id))
     : [];
@@ -200,7 +187,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
       }
     }
   };
-  const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: v }));
+  const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: dec(v) }));
 
   const build = () => {
     const body = {
@@ -662,7 +649,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
           label={t('forms.expense.payer')}
           value={payer || null}
           onChange={(v) => setPayer(v || '')}
-          data={payerData}
+          data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
           comboboxProps={{ withinPortal: true }}
         />
 
@@ -670,16 +657,16 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
           <summary>{t('forms.expense.billDetails')}</summary>
           <div className="wizard-optional-body">
             <Group gap="xs" grow>
-              <TextInput label={t('forms.expense.taxOpt')} inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(x.target.value)} />
-              <TextInput label={t('forms.expense.tipOpt')} inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(x.target.value)} />
-              <TextInput label={t('forms.expense.feeOpt')} inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(x.target.value)} />
+              <TextInput label={t('forms.expense.taxOpt')} inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(dec(x.target.value))} />
+              <TextInput label={t('forms.expense.tipOpt')} inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(dec(x.target.value))} />
+              <TextInput label={t('forms.expense.feeOpt')} inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(dec(x.target.value))} />
             </Group>
             <div className="wizard-field">
               <span className="wizard-label">{t('forms.expense.foreign')}</span>
               <Group gap="xs" grow>
                 <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
-                <TextInput placeholder={t('forms.expense.fxAmount')} inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(x.target.value)} />
-                <TextInput placeholder={t('forms.expense.fxRate')} inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(x.target.value)} />
+                <TextInput placeholder={t('forms.expense.fxAmount')} inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(dec(x.target.value))} />
+                <TextInput placeholder={t('forms.expense.fxRate')} inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(dec(x.target.value))} />
               </Group>
               {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
                 <Text size="xs" c="dimmed" mt={6}>
@@ -711,7 +698,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
                     inputMode="decimal"
                     value={g.amount}
                     style={{ flex: 1 }}
-                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: x.target.value } : gg)))}
+                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: dec(x.target.value) } : gg)))}
                   />
                   <Select
                     value={g.covered_by}
@@ -813,14 +800,14 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
         </Alert>
       )}
       {!confirm && multiSave && (
-        <Group gap="sm" grow className="wizard-actions expense-save-actions">
+        <Group gap="sm" className="wizard-actions expense-save-actions">
           {onCancel && (
-            <Button className="wizard-back" type="button" onClick={onCancel} disabled={saving}>
+            <Button className="expense-save-cancel" type="button" onClick={onCancel} disabled={saving}>
               {t('common.cancel')}
             </Button>
           )}
           <Button
-            className="wizard-back"
+            className="expense-save-new"
             type="submit"
             onClick={() => { saveModeRef.current = 'new'; }}
             loading={saving && savingMode === 'new'}
@@ -829,7 +816,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
             {t('forms.expense.saveNew')}
           </Button>
           <Button
-            className="wizard-primary"
+            className="wizard-primary expense-save-close"
             type="submit"
             onClick={() => { saveModeRef.current = 'close'; }}
             loading={saving && savingMode === 'close'}
@@ -1047,10 +1034,12 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           onChange={(x) => setProofRef(x.target.value)}
         />
       </div>
-      <Button className="wizard-primary" fullWidth type="submit" loading={paying}>
-        {t('forms.payment.record')}
-      </Button>
-      <Err e={e} />
+      <div className="wizard-sticky-footer">
+        <Err e={e} />
+        <Button className="wizard-primary" fullWidth type="submit" loading={paying}>
+          {t('forms.payment.record')}
+        </Button>
+      </div>
     </form>
   );
 }

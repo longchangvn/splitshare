@@ -6,6 +6,7 @@ import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { useT } from '../prefs.jsx';
 import { categorySelectData } from '../categories.js';
+import { normalizeDecimalInput as dec } from '../decimalInput.js';
 import { compressReceiptImage, scanErrorKey } from '../receiptScan.js';
 import {
   MAX_BATCH, MAX_FILE_BYTES, buildExpensePayload, cardAmount, cardFromSuggestion,
@@ -33,6 +34,7 @@ export function ScanReceipts({
 }) {
   const t = useT();
   const fileRef = useRef(null);
+  const libraryRef = useRef(null);
   const [cards, setCards] = useState([]);
   const [busy, setBusy] = useState(false);
   const scanning = cards.filter((c) => c.status === 'scanning').length;
@@ -180,13 +182,28 @@ export function ScanReceipts({
             hidden
             onChange={onPickFiles}
           />
+          <input
+            ref={libraryRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={onPickFiles}
+          />
           <Button
             variant="light"
             onClick={() => fileRef.current?.click()}
             disabled={busy || cards.length >= MAX_BATCH}
             loading={scanning > 0}
           >
-            {cards.length === 0 ? t('scan.addPhotos') : t('scan.takePhotos')}
+            {t('scan.takePhotos')}
+          </Button>
+          <Button
+            variant="default"
+            onClick={() => libraryRef.current?.click()}
+            disabled={busy || cards.length >= MAX_BATCH || scanning > 0}
+          >
+            {t('scan.fromLibrary')}
           </Button>
           {scanning > 0 && <Text size="xs" c="dimmed">{t('scan.scanning')}</Text>}
           {cards.length > 0 && (
@@ -246,7 +263,7 @@ export function ScanReceipts({
                     value={card.amount}
                     disabled={busy || done || !!card.origCurrency}
                     error={errors.includes('amount') ? t('scan.err.amount') : null}
-                    onChange={(e) => patch(card.id, { amount: e.currentTarget.value })}
+                    onChange={(e) => patch(card.id, { amount: dec(e.currentTarget.value) })}
                   />
                   <TextInput
                     label={t('forms.expense.spentOn')}
@@ -265,7 +282,7 @@ export function ScanReceipts({
                       inputMode="decimal"
                       value={card.origAmount}
                       disabled={busy || done}
-                      onChange={(e) => patch(card.id, { origAmount: e.currentTarget.value })}
+                      onChange={(e) => patch(card.id, { origAmount: dec(e.currentTarget.value) })}
                     />
                     <TextInput
                       label={t('forms.expense.fxRate')}
@@ -274,7 +291,7 @@ export function ScanReceipts({
                       value={card.fxRate}
                       disabled={busy || done}
                       error={errors.includes('rate') ? t('scan.err.rate') : null}
-                      onChange={(e) => patch(card.id, { fxRate: e.currentTarget.value })}
+                      onChange={(e) => patch(card.id, { fxRate: dec(e.currentTarget.value) })}
                     />
                     <div>
                       <Text size="xs" c="dimmed">{t('forms.expense.fxApprox', { amount: fmt(Math.round(Number(amount || 0) * 100), currency) })}</Text>

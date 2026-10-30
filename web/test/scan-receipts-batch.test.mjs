@@ -189,6 +189,12 @@ test('ScanReceipts scans with the batch endpoint, uploads the photo and retries 
   assert.match(modal, /api\.postForm\(`\/api\/v1\/expenses\/\$\{expenseId\}\/images`, form\)/);
   assert.match(modal, /multiple/);
   assert.match(modal, /capture="environment"/);
+  const inputs = modal.match(/<input[\s\S]*?\/>/g) || [];
+  assert.equal(inputs.length, 2, 'camera input plus library input');
+  assert.ok(inputs.some((i) => /ref=\{libraryRef\}/.test(i) && /multiple/.test(i) && !/capture/.test(i)),
+    'library input must omit capture so mobile opens the photo library');
+  assert.match(modal, /libraryRef\.current\?\.click\(\)/);
+  assert.match(modal, /t\('scan\.fromLibrary'\)/);
   assert.match(modal, /runPool\(added, 3, scanCard\)/);
   assert.match(modal, /createCards\(failed\)/);
   assert.doesNotMatch(modal, /split_type: 'EXACT'/);
@@ -196,7 +202,9 @@ test('ScanReceipts scans with the batch endpoint, uploads the photo and retries 
 
 test('GroupDetail shows the scan action only when capabilities report OCR', () => {
   assert.match(groupDetail, /api\.get\('\/api\/v1\/capabilities'\)/);
-  assert.match(groupDetail, /const canScan = |ocrEnabled && \(/);
+  assert.match(groupDetail, /const showScan = !SCAN_RECEIPTS_ENABLED \|\| ocrEnabled;/);
+  assert.match(groupDetail, /const scanDisabled = !SCAN_RECEIPTS_ENABLED \|\| !canWriteGroup;/);
+  assert.match(groupDetail, /showScan && \(/);
   assert.match(groupDetail, /<ScanReceipts[\s\S]*?meId=\{user\?\.user_id\}[\s\S]*?categories=\{categories\}/);
   assert.match(groupDetail, /onCreated=\{\(\) => \{ load\(\); loadLedger\(\); loadSummary\(\); \}\}/);
 });

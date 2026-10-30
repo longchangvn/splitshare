@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
   SCAN_DPI, SCAN_MAX_EDGE, SCAN_MOBILE_QUERY, SCAN_QUALITY,
-  fitWithin, readJpegDpi, scanErrorKey, scanToAmount, setJpegDpi,
+  fitWithin, grayStretch, readJpegDpi, scanErrorKey, scanToAmount, setJpegDpi,
 } from '../src/receiptScan.js';
 
 const read = (p) => readFile(new URL(p, import.meta.url), 'utf8');
@@ -11,17 +11,38 @@ const forms = await read('../src/components/Forms.jsx');
 const styles = await read('../src/styles.css');
 const { MESSAGES } = await import('../src/i18n/messages.js');
 
-test('compression settings: 1600px long edge, JPEG quality 70 %, 70 DPI', () => {
-  assert.equal(SCAN_MAX_EDGE, 1600);
-  assert.equal(SCAN_QUALITY, 0.7);
+test('compression settings: 1200px long edge, JPEG quality 60 %, 70 DPI', () => {
+  assert.equal(SCAN_MAX_EDGE, 1200);
+  assert.equal(SCAN_QUALITY, 0.6);
   assert.equal(SCAN_DPI, 70);
 });
 
 test('fitWithin scales the long edge down and never upscales', () => {
-  assert.deepEqual(fitWithin(4032, 3024), { width: 1600, height: 1200 });
-  assert.deepEqual(fitWithin(3024, 4032), { width: 1200, height: 1600 });
+  assert.deepEqual(fitWithin(4032, 3024), { width: 1200, height: 900 });
+  assert.deepEqual(fitWithin(3024, 4032), { width: 900, height: 1200 });
   assert.deepEqual(fitWithin(800, 600), { width: 800, height: 600 });
   assert.deepEqual(fitWithin(10000, 10, 1600), { width: 1600, height: 2 });
+});
+
+test('grayStretch converts to luminance and stretches the range to full contrast', () => {
+  // 2 px: a warm white and a dark brown — colour is dropped, the range expands to 0/255.
+  const px = Uint8ClampedArray.from([200, 190, 150, 255, 60, 55, 45, 255]);
+  const out = grayStretch(px);
+  assert.equal(out[0], 255);
+  assert.equal(out[1], 255);
+  assert.equal(out[2], 255);
+  assert.equal(out[4], 0);
+  assert.equal(out[5], 0);
+  assert.equal(out[6], 0);
+  assert.equal(out[3], 255);
+  assert.equal(out[7], 255);
+});
+
+test('grayStretch leaves a flat image alone and keeps alpha opaque', () => {
+  const flat = Uint8ClampedArray.from([128, 128, 128, 80, 128, 128, 128, 0]);
+  const out = grayStretch(flat);
+  assert.deepEqual([...out], [128, 128, 128, 255, 128, 128, 128, 255]);
+  assert.deepEqual([...grayStretch(new Uint8ClampedArray(0))], []);
 });
 
 test('setJpegDpi rewrites an existing JFIF header to 70 dpi', () => {

@@ -19,6 +19,11 @@ import { categoryLabel, categoryLabelForKey, categorySelectData } from '../categ
 import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
 import { useT } from '../prefs.jsx';
+import { normalizeDecimalInput as dec } from '../decimalInput.js';
+import { fetchRemovalPreview, isStaleRemoval, removalPath, removalSummary } from '../memberRemoval.js';
+
+// Kill switch for batch "Scan receipts": false keeps the button visible but disabled.
+const SCAN_RECEIPTS_ENABLED = true;
 
 // Mockup receipt thumbnails (docs/mobile-design.html screen 3): category →
 // emoji tile so ledger cards scan like receipts. Pure presentation.
@@ -108,6 +113,7 @@ export function GroupDetail() {
   const [removeOpen, setRemoveOpen] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeTarget, setRemoveTarget] = useState(null);
+  const [removePreview, setRemovePreview] = useState(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteTab, setInviteTab] = useState('email');
   const [inviteEmails, setInviteEmails] = useState('');
@@ -251,6 +257,7 @@ export function GroupDetail() {
   useEffect(() => { loadLedger(); }, [id, type]);
   // Batch receipt scanning is offered only when the API has an OCR provider wired.
   useEffect(() => {
+    if (!SCAN_RECEIPTS_ENABLED) return undefined;
     let cancelled = false;
     api.get('/api/v1/capabilities')
       .then((c) => { if (!cancelled) setOcrEnabled(!!c?.ocr_enabled); })
@@ -273,23 +280,40 @@ export function GroupDetail() {
   const groupLifecycle = detail?.status || 'opening';
   const canWriteGroup = groupLifecycle === 'opening'
     || (groupLifecycle === 'locked' && detail?.my_role === 'owner');
+  const showScan = !SCAN_RECEIPTS_ENABLED || ocrEnabled;
+  const scanDisabled = !SCAN_RECEIPTS_ENABLED || !canWriteGroup;
+  const scanTitle = SCAN_RECEIPTS_ENABLED ? undefined : t('scan.unavailable');
   const lifecycleLabel = t(`groupStatus.${groupLifecycle}`);
   const groupCreatedSubtitle = formatGroupCreatedAt(detail?.created_at, t('report.createdOn'));
 
+  const loadRemovePreview = async (uid) => {
+    setRemovePreview(null);
+    try { setRemovePreview(await fetchRemovalPreview(api.get, id, uid)); } catch (err) { setE(err); }
+  };
   const remove = (uid, name) => {
     setRemoveTarget({ uid, name });
     setE(null);
     setRemoveOpen(true);
+    loadRemovePreview(uid);
   };
   const confirmRemove = async () => {
-    if (!removeTarget) return;
+    if (!removeTarget || !removePreview?.can_remove) return;
     setRemoveBusy(true);
     try {
-      await api.del(`/api/v1/groups/${id}/members/${removeTarget.uid}`);
+      await api.del(removalPath(id, removeTarget.uid, removePreview));
       setRemoveOpen(false);
       setRemoveTarget(null);
+      // Removal can re-split open expenses: refresh every ledger-derived view, not just the roster.
       load();
+      loadLedger();
+      loadActivityFeed();
+      setSettleTick((x) => x + 1);
     } catch (err) {
+      if (isStaleRemoval(err)) {
+        setE({ message: t('groupDetail.removeStale') });
+        loadRemovePreview(removeTarget.uid);
+        return;
+      }
       setRemoveOpen(false);
       setRemoveTarget(null);
       setE(err);
@@ -522,7 +546,11 @@ export function GroupDetail() {
       setStatusConfirmOpen(false);
       setPendingGroupStatus(null);
       notifications.show({ message: t('groupStatus.updated'), color: 'teal' });
-    } catch (err) { setE(err); } finally { setStatusBusy(false); }
+    } catch (err) {
+      setE(err?.code === 'HAS_OPEN_BALANCE' && next === 'closed'
+        ? { message: t('groupStatus.closeUnsettled') }
+        : err);
+    } finally { setStatusBusy(false); }
   };
   // Ledger totals over the loaded page.
   const totals = useMemo(() => {
@@ -761,8 +789,8 @@ export function GroupDetail() {
               </button>
             </div>
             <div className="gd-action-quiet">
-              {ocrEnabled && (
-                <button type="button" className="gd-action-ghost" onClick={() => setScanOpen(true)} disabled={!canWriteGroup}>
+              {showScan && (
+                <button type="button" className="gd-action-ghost" onClick={() => setScanOpen(true)} disabled={scanDisabled} title={scanTitle}>
                   <GdActionIcon name="scan" />
                   <span>{t('scan.open')}</span>
                 </button>
@@ -807,12 +835,13 @@ export function GroupDetail() {
               <GdActionIcon name="pay" />
               <span>{t('groupDetail.recordPayment')}</span>
             </button>
-            {ocrEnabled && (
+            {showScan && (
               <button
                 type="button"
                 className="gd-action-btn"
                 onClick={() => setScanOpen(true)}
-                disabled={!canWriteGroup}
+                disabled={scanDisabled}
+                title={scanTitle}
               >
                 <GdActionIcon name="scan" />
                 <span>{t('scan.open')}</span>
@@ -887,6 +916,7 @@ export function GroupDetail() {
                 groupId={id}
                 members={members}
                 currency={detail.currency}
+                reloadKey={settleTick}
                 embedded
               />
             </Tabs.Panel>
@@ -951,8 +981,8 @@ export function GroupDetail() {
                 onChange={(v) => setFCat(v || '')}
                 data={categorySelectData(categories, t)}
               />
-              <TextInput size="xs" placeholder={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} />
-              <TextInput size="xs" placeholder={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} />
+              <TextInput size="xs" placeholder={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(dec(x.target.value))} />
+              <TextInput size="xs" placeholder={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(dec(x.target.value))} />
               <TextInput size="xs" type="date" aria-label={t('common.from')} value={fFrom} onChange={(x) => setFFrom(x.target.value)} />
               <TextInput size="xs" type="date" aria-label={t('common.to')} value={fTo} onChange={(x) => setFTo(x.target.value)} />
             </div>
@@ -1025,8 +1055,8 @@ export function GroupDetail() {
                   />
                 </Group>
                 <Group gap="xs" grow>
-                  <TextInput size="sm" label={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(x.target.value)} />
-                  <TextInput size="sm" label={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(x.target.value)} />
+                  <TextInput size="sm" label={t('groupDetail.minAmount')} inputMode="decimal" value={fMin} onChange={(x) => setFMin(dec(x.target.value))} />
+                  <TextInput size="sm" label={t('groupDetail.maxAmount')} inputMode="decimal" value={fMax} onChange={(x) => setFMax(dec(x.target.value))} />
                 </Group>
                 <Group gap="xs" grow>
                   <TextInput size="sm" label={t('common.from')} type="date" value={fFrom} onChange={(x) => setFFrom(x.target.value)} />
@@ -1727,14 +1757,54 @@ export function GroupDetail() {
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
       >
         <div className="wizard-form confirm-dialog">
-          <Text className="confirm-dialog-text">
-            Remove <b>{removeTarget?.name}</b>? Blocked while they hold a balance. History is kept.
-          </Text>
+          {(() => {
+            const nameOf = (uid) => detail?.members?.find((m) => m.user_id === uid)?.display_name || '?';
+            const cur = removePreview?.currency || detail?.currency;
+            const sum = removalSummary(removePreview, nameOf);
+            const name = removeTarget?.name;
+            if (sum.mode === 'loading') return <Text className="confirm-dialog-text">{t('groupDetail.removeLoading')}</Text>;
+            if (sum.mode === 'legacy') return <Text className="confirm-dialog-text">{t('groupDetail.removeMemberBody', { name })}</Text>;
+            if (sum.mode === 'settled') return <Text className="confirm-dialog-text">{t('groupDetail.removeSettled', { name })}</Text>;
+            if (sum.mode === 'blocked') {
+              return (
+                <div className="confirm-dialog-text">
+                  <Text>{t('groupDetail.removeBlocked', { name })}</Text>
+                  <ul>{sum.blockers.map((b) => <li key={b}><Text size="sm">{b}</Text></li>)}</ul>
+                </div>
+              );
+            }
+            return (
+              <div className="confirm-dialog-text">
+                <Text>{t('groupDetail.removeResplit', {
+                  name, amount: fmt(Math.abs(removePreview.net_cents), cur), count: sum.expenses.length,
+                })}</Text>
+                <Stack gap={8} mt="sm" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                  {sum.expenses.map((x) => (
+                    <div key={x.id}>
+                      <Text size="sm" fw={700}>
+                        {x.title} · {fmt(x.amountCents, cur)} · {t(`forms.expense.${x.method}`)}
+                      </Text>
+                      {x.rows.map((r) => (
+                        <Text key={r.userId} size="xs" c="dimmed">
+                          {r.name}: {fmt(r.fromCents, cur)} → {fmt(r.toCents, cur)}
+                        </Text>
+                      ))}
+                    </div>
+                  ))}
+                </Stack>
+              </div>
+            );
+          })()}
           <Group gap="sm" grow>
             <Button className="wizard-back" onClick={() => setRemoveOpen(false)} disabled={removeBusy}>
               Cancel
             </Button>
-            <Button className="wizard-primary is-danger" loading={removeBusy} onClick={confirmRemove}>
+            <Button
+              className="wizard-primary is-danger"
+              loading={removeBusy}
+              disabled={!removePreview?.can_remove}
+              onClick={confirmRemove}
+            >
               Remove
             </Button>
           </Group>
@@ -2287,7 +2357,7 @@ export function formatRecurringAmount(value, currency = 'USD') {
 }
 
 function normalizeRecurringAmount(value) {
-  const [whole = '', ...fraction] = String(value).replace(/[^0-9.]/g, '').split('.');
+  const [whole = '', ...fraction] = dec(value).replace(/[^0-9.]/g, '').split('.');
   return fraction.length > 0 ? `${whole}.${fraction.join('')}` : whole;
 }
 

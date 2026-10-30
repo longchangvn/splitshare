@@ -4,7 +4,8 @@
 
 User-narrowed scope: in the web New expense form, on phone-width screens only, a
 **Scan receipt** button opens camera or library (no `capture` attr), the image is resized
-to ≤1600 px, JPEG quality 0.7, JFIF 70 DPI, then `POST /api/v1/groups/{id}/expenses/scan`
+to ≤1200 px, flattened to stretched grayscale, JPEG quality 0.6, JFIF 70 DPI, then
+`POST /api/v1/groups/{id}/expenses/scan`
 pre-fills title / amount / date / category and stages the photo as a receipt.
 
 - [X] V1 API: `IOcrService` typed (`ReceiptSuggestion`, `OcrContext`, `OcrProviderException`) — `api/Expenses/OcrService.cs`
