@@ -101,24 +101,30 @@ jobs:
           echo "=== Expo token preflight ==="
           # Same checks Expo CLI makes before signing a dev manifest (it silently
           # serves an unsigned @anonymous manifest when any of them fails).
-          Q='query ($appId: String!) { meActor { __typename ... on UserActor { username } ... on Robot { firstName } accounts { id name viewerUserPermission2 { effectivePermissions } } } app { byId(appId: $appId) { fullName scopeKey ownerAccount { id name } } } }'
-          jq -n --arg q "$Q" --arg id "$EXPO_PROJECT_ID" '{query: $q, variables: {appId: $id}}' \
-            | curl -sS -m 30 -H "Authorization: Bearer $EXPO_TOKEN" -H 'content-type: application/json' \
-                --data @- https://api.expo.dev/graphql > /tmp/expo-me.json || true
+          # Two queries: a denied app.byId nulls the whole `data`, hiding the actor.
+          expo_gql() {
+            jq -n --arg q "$1" --arg id "$EXPO_PROJECT_ID" '{query: $q, variables: (if ($q | test("\\$appId")) then {appId: $id} else {} end)}' \
+              | curl -sS -m 30 -w '\nHTTP %{http_code}\n' -H "Authorization: Bearer $EXPO_TOKEN" \
+                  -H 'content-type: application/json' --data @- https://api.expo.dev/graphql > "$2.raw" || true
+            sed '$d' "$2.raw" > "$2"
+            tail -1 "$2.raw"
+          }
+          expo_gql 'query { meActor { __typename ... on UserActor { username } ... on Robot { firstName } accounts { id name viewerUserPermission2 { effectivePermissions } } } }' /tmp/expo-me.json
           ACTOR=$(jq -r '.data.meActor | if . == null then "" else (.username // .firstName // .__typename) end' /tmp/expo-me.json 2>/dev/null || true)
           if [ -z "$ACTOR" ]; then
-            echo "::error::EXPO_TOKEN is not accepted by Expo (no actor). Recreate it at expo.dev > Account settings > Access tokens."
-            jq -c '.errors // .' /tmp/expo-me.json 2>/dev/null | head -c 600 || true
+            echo "::error::EXPO_TOKEN is not accepted by Expo (no actor) — token value invalid/revoked. Token length: ${#EXPO_TOKEN}."
+            jq -c '.errors // .' /tmp/expo-me.json 2>/dev/null | head -c 600 || head -c 300 /tmp/expo-me.json
             exit 1
           fi
-          echo "Expo actor: $ACTOR ($(jq -r '.data.meActor.__typename' /tmp/expo-me.json))"
-          OWNER_ID=$(jq -r '.data.app.byId.ownerAccount.id // ""' /tmp/expo-me.json)
+          echo "Expo actor: $ACTOR ($(jq -r '.data.meActor.__typename' /tmp/expo-me.json)); accounts: $(jq -r '[.data.meActor.accounts[].name] | join(", ")' /tmp/expo-me.json)"
+          expo_gql 'query ($appId: String!) { app { byId(appId: $appId) { fullName ownerAccount { id name } } } }' /tmp/expo-app.json
+          OWNER_ID=$(jq -r '.data.app.byId.ownerAccount.id // ""' /tmp/expo-app.json)
           if [ -z "$OWNER_ID" ]; then
-            echo "::error::'$ACTOR' cannot read EAS project $EXPO_PROJECT_ID (token from another account/org?)."
-            jq -c '.errors // empty' /tmp/expo-me.json | head -c 600 || true
+            echo "::error::'$ACTOR' cannot read EAS project $EXPO_PROJECT_ID — create the robot/token in the account that owns the project."
+            jq -c '.errors // empty' /tmp/expo-app.json | head -c 600 || true
             exit 1
           fi
-          echo "Project: $(jq -r '.data.app.byId.fullName' /tmp/expo-me.json) (owner $(jq -r '.data.app.byId.ownerAccount.name' /tmp/expo-me.json))"
+          echo "Project: $(jq -r '.data.app.byId.fullName' /tmp/expo-app.json) (owner $(jq -r '.data.app.byId.ownerAccount.name' /tmp/expo-app.json))"
           if ! jq -e --arg o "$OWNER_ID" '.data.meActor.accounts[] | select(.id == $o)
                  | .viewerUserPermission2.effectivePermissions | index("RUN")' /tmp/expo-me.json >/dev/null; then
             echo "::error::'$ACTOR' lacks RUN permission on the project's owner account — Expo CLI won't sign manifests."
