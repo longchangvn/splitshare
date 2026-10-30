@@ -14,10 +14,13 @@ WORKDIR /app
 #   EXPO_PROJECT_ID: EAS project id (falls back to app.json extra.eas).
 #   EXPO_PACKAGER_PROXY_URL: the public https origin, so the manifest's
 #     hostUri / bundle URL point at the ingress, not the pod IP.
+# docker/proxy.js listens on $PORT and forwards to Metro on $METRO_PORT
+# (see the file for why).
 ENV CI=1 \
     EXPO_NO_TELEMETRY=1 \
     EXPO_NO_DOTENV=1 \
-    PORT=8081
+    PORT=8081 \
+    METRO_PORT=8082
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -26,4 +29,5 @@ COPY . ./
 COPY docker/app.config.js ./app.config.js
 
 EXPOSE 8081
-CMD ["sh", "-c", "exec npx expo start --lan --port \"$PORT\""]
+# Exit (-> container restart) as soon as either process dies.
+CMD ["bash", "-c", "node docker/proxy.js & npx expo start --lan --port \"$METRO_PORT\" & wait -n; exit 1"]

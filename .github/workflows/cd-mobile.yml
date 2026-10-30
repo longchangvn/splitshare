@@ -314,8 +314,11 @@ jobs:
           echo "OK"
 
           echo "=== 3/4 Signed manifest, as requested by Expo Go on iOS ==="
+          # Expo Go sends `Forwarded`; without docker/proxy.js stripping it the
+          # bundle URL is relative -> resolved to http:// -> iOS can't load it.
           code=$(curl -sS -m 60 -o /tmp/manifest.multipart -w '%{http_code}' -H "expo-platform: ios" \
             -H "Accept: multipart/mixed,application/expo+json,application/json" \
+            -H "Forwarded: host=$FQDN;proto=http" \
             -H 'expo-expect-signature: sig, keyid="expo-root", alg="rsa-v1_5-sha256"' "http://$FQDN/")
           [ "$code" = "200" ] || { echo "::error::multipart manifest returned $code"; exit 1; }
           SCOPE=$(grep -o '"scopeKey":"[^"]*"' /tmp/manifest.multipart | head -1 | cut -d'"' -f4)
@@ -327,6 +330,12 @@ jobs:
             exit 1
           fi
           echo "OK (signed for ${SCOPE%%/*})"
+          if ! grep -q "\"url\":\"https://$FQDN/node_modules/" /tmp/manifest.multipart; then
+            echo "::error::Expo Go-style manifest does not point the bundle at https://$FQDN/ (relative/http URL -> 'Could not connect to development server' on iOS)."
+            grep -o '"launchAsset":{[^}]*}' /tmp/manifest.multipart | head -c 400 || true
+            exit 1
+          fi
+          echo "OK (bundle URL is absolute https)"
 
           echo "=== 4/4 JS bundles (first build can take a few minutes) ==="
           for plat in ios android; do
