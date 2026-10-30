@@ -7,7 +7,8 @@
     "android": "expo start --android --port 8082",
     "ios": "expo start --ios --port 8082",
     "sync:shared": "node ./scripts/sync-shared.js",
-    "test": "node ./scripts/sync-shared.js --check && node ./scripts/mapping-check.js && node --test \"test/*.test.mjs\""
+    "test": "node ./scripts/sync-shared.js --check && node ./scripts/mapping-check.js && node --test \"test/*.test.mjs\"",
+    "start:tunnel": "EXPO_TUNNEL_SUBDOMAIN=splitshare-dev expo start --tunnel ngrok --port 8085"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

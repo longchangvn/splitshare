@@ -11,20 +11,23 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "app.splitshare.mobile",
+      "bundleIdentifier": "com.reseach.splitshare",
       "usesAppleSignIn": false,
       "infoPlist": {
         "NSCameraUsageDescription": "Take receipt photos for expenses.",
         "NSPhotoLibraryUsageDescription": "Attach receipt photos to expenses.",
-        "NSFaceIDUsageDescription": "Unlock SplitShare with Face ID."
+        "NSFaceIDUsageDescription": "Unlock SplitShare with Face ID.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
-      "package": "app.splitshare.mobile",
+      "package": "com.reseach.splitshare",
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "USE_BIOMETRIC"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "plugins": [
@@ -37,7 +40,10 @@
     ],
     "extra": {
       "apiUrl": "http://localhost:8081",
-      "googleClientId": ""
+      "googleClientId": "",
+      "eas": {
+        "projectId": "96029494-3e1e-4404-b5f4-a25dd79abb06"
+      }
     }
   }
 }

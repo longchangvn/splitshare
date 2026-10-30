@@ -17,6 +17,13 @@ name: CD Mobile — Expo Go dev server on Azure Container Apps
 # it's missing and updates it in place otherwise. The JS bundle is warmed and
 # verified by the smoke test at the end, which emulates Expo Go's requests.
 #
+# Expo account: Expo Go on a physical iPhone only opens a dev-server project
+# whose manifest is signed for the account Expo Go is signed in to. Required:
+#   secrets.EXPO_TOKEN       — access token of that account (expo.dev >
+#                              Account settings > Access tokens)
+#   vars.EXPO_PROJECT_ID     — EAS project id (else app.json extra.eas.projectId)
+# Testers must sign in to Expo Go with that same account (or one with access).
+#
 # Label: vars.SPLITSHARE_SWA_NAME (e.g. `stage`) of the selected environment
 # suffixes the app name: `mobile-expo-<label>` (or `mobile-expo` without it).
 #
@@ -70,8 +77,23 @@ jobs:
       # Single step so the registry password never passes through step outputs.
       - name: Provision & deploy container app
         id: deploy
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PROJECT_ID: ${{ vars.EXPO_PROJECT_ID }}
         run: |
           set -euo pipefail
+
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "::error::secrets.EXPO_TOKEN is not set on this environment — Expo Go on iOS refuses unsigned dev manifests."
+            exit 1
+          fi
+          if [ -z "$EXPO_PROJECT_ID" ]; then
+            EXPO_PROJECT_ID=$(jq -r '.expo.extra.eas.projectId // ""' mobile/app.json)
+          fi
+          if [ -z "$EXPO_PROJECT_ID" ]; then
+            echo "::error::No EAS project id: set vars.EXPO_PROJECT_ID or extra.eas.projectId in mobile/app.json."
+            exit 1
+          fi
 
           if ! [[ "$CA_NAME" =~ ^[a-z][a-z0-9-]{0,30}[a-z0-9]$ ]] || [[ "$CA_NAME" == *--* ]]; then
             echo "::error::Container app name '$CA_NAME' is invalid (lowercase letters, digits, single '-', 2-32 chars)."
@@ -171,19 +193,25 @@ jobs:
           SUFFIX="r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           COMMON=(--image "$IMAGE" --cpu 1 --memory 2Gi --min-replicas 1 --max-replicas 1
                   --revision-suffix "$SUFFIX")
+          # Token is stored as a container app secret, referenced by env var.
+          ENV_VARS=("EXPO_PACKAGER_PROXY_URL=$PROXY_URL" "EXPO_PROJECT_ID=$EXPO_PROJECT_ID"
+                    "EXPO_TOKEN=secretref:expo-token")
           if [ -n "$APP_EXISTS" ]; then
-            echo "Container app exists — updating registry, image and env in place."
+            echo "Container app exists — updating registry, secret, image and env in place."
             az containerapp registry set --name "$CA_NAME" --resource-group "$RG" \
               --server "$REG_SERVER" --username "$ACR_USER" --password "$ACR_PASS" --output none
+            az containerapp secret set --name "$CA_NAME" --resource-group "$RG" \
+              --secrets "expo-token=$EXPO_TOKEN" --output none
             az containerapp update --name "$CA_NAME" --resource-group "$RG" "${COMMON[@]}" \
-              --set-env-vars "EXPO_PACKAGER_PROXY_URL=$PROXY_URL" --output none
+              --set-env-vars "${ENV_VARS[@]}" --output none
           else
             echo "Container app does not exist — creating it."
             az containerapp create --name "$CA_NAME" --resource-group "$RG" \
               --environment "$ENV_ID" "${COMMON[@]}" \
               --registry-server "$REG_SERVER" --registry-username "$ACR_USER" --registry-password "$ACR_PASS" \
               --ingress external --target-port 8081 --transport http \
-              --env-vars "EXPO_PACKAGER_PROXY_URL=$PROXY_URL" --output none
+              --secrets "expo-token=$EXPO_TOKEN" \
+              --env-vars "${ENV_VARS[@]}" --output none
           fi
           # exp:// == plain HTTP to Expo Go -> accept HTTP without redirecting.
           az containerapp ingress update --name "$CA_NAME" --resource-group "$RG" \
@@ -234,23 +262,26 @@ jobs:
             echo "::error::Manifest points at '$LAUNCH' / '$HOST_URI' instead of $FQDN — EXPO_PACKAGER_PROXY_URL is not applied."
             exit 1
           fi
-          # Unsigned manifest + projectId => signed-in Expo Go refuses it
-          # ("not signed in to Expo CLI"); mobile/docker/app.config.js strips it.
-          if jq -e '.extra.eas.projectId // empty' /tmp/manifest.json >/dev/null; then
-            echo "::error::Manifest is unsigned but carries extra.eas.projectId — Expo Go will refuse it."
-            exit 1
-          fi
 
           echo "=== 2/4 exps:// manifest (https://$FQDN) ==="
           code=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' "${HDRS[@]}" "https://$FQDN/")
           [ "$code" = "200" ] || { echo "::error::https manifest returned $code"; exit 1; }
           echo "OK"
 
-          echo "=== 3/4 Expo Go Accept header (multipart manifest) ==="
-          code=$(curl -sS -m 20 -o /dev/null -w '%{http_code}' -H "expo-platform: android" \
-            -H "Accept: multipart/mixed,application/expo+json,application/json" "http://$FQDN/")
+          echo "=== 3/4 Signed manifest, as requested by Expo Go on iOS ==="
+          code=$(curl -sS -m 60 -o /tmp/manifest.multipart -w '%{http_code}' -H "expo-platform: ios" \
+            -H "Accept: multipart/mixed,application/expo+json,application/json" \
+            -H 'expo-expect-signature: sig, keyid="expo-root", alg="rsa-v1_5-sha256"' "http://$FQDN/")
           [ "$code" = "200" ] || { echo "::error::multipart manifest returned $code"; exit 1; }
-          echo "OK"
+          SCOPE=$(grep -o '"scopeKey":"[^"]*"' /tmp/manifest.multipart | head -1 | cut -d'"' -f4)
+          echo "scopeKey: ${SCOPE:-<none>}"
+          if ! grep -qi 'expo-signature' /tmp/manifest.multipart || ! grep -q 'BEGIN CERTIFICATE' /tmp/manifest.multipart \
+             || [[ "$SCOPE" == @anonymous/* ]] || [ -z "$SCOPE" ]; then
+            echo "::error::Manifest is not signed for an Expo account — iOS Expo Go will show 'not signed in to Expo CLI'. Check secrets.EXPO_TOKEN and the EAS project id."
+            az containerapp logs show --name "$CA_NAME" --resource-group "$RG" --tail 50 || true
+            exit 1
+          fi
+          echo "OK (signed for ${SCOPE%%/*})"
 
           echo "=== 4/4 JS bundles (first build can take a few minutes) ==="
           for plat in ios android; do
