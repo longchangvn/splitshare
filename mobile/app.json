@@ -36,7 +36,8 @@
       "expo-local-authentication",
       "expo-notifications",
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      "expo-web-browser"
     ],
     "extra": {
       "apiUrl": "http://localhost:8081",
