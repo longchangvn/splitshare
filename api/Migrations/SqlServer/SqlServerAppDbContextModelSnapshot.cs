@@ -620,7 +620,13 @@ namespace SplitShare.Api.Migrations.SqlServer
                     b.Property<Guid>("InvitedBy")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TokenHash");
 
                     b.HasIndex("GroupId", "Email")
                         .IsUnique();

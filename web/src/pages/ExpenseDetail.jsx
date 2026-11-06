@@ -323,8 +323,12 @@ export function JoinPage() {
   const t = useT();
   const { token } = useParams();
   const nav = useNavigate();
+  const { user, loading } = useAuth();
   const [msg, setMsg] = useState(t('expense.joining'));
   useEffect(() => {
+    if (loading) return;
+    // Anonymous visitors sign in (or register) first, then come back here to join.
+    if (!user) { nav(`/login?next=${encodeURIComponent(`/g/${token}`)}`, { replace: true }); return; }
     api.post('/api/v1/groups/join', { token })
       .then((r) => {
         const gid = r.group_id ?? r.group?.id;
@@ -332,7 +336,7 @@ export function JoinPage() {
         nav(`/groups/${gid}`);
       })
       .catch((err) => setMsg(`Join failed: ${err.code || ''} ${err.message}`));
-  }, [token, nav]);
+  }, [token, nav, user, loading]);
   return (
     <Shell>
       <Card withBorder shadow="sm" padding="lg" radius="md">

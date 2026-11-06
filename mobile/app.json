@@ -4,7 +4,7 @@
     "slug": "splitshare",
     "version": "1.0.0",
     "orientation": "portrait",
-    "scheme": "splitshare",
+    "scheme": ["splitshare", "com.reseach.splitshare"],
     "platforms": [
       "ios",
       "android"
@@ -41,7 +41,9 @@
     ],
     "extra": {
       "apiUrl": "http://localhost:8081",
-      "googleClientId": "",
+      "googleClientId": "629654657844-qa8bhnse10a2ppdmo678ir32vab63qns.apps.googleusercontent.com",
+      "googleIosClientId": "",
+      "googleAndroidClientId": "",
       "eas": {
         "projectId": "96029494-3e1e-4404-b5f4-a25dd79abb06"
       }

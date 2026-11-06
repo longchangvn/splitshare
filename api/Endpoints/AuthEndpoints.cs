@@ -11,7 +11,7 @@ public static class AuthEndpoints
     public static Guid? CurrentUserId(ClaimsPrincipal p)
         => Guid.TryParse(p.FindFirstValue(JwtRegisteredClaimNames.Sub), out var id) ? id : null;
 
-    private static object UserDto(Models.User u) => new
+    internal static object UserDto(Models.User u) => new
     {
         user_id = u.Id, username = u.Username, email = u.Email,
         display_name = u.DisplayName, phone = u.Phone,

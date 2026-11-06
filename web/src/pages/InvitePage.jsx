@@ -9,6 +9,8 @@ import { api } from '../api.js';
 import { Err } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { initialsOf } from '../components/Net.jsx';
+import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
+import { inviteRows } from '../inviteResults.js';
 import { useT } from '../prefs.jsx';
 
 // Single invitation hub: invite multiple people at once (emails and/or contacts)
@@ -23,6 +25,7 @@ export function InvitePage() {
   const [link, setLink] = useState('');
   const [e, setE] = useState(null);
   const [inviting, setInviting] = useState(false);
+  const [inviteResult, setInviteResult] = useState([]);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
@@ -39,14 +42,13 @@ export function InvitePage() {
     const list = emails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
     if (list.length === 0) { setE({ message: t('errors.needEmail') }); return; }
     setInviting(true);
+    setInviteResult([]);
     try {
-      const r = await api.post(`/api/v1/groups/${id}/invites`, { emails: list });
-      notifications.show({
-        title: t('invite.sent'),
-        message: `added: ${(r.added || []).join(', ') || '—'} · pending: ${(r.pending || []).join(', ') || '—'}`,
-        color: 'teal',
-      });
-      setEmails('');
+      const rows = inviteRows(await api.post(`/api/v1/groups/${id}/invites`, { emails: list }));
+      setInviteResult(rows);
+      notifyInviteResults(t, rows);
+      // Keep failed addresses in the box so "Send invites" retries just those.
+      setEmails(rows.filter((r) => !r.emailSent).map((r) => r.email).join(', '));
       setE(null);
     } catch (err) { setE(err); } finally { setInviting(false); }
   };
@@ -96,6 +98,7 @@ export function InvitePage() {
             <Group><Button type="submit" loading={inviting}>{t('invite.sendInvites')}</Button></Group>
           </Stack>
         </form>
+        <InviteResults rows={inviteResult} />
       </Card>
 
       <Card withBorder shadow="sm" padding="md" radius="md" mt="md">

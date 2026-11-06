@@ -7,23 +7,38 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SplitShare.Api.Auth;
 
+public enum EmailSendStatus { Sent, Failed, NotConfigured }
+
+/// <summary>
+/// Outcome of one send. <see cref="EmailSendStatus.Sent"/> only when the provider
+/// accepted the message and returned a message id; anything else carries a reason.
+/// </summary>
+public sealed record EmailSendResult(EmailSendStatus Status, string? MessageId = null, string? Error = null)
+{
+    public bool Sent => Status == EmailSendStatus.Sent;
+    public static EmailSendResult Accepted(string messageId) => new(EmailSendStatus.Sent, messageId);
+    public static EmailSendResult Fail(string error) => new(EmailSendStatus.Failed, null, error);
+    public static EmailSendResult Unconfigured(string error) => new(EmailSendStatus.NotConfigured, null, error);
+}
+
 /// <summary>
 /// Outbound email. <paramref name="transactional"/> marks account-critical mail
 /// (verify, password reset) that must reach the user even if they unsubscribed
-/// from non-essential mail (invites, nudges, alerts).
+/// from non-essential mail (invites, nudges, alerts). Never throws: the result
+/// says whether the provider accepted the message.
 /// </summary>
 public interface IEmailSender
 {
-    Task SendAsync(string to, string subject, string body, bool transactional = false);
+    Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false);
 }
 
-/// <summary>Dev stub: logs emails (default when <c>Email:Provider</c> is unset).</summary>
+/// <summary>Dev stub: logs emails (default when <c>Email:Provider</c> is unset). Nothing is delivered.</summary>
 public sealed class StubEmailSender(ILogger<StubEmailSender> logger) : IEmailSender
 {
-    public Task SendAsync(string to, string subject, string body, bool transactional = false)
+    public Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
     {
         logger.LogInformation("EMAIL to={To} subject={Subject} body={Body}", to, subject, body);
-        return Task.CompletedTask;
+        return Task.FromResult(EmailSendResult.Unconfigured("Email provider not configured; the email was only logged."));
     }
 }
 
@@ -31,8 +46,8 @@ public sealed class StubEmailSender(ILogger<StubEmailSender> logger) : IEmailSen
 /// OneSignal email channel (<c>POST https://api.onesignal.com/notifications</c>,
 /// <c>target_channel: "email"</c>, <c>email_to</c>). Credentials come from
 /// <c>Email:OneSignal:AppId/ApiKey</c>, falling back to the push credentials
-/// <c>Notification:OneSignal:*</c> (same OneSignal app). Best-effort: failures
-/// are logged (without recipient or body — bodies carry tokens), never thrown.
+/// <c>Notification:OneSignal:*</c> (same OneSignal app). Failures are logged
+/// (without recipient or body — bodies carry tokens) and returned, never thrown.
 /// </summary>
 public sealed partial class OneSignalEmailSender(
     IHttpClientFactory httpClientFactory,
@@ -56,14 +71,14 @@ public sealed partial class OneSignalEmailSender(
         return $"<div style=\"font-family:sans-serif;font-size:14px;line-height:1.5\">{html.Replace("\n", "<br>")}</div>";
     }
 
-    public async Task SendAsync(string to, string subject, string body, bool transactional = false)
+    public async Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
     {
         var appId = config["Email:OneSignal:AppId"] ?? config["Notification:OneSignal:AppId"];
         var apiKey = config["Email:OneSignal:ApiKey"] ?? config["Notification:OneSignal:ApiKey"];
         if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(apiKey))
         {
             logger.LogWarning("OneSignal email not configured (Email:OneSignal:AppId / :ApiKey); skipping email.");
-            return;
+            return EmailSendResult.Unconfigured("Email provider credentials are not configured.");
         }
 
         var payload = new
@@ -93,23 +108,26 @@ public sealed partial class OneSignalEmailSender(
             if (!res.IsSuccessStatusCode)
             {
                 logger.LogWarning("OneSignal email send failed: {Status} {Body}", (int)res.StatusCode, resBody);
-                return;
+                return EmailSendResult.Fail($"Email provider rejected the message (HTTP {(int)res.StatusCode}){ErrorSuffix(resBody)}");
             }
             // 200 without a message "id" = valid request but nothing was sent (e.g. email channel not set up).
-            if (!HasMessageId(resBody))
+            var messageId = MessageId(resBody);
+            if (messageId is null)
             {
                 logger.LogWarning("OneSignal email not sent: {Body}", resBody);
-                return;
+                return EmailSendResult.Fail($"Email provider did not send the message{ErrorSuffix(resBody)}");
             }
             logger.LogInformation("OneSignal email accepted (subject={Subject}): {Body}", subject, resBody);
+            return EmailSendResult.Accepted(messageId);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "OneSignal email send failed (best-effort, suppressed).");
+            logger.LogWarning(ex, "OneSignal email send failed.");
+            return EmailSendResult.Fail("Email provider unreachable.");
         }
     }
 
-    private static bool HasMessageId(string body)
+    private static string? MessageId(string body)
     {
         try
         {
@@ -117,9 +135,28 @@ public sealed partial class OneSignalEmailSender(
             var root = doc.RootElement;
             return root.ValueKind == JsonValueKind.Object && !root.TryGetProperty("errors", out _)
                 && root.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
-                && id.GetString()!.Length > 0;
+                && id.GetString()!.Length > 0 ? id.GetString() : null;
         }
-        catch (JsonException) { return false; }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>": first provider error" (bounded), or empty when the body has none.</summary>
+    private static string ErrorSuffix(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("errors", out var errors)) return ".";
+            var first = errors.ValueKind switch
+            {
+                JsonValueKind.Array => errors.EnumerateArray().Select(e => e.ToString()).FirstOrDefault(),
+                JsonValueKind.Object => errors.EnumerateObject().Select(p => p.Name).FirstOrDefault(),
+                _ => errors.ToString()
+            };
+            return string.IsNullOrWhiteSpace(first) ? "." : $": {first[..Math.Min(160, first.Length)]}";
+        }
+        catch (JsonException) { return "."; }
     }
 
     private static string? NullIfBlank(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;

@@ -620,7 +620,13 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.Property<Guid>("InvitedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TokenHash");
 
                     b.HasIndex("GroupId", "Email")
                         .IsUnique();

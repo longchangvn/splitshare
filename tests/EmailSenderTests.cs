@@ -42,10 +42,12 @@ public sealed class EmailSenderTests
     [Fact]
     public async Task Sends_Email_Channel_Payload()
     {
-        var h = new CaptureHandler(() => new HttpResponseMessage(HttpStatusCode.OK));
+        var h = new CaptureHandler(() => Json(HttpStatusCode.OK, "{\"id\":\"msg-123\"}"));
         var cfg = new Dictionary<string, string?>(Base) { ["Email:FromName"] = "SplitShare" };
-        await Sender(h, cfg).SendAsync("a@x.com", "Reset", "Go: https://app.test/reset/abc?x=1&y=2\nbye <3", transactional: true);
+        var result = await Sender(h, cfg).SendAsync("a@x.com", "Reset", "Go: https://app.test/reset/abc?x=1&y=2\nbye <3", transactional: true);
 
+        Assert.Equal(EmailSendResult.Accepted("msg-123"), result);
+        Assert.True(result.Sent);
         var (url, auth, body) = Assert.Single(h.Requests);
         Assert.Equal("https://api.onesignal.com/notifications?c=email", url);
         Assert.Equal("Key key-1", auth);
@@ -79,18 +81,47 @@ public sealed class EmailSenderTests
         Assert.False(j.TryGetProperty("include_unsubscribed", out _));
     }
 
+    private static HttpResponseMessage Json(HttpStatusCode code, string body) =>
+        new(code) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+
     [Fact]
-    public async Task Failures_Are_Suppressed_And_Missing_Config_Skips()
+    public async Task Failures_Are_Returned_Not_Thrown_And_Missing_Config_Skips()
     {
         var failing = new CaptureHandler(() => throw new HttpRequestException("down"));
-        await Sender(failing, Base).SendAsync("a@x.com", "s", "b"); // no throw
+        var down = await Sender(failing, Base).SendAsync("a@x.com", "s", "b"); // no throw
+        Assert.Equal(EmailSendStatus.Failed, down.Status);
+        Assert.Equal("Email provider unreachable.", down.Error);
 
-        var error = new CaptureHandler(() => new HttpResponseMessage(HttpStatusCode.BadRequest));
-        await Sender(error, Base).SendAsync("a@x.com", "s", "b"); // no throw
+        var error = new CaptureHandler(() => Json(HttpStatusCode.BadRequest, "{\"errors\":[\"Invalid email\"]}"));
+        var rejected = await Sender(error, Base).SendAsync("a@x.com", "s", "b"); // no throw
+        Assert.Equal(EmailSendStatus.Failed, rejected.Status);
+        Assert.Equal("Email provider rejected the message (HTTP 400): Invalid email", rejected.Error);
 
         var unconfigured = new CaptureHandler(() => new HttpResponseMessage(HttpStatusCode.OK));
-        await Sender(unconfigured, new() { ["Email:Provider"] = "onesignal" }).SendAsync("a@x.com", "s", "b");
+        var skipped = await Sender(unconfigured, new() { ["Email:Provider"] = "onesignal" }).SendAsync("a@x.com", "s", "b");
         Assert.Empty(unconfigured.Requests);
+        Assert.Equal(EmailSendStatus.NotConfigured, skipped.Status);
+        Assert.False(skipped.Sent);
+    }
+
+    [Theory]
+    [InlineData("")] // empty 200
+    [InlineData("{\"id\":\"\"}")]
+    [InlineData("{\"id\":\"x\",\"errors\":{\"invalid_email_tokens\":[\"a@x.com\"]}}")]
+    [InlineData("not json")]
+    public async Task Ok_Without_Message_Id_Is_Not_Sent(string body)
+    {
+        var h = new CaptureHandler(() => Json(HttpStatusCode.OK, body));
+        var r = await Sender(h, Base).SendAsync("a@x.com", "s", "b");
+        Assert.Equal(EmailSendStatus.Failed, r.Status);
+        Assert.StartsWith("Email provider did not send the message", r.Error);
+    }
+
+    [Fact]
+    public async Task Stub_Never_Claims_Sent()
+    {
+        var r = await new StubEmailSender(NullLogger<StubEmailSender>.Instance).SendAsync("a@x.com", "s", "b");
+        Assert.Equal(EmailSendStatus.NotConfigured, r.Status);
     }
 
     [Fact]

@@ -10,6 +10,7 @@ import { api, setTokens } from '../api/client';
 import { Button, Field, Input, DevApiUrlCard } from '../ui';
 import { useT } from '../i18n';
 import { AuthLayout, AccountErr, PasswordInput, a } from '../components/account/AccountKit';
+import { nativeGoogleAvailable, useGoogleIdToken } from '../auth/google';
 
 // Same client-side rules as before / server (username 3–30 a-z0-9_.-, pw 8+ letter+digit, name 1–50).
 const USER_RE = /^[a-z0-9_.-]{3,30}$/;
@@ -25,19 +26,54 @@ function OrDivider() {
   );
 }
 
-function GoogleButton({ navigation, intent = 'signin' }) {
+function NativeGoogleButton({ label, loginHint, onIdToken }) {
+  const [busy, setBusy] = useState(false);
+  const [e, setE] = useState(null);
+  const { ready, start } = useGoogleIdToken({
+    loginHint,
+    onIdToken: async (tok) => {
+      try { await onIdToken(tok); } catch (err) { setE(err); } finally { setBusy(false); }
+    },
+    onError: (msg) => { setBusy(false); if (msg) setE(localErr(msg)); },
+  });
+  const onPress = () => {
+    if (busy) return;
+    setE(null);
+    setBusy(true);
+    start().catch((err) => { setBusy(false); setE(localErr(err?.message || String(err))); });
+  };
+  return (
+    <>
+      <Button style={{ marginTop: 12 }} variant="ghost" icon="G" title={label} busy={busy} disabled={!ready} onPress={onPress} />
+      <AccountErr e={e} />
+    </>
+  );
+}
+
+/**
+ * Google sign-in: native ID-token flow when this build has the platform client ID
+ * (see auth/google.js); otherwise the paste-token fallback (GoogleToken screen).
+ * onIdToken overrides the default exchange (useAuth().google).
+ */
+export function GoogleSignInButton({ navigation, intent = 'signin', loginHint, onIdToken }) {
   const t = useT();
+  const { google } = useAuth();
   const label = t(intent === 'signup' ? 'auth.signUpGoogle' : 'auth.signInGoogle');
-  // Native Google ID-token flow is not wired yet (needs expo-auth-session + client id);
-  // keep the paste-token fallback that hands the token to /auth/google.
+  if (nativeGoogleAvailable()) {
+    return <NativeGoogleButton label={label} loginHint={loginHint} onIdToken={onIdToken || google} />;
+  }
   const onPress = () => Alert.alert(t('m.account.googleTitle'), t('m.account.googleBody'), [
     { text: t('common.cancel'), style: 'cancel' },
     { text: t('m.account.googlePaste'), onPress: () => navigation.navigate('GoogleToken') },
   ]);
+  return <Button style={{ marginTop: 12 }} variant="ghost" icon="G" title={label} onPress={onPress} />;
+}
+
+function GoogleButton({ navigation, intent = 'signin' }) {
   return (
     <>
       <OrDivider />
-      <Button style={{ marginTop: 12 }} variant="ghost" icon="G" title={label} onPress={onPress} />
+      <GoogleSignInButton navigation={navigation} intent={intent} />
     </>
   );
 }

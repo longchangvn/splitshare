@@ -52,6 +52,45 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         catch { return false; }
     }
 
+    /// <summary>Unique username derived from the address's local part (a-z 0-9 _ . -, 3-30 chars).</summary>
+    private async Task<string> DefaultUsernameAsync(string emailAddr)
+    {
+        var baseName = new string(emailAddr.Split('@')[0].ToLowerInvariant()
+            .Where(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '-').ToArray());
+        if (baseName.Length < 3) baseName = $"user{baseName}";
+        baseName = baseName[..Math.Min(24, baseName.Length)];
+        var username = baseName;
+        for (var i = 1; await db.Users.AnyAsync(u => u.Username == username); i++)
+            username = $"{baseName}-{i}";
+        return username;
+    }
+
+    private static string DefaultDisplayName(string emailAddr)
+    {
+        var local = emailAddr.Split('@')[0];
+        return local[..Math.Min(50, local.Length)];
+    }
+
+    /// <summary>
+    /// Adds (unsaved) the account for an emailed-invite acceptance: default username and
+    /// display name from the address, email verified — the link was delivered to it.
+    /// The caller saves it together with the group membership.
+    /// </summary>
+    public async Task<User> StageInvitedUserAsync(string emailAddr, string password)
+    {
+        emailAddr = emailAddr.Trim().ToLowerInvariant();
+        var user = new User
+        {
+            Username = await DefaultUsernameAsync(emailAddr), Email = emailAddr,
+            DisplayName = DefaultDisplayName(emailAddr), PasswordHash = PasswordHasher.Hash(password),
+            EmailVerifiedAt = DateTime.UtcNow
+        };
+        db.Users.Add(user);
+        return user;
+    }
+
+    public async Task<AuthResult> SignInAsync(User user) => new(true, null, null, user, await IssueTokensAsync(user));
+
     private async Task<TokenPair> IssueTokensAsync(User user)
     {
         var refresh = TokenService.NewOpaqueToken();
@@ -137,15 +176,9 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
             ?? await db.Users.FirstOrDefaultAsync(u => u.Email == gEmail);
         if (user is null)
         {
-            var baseName = new string(g.Email.Split('@')[0].ToLowerInvariant()
-                .Where(c => char.IsLetterOrDigit(c) || c is '_' or '.' or '-').ToArray());
-            if (baseName.Length < 3) baseName = $"user{baseName}";
-            var username = baseName[..Math.Min(24, baseName.Length)];
-            for (var i = 1; await db.Users.AnyAsync(u => u.Username == username); i++)
-                username = $"{baseName[..Math.Min(24, baseName.Length)]}-{i}";
             user = new User
             {
-                Username = username, Email = gEmail, DisplayName = gEmail.Split('@')[0],
+                Username = await DefaultUsernameAsync(gEmail), Email = gEmail, DisplayName = DefaultDisplayName(gEmail),
                 GoogleSub = g.Sub, EmailVerifiedAt = DateTime.UtcNow
             };
             db.Users.Add(user);

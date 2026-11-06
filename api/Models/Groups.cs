@@ -9,6 +9,8 @@ public sealed class PendingInvite
     public Guid InvitedBy { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ConsumedAt { get; set; }
+    /// <summary>SHA-256 of the single-use token in the emailed /invite/{token} link; rotated on resend.</summary>
+    public string? TokenHash { get; set; }
 }
 
 /// <summary>Removal record for the removed-member ledger snapshot rule (task 7.1).</summary>

@@ -26,7 +26,7 @@ function AuthBrand() {
   );
 }
 
-function AuthLayout({ children }) {
+export function AuthLayout({ children }) {
   return (
     <div className="auth-page">
       <div className="auth-bg" aria-hidden>
@@ -46,7 +46,7 @@ function AuthLayout({ children }) {
   );
 }
 
-function AuthSubmit({ children, loading, icon = 'enter', ...props }) {
+export function AuthSubmit({ children, loading, icon = 'enter', ...props }) {
   return (
     <Button
       className="wizard-primary auth-submit"
@@ -237,7 +237,7 @@ function GoogleGIcon() {
 //     to popup-block, no backgrounded tab waiting on timers.
 // Either way googleReturn.js hands the token back from the document Google
 // returns to, rather than this page polling for it.
-function GoogleBtn({ next, intent = 'signin' }) {
+export function GoogleBtn({ next, intent = 'signin', loginHint }) {
   const t = useT();
   const { setUser } = useAuth();
   const nav = useNavigate();
@@ -371,6 +371,7 @@ function GoogleBtn({ next, intent = 'signin' }) {
         nonce,
         state: next || '',
         prompt: 'select_account',
+        ...(loginHint ? { login_hint: loginHint } : {}),
       });
       url = `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
     } catch (err) {

@@ -15,6 +15,8 @@ import { RowMenu } from '../components/Mobile.jsx';
 import { ExpenseForm, PaymentForm } from '../components/Forms.jsx';
 import { ScanReceipts } from '../components/ScanReceipts.jsx';
 import { AddExpenseFab } from '../components/QuickAddExpense.jsx';
+import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
+import { inviteRows } from '../inviteResults.js';
 import { categoryLabel, categoryLabelForKey, categorySelectData } from '../categories.js';
 import { StatementPanel } from './Statement.jsx';
 import { ReportPanel } from './Report.jsx';
@@ -118,6 +120,7 @@ export function GroupDetail() {
   const [inviteTab, setInviteTab] = useState('email');
   const [inviteEmails, setInviteEmails] = useState('');
   const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteResult, setInviteResult] = useState([]);
   const [inviteLinkLive, setInviteLinkLive] = useState('');
   const [rotateBusy, setRotateBusy] = useState(false);
   const [contactQ, setContactQ] = useState('');
@@ -464,14 +467,13 @@ export function GroupDetail() {
     const list = inviteEmails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
     if (list.length === 0) { setE({ message: t('errors.needEmail') }); return; }
     setInviteBusy(true);
+    setInviteResult([]);
     try {
-      const r = await api.post(`/api/v1/groups/${id}/invites`, { emails: list });
-      notifications.show({
-        title: t('invite.sent'),
-        message: `added: ${(r.added || []).join(', ') || '—'} · pending: ${(r.pending || []).join(', ') || '—'}`,
-        color: 'teal',
-      });
-      setInviteEmails('');
+      const rows = inviteRows(await api.post(`/api/v1/groups/${id}/invites`, { emails: list }));
+      setInviteResult(rows);
+      notifyInviteResults(t, rows);
+      // Keep failed addresses in the box so "Send invites" retries just those.
+      setInviteEmails(rows.filter((r) => !r.emailSent).map((r) => r.email).join(', '));
       setE(null);
       load();
     } catch (err) { setE(err); } finally { setInviteBusy(false); }
@@ -1885,6 +1887,7 @@ export function GroupDetail() {
         onClose={() => {
           setInviteOpen(false);
           setInviteEmails('');
+          setInviteResult([]);
           setContactQ('');
           setContacts([]);
           setE(null);
@@ -1934,6 +1937,7 @@ export function GroupDetail() {
                   {t('invite.sendInvites')}
                 </Button>
               </form>
+              <InviteResults rows={inviteResult} />
             </Tabs.Panel>
 
             <Tabs.Panel value="contacts">
