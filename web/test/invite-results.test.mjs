@@ -63,7 +63,7 @@ test('row messages explain failures', () => {
 
 test('every invite/invitation key used by the UI exists in every locale', async () => {
   const sources = await Promise.all([
-    '../src/inviteResults.js', '../src/components/InviteResults.jsx', '../src/pages/InvitationPage.jsx',
+    '../src/inviteResults.js', '../src/components/InviteResults.jsx', '../src/pages/InvitationPage.jsx', '../src/components/InvitationBanner.jsx',
   ].map((p) => readFile(new URL(p, import.meta.url), 'utf8')));
   const keys = new Set(sources.join('\n').match(/'(invite|invitation)\.[A-Za-z]+'/g).map((k) => k.slice(1, -1)));
   assert.ok(keys.size > 20);

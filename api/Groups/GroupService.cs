@@ -19,7 +19,7 @@ public sealed record InviteOutcome(string Email, string Status, bool EmailSent, 
 public sealed record InvitesResult(List<string> Added, List<string> Pending, List<InviteOutcome>? Results = null);
 public sealed record InvitePreview(string Email, string GroupName, string Currency, int MemberCount,
     string InvitedBy, bool IsGmail, bool AccountExists);
-public sealed record InviteAccepted(User User, Guid GroupId, List<Guid> AutoJoinedGroups);
+public sealed record InviteAccepted(User User, Guid GroupId);
 public sealed record JoinedGroup(Guid GroupId, bool AlreadyMember);
 public sealed record NewInviteLink(string InviteLink);
 public sealed record StatusResult(string Status);
@@ -168,22 +168,12 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
             ?? "A friend";
         foreach (var em in normalized)
         {
-            var user = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
-            if (user is not null)
-            {
-                // V1 simplification: registered users are added directly + notified
-                // (spec Accept/Decline flow deferred; see report).
-                var r = await AddMembersAsync(actorId, groupId, [user.Id]);
-                if (!r.Ok) return r;
-                added.Add(em);
-                outbox.Add((em, "added", $"{inviter} added you to {g.Name} on SplitShare",
-                    $"Hi {user.DisplayName},\n\n{inviter} added you to the group \"{g.Name}\" on SplitShare.\n" +
-                    $"Open it here: {BaseUrl}/groups/{g.Id}"));
-                continue;
-            }
             if (await db.GroupMembers.CountAsync(m => m.GroupId == groupId) + 1 > MaxMembers)
                 return new(false, "GROUP_FULL", $"Group is full (max {MaxMembers}).");
-            // Re-inviting resends: a fresh single-use token replaces the old link and restarts the 30 days.
+            // Nobody is added here — registered or not. Membership happens only when the
+            // invitee confirms by opening their personal /invite/{token} link. Re-inviting
+            // resends: a fresh token replaces the old link and restarts the 30 days.
+            var user = await db.Users.FirstOrDefaultAsync(u => u.Email == em);
             var raw = TokenService.NewOpaqueToken();
             var row = await db.PendingInvites.FirstOrDefaultAsync(p => p.GroupId == groupId && p.Email == em);
             if (row is null) db.PendingInvites.Add(row = new PendingInvite { GroupId = groupId, Email = em });
@@ -192,13 +182,16 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
             row.ConsumedAt = null;
             row.TokenHash = TokenService.HashToken(raw);
             pending.Add(em);
+            var how = user is not null
+                ? "Open the link and log in to join the group."
+                : IsGmail(em)
+                    ? "Open the link and continue with your Google account to join the group."
+                    : "Open the link and choose a password to join the group.";
             outbox.Add((em, "invited", $"{inviter} invited you to {g.Name} on SplitShare",
-                $"Hi,\n\n{inviter} invited you to split expenses in \"{g.Name}\" on SplitShare.\n" +
+                $"Hi{(user is not null ? $" {user.DisplayName}" : "")},\n\n" +
+                $"{inviter} invited you to split expenses in \"{g.Name}\" on SplitShare.\n" +
                 $"Accept the invitation: {InvitationLink(BaseUrl, raw)}\n\n" +
-                (IsGmail(em)
-                    ? "Continue with your Google account and you'll join the group right away."
-                    : "Choose a password and you'll join the group right away.") +
-                $" The link works for {InviteDays} days."));
+                $"{how} You're not added until you accept. The link works for {InviteDays} days."));
         }
         await db.SaveChangesAsync();
         // Only after the invite rows are committed. Each address reports whether the
@@ -270,9 +263,9 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
 
     /// <summary>
     /// Clicking the emailed link: creates the invitee's account with default fields
-    /// (username/display name from the address, email verified by the link), joins the
-    /// group and consumes the invite — all in one save — then auto-joins any other
-    /// pending invites for the address.
+    /// (username/display name from the address, email verified by the link), joins this
+    /// group and consumes the invite — all in one save. Other groups' invites stay
+    /// pending until their own links are opened.
     /// </summary>
     public async Task<GroupOp> AcceptInvitationAsync(string? token, string? password, AuthService auth)
     {
@@ -292,8 +285,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
             // Lost a race on the unique email/username: the other request created the account.
             return new(false, "ACCOUNT_EXISTS", "An account with this email already exists. Log in to join.");
         }
-        var others = await ConsumePendingInvitesAsync(inv.Email, user.Id);
-        return new(true, null, null, new InviteAccepted(user, g.Id, others));
+        return new(true, null, null, new InviteAccepted(user, g.Id));
     }
 
     /// <summary>Signed-in join through an emailed link (e.g. after Google sign-in). Like the
@@ -325,9 +317,8 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         var user = await db.Users.FindAsync(userId);
         if (user is null) return new(false, "UNAUTH", "Not authenticated.");
         // Invite-token possession is the authorization: the link never expires
-        // (only a deliberate owner rotate kills it), and register-time auto-join
-        // of email invites has no verification gate either — so joining via the
-        // link must not require a verified email (it is undeliverable in prod).
+        // (only a deliberate owner rotate kills it) — so joining via the link must
+        // not require a verified email (it is undeliverable in prod).
         if (await db.GroupMembers.FindAsync(g.Id, userId) is not null)
             return new(true, null, null, new JoinedGroup(g.Id, true));
         if (await db.GroupMembers.CountAsync(m => m.GroupId == g.Id) >= MaxMembers)
@@ -342,35 +333,6 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         return new(true, null, null, new JoinedGroup(g.Id, false));
     }
 
-    /// <summary>Auto-join pending email invites after registration (task 4.2).</summary>
-    public async Task<List<Guid>> ConsumePendingInvitesAsync(string emailAddr, Guid userId)
-    {
-        if (await db.Users.FindAsync(userId) is null) return [];
-        var em = emailAddr.Trim().ToLowerInvariant();
-        var cutoff = DateTime.UtcNow.AddDays(-30);
-        var rows = await db.PendingInvites
-            .Where(p => p.Email == em && p.ConsumedAt == null && p.CreatedAt >= cutoff)
-            .ToListAsync();
-        var joined = new List<Guid>();
-        foreach (var p in rows)
-        {
-            var g = await db.Groups.FindAsync(p.GroupId);
-            if (g is null || g.DeletedAt is not null) continue;
-            if (g.Status != "opening") continue;
-            if (await db.GroupMembers.FindAsync(g.Id, userId) is not null)
-            {
-                p.ConsumedAt = DateTime.UtcNow;
-                continue;
-            }
-            if (await db.GroupMembers.CountAsync(m => m.GroupId == g.Id) >= MaxMembers) continue;
-            if (await db.GroupMembers.CountAsync(m => m.UserId == userId) >= MaxGroupsPerUser) continue;
-            db.GroupMembers.Add(new GroupMember { GroupId = g.Id, UserId = userId });
-            p.ConsumedAt = DateTime.UtcNow;
-            joined.Add(g.Id);
-        }
-        await db.SaveChangesAsync();
-        return joined;
-    }
 
     public async Task<GroupOp> RotateInviteAsync(Guid actorId, Guid groupId)
     {

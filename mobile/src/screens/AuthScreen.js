@@ -11,6 +11,7 @@ import { Button, Field, Input, DevApiUrlCard } from '../ui';
 import { useT } from '../i18n';
 import { AuthLayout, AccountErr, PasswordInput, a } from '../components/account/AccountKit';
 import { nativeGoogleAvailable, useGoogleIdToken } from '../auth/google';
+import { InvitationBanner } from '../components/account/InvitationBanner';
 
 // Same client-side rules as before / server (username 3–30 a-z0-9_.-, pw 8+ letter+digit, name 1–50).
 const USER_RE = /^[a-z0-9_.-]{3,30}$/;
@@ -78,7 +79,8 @@ function GoogleButton({ navigation, intent = 'signin' }) {
   );
 }
 
-export default function AuthScreen({ navigation }) {
+export default function AuthScreen({ navigation, route }) {
+  const invitation = route?.params?.invitation;
   const t = useT();
   const { login, loginWithStored } = useAuth();
   const [id, setId] = useState('');
@@ -130,6 +132,7 @@ export default function AuthScreen({ navigation }) {
       title={t('auth.welcomeBack')}
       desc={t('auth.loginContinue')}
       footer={<DevApiUrlCard />}
+      banner={invitation ? <InvitationBanner {...invitation} /> : null}
     >
       <Field label={t('auth.usernameOrEmail')}>
         <Input
@@ -160,7 +163,8 @@ export default function AuthScreen({ navigation }) {
   );
 }
 
-export function RegisterScreen({ navigation }) {
+export function RegisterScreen({ navigation, route }) {
+  const invitation = route?.params?.invitation;
   const t = useT();
   const { register } = useAuth();
   const [f, setF] = useState({ username: '', email: '', display_name: '', password: '', phone: '' });
@@ -197,7 +201,12 @@ export function RegisterScreen({ navigation }) {
   };
 
   return (
-    <AuthLayout compact title={t('auth.createAccount')} desc={t('auth.startSplitting')}>
+    <AuthLayout
+      compact
+      title={t('auth.createAccount')}
+      desc={t('auth.startSplitting')}
+      banner={invitation ? <InvitationBanner {...invitation} /> : null}
+    >
       <Field label={t('auth.username')} hint={t('m.account.usernameRule')}>
         <Input value={f.username} onChangeText={set('username')} autoCapitalize="none" autoCorrect={false} autoComplete="username-new" maxLength={30} accessibilityLabel={t('auth.username')} />
       </Field>

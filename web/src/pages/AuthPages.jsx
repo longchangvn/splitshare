@@ -7,6 +7,7 @@ import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
 import { takePending, PING, makeNonce, REDIRECT_FLOW_KEY } from '../googleReturn.js';
 import { BrandMark } from '../components/Shell.jsx';
+import { InvitationBanner } from '../components/InvitationBanner.jsx';
 import { useT } from '../prefs.jsx';
 
 // Sanitized in-app destination from ?next= (same-origin path only).
@@ -100,6 +101,7 @@ export function Login() {
   const nav = useNavigate();
   const location = useLocation();
   const next = safeNext(location.search);
+  const invitation = location.state?.invitation;
   const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [e, setE] = useState(null);
@@ -113,6 +115,7 @@ export function Login() {
   return (
     <AuthLayout>
       <Stack gap="md">
+        {invitation && <InvitationBanner {...invitation} />}
         <div className="auth-heading">
           <Title order={3} className="auth-title">{t('auth.welcomeBack')}</Title>
           <Text size="sm" c="dimmed" className="auth-desc">{t('auth.loginContinue')}</Text>
@@ -143,7 +146,7 @@ export function Login() {
         <Err e={e} />
         <GoogleBtn next={next} intent="signin" />
         <Text ta="center" size="sm" className="auth-links">
-          <Anchor component={Link} to={withNext('/register', next)}>{t('auth.register')}</Anchor>
+          <Anchor component={Link} to={withNext('/register', next)} state={location.state}>{t('auth.register')}</Anchor>
           <span aria-hidden>·</span>
           <Anchor component={Link} to="/forgot">{t('auth.forgotPassword')}</Anchor>
         </Text>
@@ -158,6 +161,7 @@ export function Register() {
   const nav = useNavigate();
   const location = useLocation();
   const next = safeNext(location.search);
+  const invitation = location.state?.invitation;
   const [f, setF] = useState({ username: '', email: '', display_name: '', password: '' });
   const [e, setE] = useState(null);
   const [done, setDone] = useState(null);
@@ -176,6 +180,7 @@ export function Register() {
   return (
     <AuthLayout>
       <Stack gap="md">
+        {invitation && <InvitationBanner {...invitation} />}
         <div className="auth-heading">
           <Title order={3} className="auth-title">{t('auth.createAccount')}</Title>
           <Text size="sm" c="dimmed" className="auth-desc">{t('auth.startSplitting')}</Text>
@@ -195,7 +200,7 @@ export function Register() {
         )}
         <GoogleBtn next={next} intent="signup" />
         <Text ta="center" size="sm" className="auth-links">
-          <Anchor component={Link} to={withNext('/login', next)}>{t('auth.backToLogin')}</Anchor>
+          <Anchor component={Link} to={withNext('/login', next)} state={location.state}>{t('auth.backToLogin')}</Anchor>
         </Text>
       </Stack>
     </AuthLayout>

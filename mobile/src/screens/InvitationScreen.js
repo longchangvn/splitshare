@@ -5,13 +5,14 @@
 //   step 'login'     existing account (small link on the choice screen)
 // Signed in → POST /invitations/:token/join and open the group.
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { api, setTokens } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
 import { Button, Field, Input, Screen, toast } from '../ui';
 import { AuthLayout, AccountErr, PasswordInput, a } from '../components/account/AccountKit';
+import { InvitationBanner } from '../components/account/InvitationBanner';
 import { GoogleSignInButton, validPassword } from './AuthScreen';
 
 const LINK_ERRORS = {
@@ -19,24 +20,6 @@ const LINK_ERRORS = {
   INVITE_EXPIRED: 'invitation.expired',
   INVITE_USED: 'invitation.used',
 };
-
-/** Always-visible marker that these screens come from an invitation. */
-function InvitationBanner({ info }) {
-  const t = useT();
-  return (
-    <View style={s.banner} accessible accessibilityRole="summary"
-      accessibilityLabel={`${t('invitation.badge')}. ${t('invitation.banner', { inviter: info.invited_by, group: info.group_name })}`}>
-      <View style={s.icon}><Text style={s.iconT}>✉</Text></View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={s.badge}>{t('invitation.badge')}</Text>
-        <Text style={[type.h3, { marginTop: 4 }]}>{t('invitation.banner', { inviter: info.invited_by, group: info.group_name })}</Text>
-        <Text style={type.small} numberOfLines={2}>
-          {t('invitation.members', { count: info.member_count })} · {t('invitation.sentTo', { email: info.email })}
-        </Text>
-      </View>
-    </View>
-  );
-}
 
 export default function InvitationScreen({ route, navigation }) {
   const { token, step, info: passedInfo } = route.params || {};
@@ -235,21 +218,10 @@ export default function InvitationScreen({ route, navigation }) {
 
   return (
     <AuthLayout compact title={info && !linkError ? undefined : t('invitation.heading')}>
-      {info && !linkError ? <InvitationBanner info={info} /> : null}
+      {info && !linkError ? (
+        <InvitationBanner inviter={info.invited_by} group={info.group_name} memberCount={info.member_count} email={info.email} />
+      ) : null}
       {body}
     </AuthLayout>
   );
 }
-
-const s = StyleSheet.create({
-  banner: {
-    flexDirection: 'row', gap: 12, alignItems: 'flex-start', padding: 14, borderRadius: 16,
-    backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.accentLight,
-  },
-  icon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  iconT: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  badge: {
-    alignSelf: 'flex-start', overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999,
-    backgroundColor: '#fff', color: colors.primaryText, fontSize: 11, fontWeight: '800', letterSpacing: 0.3,
-  },
-});

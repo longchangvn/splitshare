@@ -52,7 +52,7 @@ public sealed class InvitationTests
     [Fact]
     public async Task Invite_Reports_Per_Email_Send_Result()
     {
-        var (_, auth, groups, mail) = Setup();
+        var (db, auth, groups, mail) = Setup();
         var owner = await Reg(auth, "owner1");
         var member = await Reg(auth, "member1");
         var gid = await NewGroup(groups, owner.Id);
@@ -66,11 +66,12 @@ public sealed class InvitationTests
 
         Assert.True(r.Ok);
         var data = (InvitesResult)r.Data!;
-        Assert.Equal(["member1@x.io"], data.Added);
-        Assert.Equal(["new@x.io", "bounce@x.io"], data.Pending);
+        Assert.Empty(data.Added); // registered users are invited too, never added up front
+        Assert.Equal(["member1@x.io", "new@x.io", "bounce@x.io"], data.Pending);
+        Assert.Null(await db.GroupMembers.FindAsync(gid, member.Id));
         var results = data.Results!;
         Assert.Equal(3, results.Count); // case-insensitive de-dup
-        Assert.Equal(new InviteOutcome("member1@x.io", "added", true, "sent", null), results[0]);
+        Assert.Equal(new InviteOutcome("member1@x.io", "invited", true, "sent", null), results[0]);
         Assert.Equal(new InviteOutcome("new@x.io", "invited", true, "sent", null), results[1]);
         Assert.Equal("failed", results[2].EmailStatus);
         Assert.False(results[2].EmailSent);
@@ -147,12 +148,12 @@ public sealed class InvitationTests
 
         var other = (InvitePreview)(await groups.InvitationPreviewAsync(TokenFor(mail, "pal@x.io"))).Data!;
         Assert.False(other.IsGmail);
-        Assert.Contains("Choose a password", mail.Sent.Single(m => m.To == "pal@x.io").Body);
+        Assert.Contains("choose a password", mail.Sent.Single(m => m.To == "pal@x.io").Body);
         Assert.Equal("INVITE_INVALID", (await groups.InvitationPreviewAsync("nope")).ErrorCode);
     }
 
     [Fact]
-    public async Task Accept_Creates_Default_User_Joins_Group_And_Other_Invites()
+    public async Task Accept_Creates_Default_User_Joins_Only_This_Group()
     {
         var (db, auth, groups, mail) = Setup();
         var owner = await Reg(auth, "owner6");
@@ -167,15 +168,15 @@ public sealed class InvitationTests
         Assert.True(r.Ok, r.Error);
         var a = (InviteAccepted)r.Data!;
         Assert.Equal(gid, a.GroupId);
-        Assert.Equal([other], a.AutoJoinedGroups);
         var u = await db.Users.SingleAsync(x => x.Email == "jane.doe@x.io");
         Assert.Equal("jane.doe", u.Username);
         Assert.Equal("jane.doe", u.DisplayName);
         Assert.NotNull(u.EmailVerifiedAt);
         Assert.Equal("member", await groups.RoleAsync(gid, u.Id));
-        Assert.Equal("member", await groups.RoleAsync(other, u.Id));
+        // The other group's invite waits for its own link.
+        Assert.Null(await groups.RoleAsync(other, u.Id));
+        Assert.Null((await db.PendingInvites.SingleAsync(p => p.GroupId == other)).ConsumedAt);
         Assert.True((await auth.LoginAsync("jane.doe@x.io", "secret123")).Ok);
-        Assert.True(await db.PendingInvites.AllAsync(p => p.ConsumedAt != null));
 
         Assert.Equal("INVITE_USED", (await groups.AcceptInvitationAsync(token, "secret123", auth)).ErrorCode);
         Assert.Equal("INVITE_USED", (await groups.InvitationPreviewAsync(token)).ErrorCode);
@@ -233,7 +234,7 @@ public sealed class InvitationTests
     }
 
     [Fact]
-    public async Task Google_Signin_Then_Join_Is_Idempotent_And_Token_Is_Single_Use()
+    public async Task Google_Signin_Joins_Only_Through_The_Link_Once()
     {
         var (db, auth, groups, mail) = Setup();
         var owner = await Reg(auth, "owner10");
@@ -241,15 +242,16 @@ public sealed class InvitationTests
         await groups.InviteEmailsAsync(owner.Id, gid, ["pat@gmail.com"]);
         var token = TokenFor(mail, "pat@gmail.com");
 
-        // Google sign-in creates the account with default fields; pending invites auto-join.
+        // Google sign-in creates the account with default fields but joins nothing by itself.
         var g = await auth.GoogleAsync(new GoogleIdentity("sub-pat", "Pat@gmail.com", true));
         Assert.Equal("pat", g.User!.Username);
-        Assert.Equal([gid], await groups.ConsumePendingInvitesAsync(g.User.Email, g.User.Id));
+        Assert.Null(await groups.RoleAsync(gid, g.User.Id));
 
-        // The landing page then joins through the link: already a member, still OK.
+        // The invitation page then joins through the link.
         var join = (JoinedGroup)(await groups.JoinInvitationAsync(g.User.Id, token)).Data!;
-        Assert.True(join.AlreadyMember);
+        Assert.False(join.AlreadyMember);
         Assert.Equal(gid, join.GroupId);
+        Assert.True(((JoinedGroup)(await groups.JoinInvitationAsync(g.User.Id, token)).Data!).AlreadyMember);
 
         var stranger = await Reg(auth, "stranger");
         Assert.Equal("INVITE_USED", (await groups.JoinInvitationAsync(stranger.Id, token)).ErrorCode);
@@ -272,6 +274,30 @@ public sealed class InvitationTests
         Assert.False(((JoinedGroup)r.Data!).AlreadyMember);
         Assert.Equal("member", await groups.RoleAsync(gid, personal.Id));
         Assert.NotNull((await db.PendingInvites.SingleAsync()).ConsumedAt);
+    }
+
+    [Fact]
+    public async Task Registered_User_Joins_Only_After_Opening_The_Link()
+    {
+        var (db, auth, groups, mail) = Setup();
+        var owner = await Reg(auth, "owner13");
+        var member = await Reg(auth, "known");
+        var gid = await NewGroup(groups, owner.Id, "Known");
+
+        await groups.InviteEmailsAsync(owner.Id, gid, ["known@x.io"]);
+
+        Assert.Null(await groups.RoleAsync(gid, member.Id)); // not added before confirming
+        var token = TokenFor(mail, "known@x.io");
+        Assert.NotEmpty(token);
+        Assert.Contains("log in to join", mail.Sent.Last(m => m.To == "known@x.io").Body);
+        var preview = (InvitePreview)(await groups.InvitationPreviewAsync(token)).Data!;
+        Assert.True(preview.AccountExists);
+        Assert.Equal("Known", preview.GroupName);
+        Assert.Equal("owner13", preview.InvitedBy);
+        var join = (JoinedGroup)(await groups.JoinInvitationAsync(member.Id, token)).Data!;
+        Assert.False(join.AlreadyMember);
+        Assert.Equal("member", await groups.RoleAsync(gid, member.Id));
+        Assert.NotNull((await db.PendingInvites.SingleAsync(p => p.Email == "known@x.io")).ConsumedAt);
     }
 
     [Fact]

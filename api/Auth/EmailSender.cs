@@ -146,8 +146,13 @@ public sealed partial class OneSignalEmailSender(
         try
         {
             using var doc = JsonDocument.Parse(body);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object
-                || !doc.RootElement.TryGetProperty("errors", out var errors)) return ".";
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return ".";
+            // OneSignal answers 200 + "not subscribed" when the app has no Email channel;
+            // only the warning names the real cause.
+            if (doc.RootElement.TryGetProperty("warnings", out var warnings)
+                && warnings.ToString().Contains("configure Email", StringComparison.OrdinalIgnoreCase))
+                return ": the OneSignal app has no Email channel configured (OneSignal dashboard → Settings → Email).";
+            if (!doc.RootElement.TryGetProperty("errors", out var errors)) return ".";
             var first = errors.ValueKind switch
             {
                 JsonValueKind.Array => errors.EnumerateArray().Select(e => e.ToString()).FirstOrDefault(),
@@ -155,10 +160,9 @@ public sealed partial class OneSignalEmailSender(
                 _ => errors.ToString()
             };
             if (string.IsNullOrWhiteSpace(first)) return ".";
-            // OneSignal's wording when every recipient's email subscription is unsubscribed
-            // (unsubscribe link, bounce or spam report): non-essential mail skips them.
+            // Otherwise OneSignal found no deliverable email subscription for the address.
             if (first.Contains("not subscribed", StringComparison.OrdinalIgnoreCase))
-                return ": the recipient is unsubscribed from SplitShare emails.";
+                return ": no deliverable email subscription for the recipient in OneSignal.";
             return $": {first[..Math.Min(160, first.Length)]}";
         }
         catch (JsonException) { return "."; }

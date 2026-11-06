@@ -186,8 +186,7 @@ public static class GroupEndpoints
                 user = AuthEndpoints.UserDto(a.User),
                 access_token = s.Tokens!.AccessToken, token_type = "Bearer",
                 refresh_token = s.Tokens.RefreshToken,
-                group_id = a.GroupId,
-                auto_joined_groups = a.AutoJoinedGroups
+                group_id = a.GroupId
             });
         }).RequireRateLimiting("auth-ip");
     }

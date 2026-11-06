@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Badge, Button, Center, Group, Loader, Paper, PasswordInput,
-  Stack, Text, TextInput, ThemeIcon, Title,
+  Anchor, Button, Center, Loader, PasswordInput, Stack, Text, TextInput, Title,
 } from '@mantine/core';
 import { api, setTokens } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
 import { AuthLayout, AuthSubmit, GoogleBtn } from './AuthPages.jsx';
+import { InvitationBanner } from '../components/InvitationBanner.jsx';
 import { useT } from '../prefs.jsx';
 
 // Link errors that end the flow: show a friendly message + a way forward.
@@ -16,31 +16,78 @@ const LINK_ERRORS = {
   INVITE_USED: 'invitation.used',
 };
 
-/** Always-visible marker that these screens come from an invitation. */
-function InvitationBanner({ info }) {
+/**
+ * Anonymous landing for the shared group link (/g/:token): invitation banner +
+ * Continue with Google | Register new account (+ small Log in link). Each path
+ * returns to /g/:token signed in, which then joins the group.
+ */
+export function GroupLinkInvitation({ token }) {
   const t = useT();
-  return (
-    <Paper
-      withBorder
-      radius="md"
-      p="md"
-      role="note"
-      aria-label={t('invitation.badge')}
-      style={{ background: 'var(--mantine-color-teal-0)', borderColor: 'var(--mantine-color-teal-3)' }}
-    >
-      <Group gap="sm" wrap="nowrap" align="flex-start">
-        <ThemeIcon color="teal" variant="filled" radius="xl" size={36} aria-hidden>✉</ThemeIcon>
-        <div style={{ minWidth: 0 }}>
-          <Badge color="teal" variant="light" size="sm">{t('invitation.badge')}</Badge>
-          <Text fw={700} mt={4} c="dark">
-            {t('invitation.banner', { inviter: info.invited_by, group: info.group_name })}
-          </Text>
-          <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-            {t('invitation.members', { count: info.member_count })} · {t('invitation.sentTo', { email: info.email })}
-          </Text>
+  const [group, setGroup] = useState(null);
+  const [e, setE] = useState(null);
+  const next = `/g/${token}`;
+  const googleReady = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
+
+  useEffect(() => {
+    let live = true;
+    api.get(`/api/v1/invites/${encodeURIComponent(token)}`)
+      .then((g) => { if (live) setGroup(g); })
+      .catch((err) => { if (live) setE(err); });
+    return () => { live = false; };
+  }, [token]);
+
+  const invitation = group ? { group: group.name, memberCount: group.member_count } : null;
+  const to = (path) => ({ pathname: path, search: `?next=${encodeURIComponent(next)}` });
+
+  let body;
+  if (e) {
+    body = (
+      <>
+        <Text size="sm" role="alert">{t(e.code === 'INVITE_ROTATED' ? 'invitation.invalid' : 'errors.joinFailed')}</Text>
+        <Button component={Link} to="/login" className="wizard-primary auth-submit" fullWidth>{t('auth.logIn')}</Button>
+      </>
+    );
+  } else if (!group) {
+    body = (
+      <Center py="md" aria-live="polite">
+        <Loader size="sm" />
+        <Text size="sm" ml="sm">{t('invitation.loading')}</Text>
+      </Center>
+    );
+  } else {
+    body = (
+      <>
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">{t('invitation.chooseHow')}</Title>
         </div>
-      </Group>
-    </Paper>
+        {googleReady && (
+          <>
+            <GoogleBtn next={next} intent="signup" label={t('auth.continueGoogle')} divider={false} />
+            <div className="auth-sep"><span>{t('auth.or')}</span></div>
+          </>
+        )}
+        <Button component={Link} to={to('/register')} state={{ invitation }} className="wizard-primary auth-submit" fullWidth>
+          {t('invitation.register')}
+        </Button>
+        <Text ta="center" size="sm" className="auth-links">
+          {t('invitation.haveAccount')}{' '}
+          <Anchor component={Link} to={to('/login')} state={{ invitation }}>{t('auth.logIn')}</Anchor>
+        </Text>
+      </>
+    );
+  }
+
+  return (
+    <AuthLayout>
+      <Stack gap="md">
+        {invitation ? <InvitationBanner {...invitation} /> : (
+          <div className="auth-heading">
+            <Title order={3} className="auth-title">{t('invitation.heading')}</Title>
+          </div>
+        )}
+        {body}
+      </Stack>
+    </AuthLayout>
   );
 }
 
@@ -237,7 +284,14 @@ export function InvitationPage() {
   return (
     <AuthLayout>
       <Stack gap="md">
-        {info && !user && !linkError ? <InvitationBanner info={info} /> : (
+        {info && !user && !linkError ? (
+          <InvitationBanner
+            inviter={info.invited_by}
+            group={info.group_name}
+            memberCount={info.member_count}
+            email={info.email}
+          />
+        ) : (
           <div className="auth-heading">
             <Title order={3} className="auth-title">{t('invitation.heading')}</Title>
           </div>

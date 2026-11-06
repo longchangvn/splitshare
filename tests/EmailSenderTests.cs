@@ -118,13 +118,24 @@ public sealed class EmailSenderTests
     }
 
     [Fact]
-    public async Task Unsubscribed_Recipient_Is_Explained()
+    public async Task Not_Subscribed_Is_Explained()
     {
         var h = new CaptureHandler(() => Json(HttpStatusCode.OK,
             "{\"id\":\"\",\"errors\":[\"All included players are not subscribed\"]}"));
         var r = await Sender(h, Base).SendAsync("a@x.com", "s", "b");
         Assert.Equal(EmailSendStatus.Failed, r.Status);
-        Assert.Equal("Email provider did not send the message: the recipient is unsubscribed from SplitShare emails.", r.Error);
+        Assert.Equal("Email provider did not send the message: no deliverable email subscription for the recipient in OneSignal.", r.Error);
+    }
+
+    [Fact]
+    public async Task Missing_Email_Channel_Is_Named()
+    {
+        // Verbatim OneSignal reply for an app without the Email channel.
+        var h = new CaptureHandler(() => Json(HttpStatusCode.OK,
+            "{\"id\":\"\",\"errors\":[\"All included players are not subscribed\"],\"warnings\":[\"You must configure Email notifications in your OneSignal settings if you wish to send messages to Email users.\"]}"));
+        var r = await Sender(h, Base).SendAsync("a@x.com", "s", "b", transactional: true);
+        Assert.Equal(EmailSendStatus.Failed, r.Status);
+        Assert.Contains("no Email channel configured", r.Error);
     }
 
     [Fact]
