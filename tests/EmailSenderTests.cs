@@ -118,6 +118,16 @@ public sealed class EmailSenderTests
     }
 
     [Fact]
+    public async Task Unsubscribed_Recipient_Is_Explained()
+    {
+        var h = new CaptureHandler(() => Json(HttpStatusCode.OK,
+            "{\"id\":\"\",\"errors\":[\"All included players are not subscribed\"]}"));
+        var r = await Sender(h, Base).SendAsync("a@x.com", "s", "b");
+        Assert.Equal(EmailSendStatus.Failed, r.Status);
+        Assert.Equal("Email provider did not send the message: the recipient is unsubscribed from SplitShare emails.", r.Error);
+    }
+
+    [Fact]
     public async Task Stub_Never_Claims_Sent()
     {
         var r = await new StubEmailSender(NullLogger<StubEmailSender>.Instance).SendAsync("a@x.com", "s", "b");

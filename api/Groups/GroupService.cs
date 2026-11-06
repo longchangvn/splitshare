@@ -206,7 +206,9 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         var results = new List<InviteOutcome>();
         foreach (var m in outbox)
         {
-            var sent = await email.SendAsync(m.To, m.Subject, m.Body);
+            // Product decision: invites are action-triggered and must arrive even for
+            // addresses unsubscribed from non-essential mail, so they go as transactional.
+            var sent = await email.SendAsync(m.To, m.Subject, m.Body, transactional: true);
             results.Add(new InviteOutcome(m.To, m.Status, sent.Sent, EmailStatusName(sent.Status), sent.Error));
         }
         return new(true, null, null, new InvitesResult(added, pending, results));

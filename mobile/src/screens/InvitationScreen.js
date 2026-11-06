@@ -1,12 +1,13 @@
 // Emailed per-address invitation (splitshare://invite/<token>) — web parity with
-// pages/InvitationPage.jsx. Signed in → POST /invitations/:token/join. Anonymous →
-// GET preview, then create the account: Gmail continues with native Google (defaults
-// from Google), others choose a password (POST /invitations/:token/accept).
+// pages/InvitationPage.jsx. Pushed steps of the same screen:
+//   (no step)        choice: Continue with Google | Register new account
+//   step 'register'  email fixed, choose a password → account + join
+//   step 'login'     existing account (small link on the choice screen)
+// Signed in → POST /invitations/:token/join and open the group.
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { api, setTokens } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { nativeGoogleAvailable } from '../auth/google';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
 import { Button, Field, Input, Screen, toast } from '../ui';
@@ -19,18 +20,35 @@ const LINK_ERRORS = {
   INVITE_USED: 'invitation.used',
 };
 
-export default function InvitationScreen({ route, navigation }) {
-  const { token } = route.params || {};
+/** Always-visible marker that these screens come from an invitation. */
+function InvitationBanner({ info }) {
   const t = useT();
-  const { user, signIn, setPostAuthRoute } = useAuth();
-  const [info, setInfo] = useState(null);
+  return (
+    <View style={s.banner} accessible accessibilityRole="summary"
+      accessibilityLabel={`${t('invitation.badge')}. ${t('invitation.banner', { inviter: info.invited_by, group: info.group_name })}`}>
+      <View style={s.icon}><Text style={s.iconT}>✉</Text></View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={s.badge}>{t('invitation.badge')}</Text>
+        <Text style={[type.h3, { marginTop: 4 }]}>{t('invitation.banner', { inviter: info.invited_by, group: info.group_name })}</Text>
+        <Text style={type.small} numberOfLines={2}>
+          {t('invitation.members', { count: info.member_count })} · {t('invitation.sentTo', { email: info.email })}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+export default function InvitationScreen({ route, navigation }) {
+  const { token, step, info: passedInfo } = route.params || {};
+  const t = useT();
+  const { user, login, signIn, setPostAuthRoute } = useAuth();
+  const [info, setInfo] = useState(passedInfo || null);
   const [e, setE] = useState(null);
-  const [usePassword, setUsePassword] = useState(false);
+  const [id, setId] = useState(passedInfo?.email || '');
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
   const accepted = useRef(false);
   const path = `/api/v1/invitations/${encodeURIComponent(token || '')}`;
-  const googleReady = nativeGoogleAvailable();
 
   useEffect(() => {
     let live = true;
@@ -40,16 +58,18 @@ export default function InvitationScreen({ route, navigation }) {
       api.post(`${path}/join`)
         .then((r) => { if (live) navigation.replace('GroupDetail', { id: r.group_id }); })
         .catch((err) => { if (live) setE(err); });
-    } else {
+    } else if (!info) {
       api.get(path)
-        .then((r) => { if (live) setInfo(r); })
+        .then((r) => { if (live) { setInfo(r); setId(r.email); } })
         .catch((err) => { if (live) setE(err); });
     }
     return () => { live = false; };
   }, [user, path]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const accept = async () => {
-    if (busy) return;
+  const goStep = (next, extra = {}) => navigation.push('Invitation', { token, step: next, info: { ...info, ...extra } });
+
+  const register = async () => {
+    if (busy) return undefined;
     setE(null);
     if (!validPassword(pw)) return setE({ friendly: true, message: t('invitation.passwordHint') });
     setBusy(true);
@@ -57,12 +77,25 @@ export default function InvitationScreen({ route, navigation }) {
       const d = await api.post(`${path}/accept`, { password: pw });
       accepted.current = true;
       await signIn(d, { name: 'GroupDetail', params: { id: d.group_id } });
-    } catch (err) { setE(err); setBusy(false); }
+    } catch (err) {
+      setBusy(false);
+      if (err.code === 'ACCOUNT_EXISTS') {
+        navigation.replace('Invitation', { token, step: 'login', info: { ...info, account_exists: true } });
+      } else setE(err);
+    }
     return undefined;
   };
 
-  // Google: sign in, join through the link while still on this screen (the auth
-  // stack unmounts on sign-in), then open the group.
+  // Login swaps the auth stack for the app stack (this screen unmounts); come
+  // back to the invitation there, which then joins through the link.
+  const logIn = async () => {
+    if (busy || !id.trim() || !pw) return;
+    setBusy(true); setE(null);
+    setPostAuthRoute({ name: 'Invitation', params: { token } });
+    try { await login(id.trim(), pw); } catch (err) { setPostAuthRoute(null); setE(err); setBusy(false); }
+  };
+
+  // Google: sign in, join through the link while still on this screen, then open the group.
   const withGoogle = async (idToken) => {
     const d = await api.post('/api/v1/auth/google', { id_token: idToken });
     await setTokens(d.access_token, d.refresh_token);
@@ -75,11 +108,6 @@ export default function InvitationScreen({ route, navigation }) {
     }
     accepted.current = true;
     await signIn(d, next);
-  };
-
-  const goLogin = () => {
-    setPostAuthRoute({ name: 'Invitation', params: { token } });
-    navigation.navigate('Login');
   };
 
   const linkError = e && LINK_ERRORS[e.code];
@@ -106,8 +134,12 @@ export default function InvitationScreen({ route, navigation }) {
     );
   }
 
-  const exists = info?.account_exists || e?.code === 'ACCOUNT_EXISTS';
-  const google = info?.is_gmail && googleReady && !usePassword;
+  const back = (
+    <Text style={[a.linkT, { marginTop: 8 }]} onPress={() => navigation.goBack()} accessibilityRole="link">
+      ← {t('invitation.otherOptions')}
+    </Text>
+  );
+
   let body;
   if (linkError) {
     body = (
@@ -123,42 +155,78 @@ export default function InvitationScreen({ route, navigation }) {
         <Text style={type.body}>{t('invitation.loading')}</Text>
       </View>
     );
-  } else if (exists) {
+  } else if (step === 'register' && !info.account_exists) {
     body = (
       <>
-        <Text style={[type.body, { marginTop: 14 }]}>{t('invitation.accountExists', { email: info.email })}</Text>
-        <Button style={{ marginTop: 16 }} title={t('invitation.logInToJoin')} onPress={goLogin} />
-        {info.is_gmail && googleReady ? (
-          <GoogleSignInButton navigation={navigation} intent="signin" loginHint={info.email} onIdToken={withGoogle} />
-        ) : null}
+        {back}
+        <Text style={[type.h2, { marginTop: 10 }]} accessibilityRole="header">{t('invitation.registerTitle')}</Text>
+        <Text style={[type.small, { marginTop: 4 }]}>{t('invitation.createHint')}</Text>
+        <Field label={t('auth.email')}>
+          <Input value={info.email} editable={false} accessibilityLabel={t('auth.email')} />
+        </Field>
+        <Field label={t('invitation.choosePassword')} hint={t('invitation.passwordHint')}>
+          <PasswordInput value={pw} onChangeText={setPw} autoComplete="new-password" returnKeyType="go" onSubmitEditing={register} />
+        </Field>
+        <AccountErr e={e} />
+        <Button style={{ marginTop: 16 }} icon="＋" title={t('invitation.accept')} busy={busy} disabled={!pw} onPress={register} />
+      </>
+    );
+  } else if (step === 'login' || step === 'register') {
+    body = (
+      <>
+        {back}
+        <Text style={[type.h2, { marginTop: 10 }]} accessibilityRole="header">{t('auth.logIn')}</Text>
+        <Text style={[type.small, { marginTop: 4 }]}>
+          {info.account_exists ? t('invitation.accountExists', { email: info.email }) : t('invitation.loginHint')}
+        </Text>
+        <Field label={t('auth.usernameOrEmail')}>
+          <Input
+            value={id}
+            onChangeText={setId}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="username"
+            textContentType="username"
+            accessibilityLabel={t('auth.usernameOrEmail')}
+          />
+        </Field>
+        <Field label={t('auth.password')}>
+          <PasswordInput value={pw} onChangeText={setPw} autoComplete="current-password" returnKeyType="go" onSubmitEditing={logIn} />
+        </Field>
+        <AccountErr e={e} />
+        <Button style={{ marginTop: 16 }} title={t('invitation.loginAction')} busy={busy} disabled={!id.trim() || !pw} onPress={logIn} />
+        <View style={a.links}>
+          <Text style={a.linkT} onPress={() => navigation.navigate('Forgot')} accessibilityRole="link">{t('auth.forgotPassword')}</Text>
+        </View>
       </>
     );
   } else {
+    // Choice screen: the two ways in.
     body = (
       <>
-        <Field label={t('invitation.yourEmail')}>
-          <Input value={info.email} editable={false} accessibilityLabel={t('invitation.yourEmail')} />
-        </Field>
-        {google ? (
+        <Text style={[type.h2, { marginTop: 18 }]} accessibilityRole="header">{t('invitation.chooseHow')}</Text>
+        <GoogleSignInButton
+          navigation={navigation}
+          intent="signup"
+          loginHint={info.email}
+          label={t('auth.continueGoogle')}
+          onIdToken={withGoogle}
+        />
+        <View style={a.orRow} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <View style={a.orLine} /><Text style={a.orT}>{t('auth.or')}</Text><View style={a.orLine} />
+        </View>
+        {info.account_exists ? (
           <>
-            <Text style={[type.small, { marginTop: 12 }]}>{t('invitation.gmailHint')}</Text>
-            <GoogleSignInButton navigation={navigation} intent="signup" loginHint={info.email} onIdToken={withGoogle} />
-            <View style={a.links}>
-              <Text style={a.linkT} onPress={() => setUsePassword(true)} accessibilityRole="link">{t('invitation.usePassword')}</Text>
-            </View>
+            <Text style={[type.small, { marginTop: 12 }]}>{t('invitation.accountExists', { email: info.email })}</Text>
+            <Button style={{ marginTop: 12 }} title={t('invitation.loginAction')} onPress={() => goStep('login')} />
           </>
         ) : (
           <>
-            <Field label={t('invitation.choosePassword')} hint={t('invitation.passwordHint')}>
-              <PasswordInput value={pw} onChangeText={setPw} autoComplete="new-password" returnKeyType="go" onSubmitEditing={accept} />
-            </Field>
-            <AccountErr e={e} />
-            <Button style={{ marginTop: 16 }} icon="＋" title={t('invitation.accept')} busy={busy} disabled={!pw} onPress={accept} />
-            {info.is_gmail && googleReady ? (
-              <View style={a.links}>
-                <Text style={a.linkT} onPress={() => setUsePassword(false)} accessibilityRole="link">{t('invitation.useGoogle')}</Text>
-              </View>
-            ) : null}
+            <Button style={{ marginTop: 12 }} icon="＋" title={t('invitation.register')} onPress={() => goStep('register')} />
+            <View style={a.links}>
+              <Text style={type.small}>{t('invitation.haveAccount')}</Text>
+              <Text style={a.linkT} onPress={() => goStep('login')} accessibilityRole="link">{t('auth.logIn')}</Text>
+            </View>
           </>
         )}
       </>
@@ -166,12 +234,22 @@ export default function InvitationScreen({ route, navigation }) {
   }
 
   return (
-    <AuthLayout
-      compact
-      title={info ? t('invitation.title', { name: info.group_name }) : t('invitation.heading')}
-      desc={info ? `${t('invitation.invitedBy', { name: info.invited_by })} · ${t('invitation.members', { count: info.member_count })}` : undefined}
-    >
+    <AuthLayout compact title={info && !linkError ? undefined : t('invitation.heading')}>
+      {info && !linkError ? <InvitationBanner info={info} /> : null}
       {body}
     </AuthLayout>
   );
 }
+
+const s = StyleSheet.create({
+  banner: {
+    flexDirection: 'row', gap: 12, alignItems: 'flex-start', padding: 14, borderRadius: 16,
+    backgroundColor: colors.primarySoft, borderWidth: 1, borderColor: colors.accentLight,
+  },
+  icon: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  iconT: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  badge: {
+    alignSelf: 'flex-start', overflow: 'hidden', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999,
+    backgroundColor: '#fff', color: colors.primaryText, fontSize: 11, fontWeight: '800', letterSpacing: 0.3,
+  },
+});

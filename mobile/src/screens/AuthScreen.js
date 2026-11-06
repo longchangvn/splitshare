@@ -55,10 +55,10 @@ function NativeGoogleButton({ label, loginHint, onIdToken }) {
  * (see auth/google.js); otherwise the paste-token fallback (GoogleToken screen).
  * onIdToken overrides the default exchange (useAuth().google).
  */
-export function GoogleSignInButton({ navigation, intent = 'signin', loginHint, onIdToken }) {
+export function GoogleSignInButton({ navigation, intent = 'signin', loginHint, onIdToken, label: labelOverride }) {
   const t = useT();
   const { google } = useAuth();
-  const label = t(intent === 'signup' ? 'auth.signUpGoogle' : 'auth.signInGoogle');
+  const label = labelOverride || t(intent === 'signup' ? 'auth.signUpGoogle' : 'auth.signInGoogle');
   if (nativeGoogleAvailable()) {
     return <NativeGoogleButton label={label} loginHint={loginHint} onIdToken={onIdToken || google} />;
   }

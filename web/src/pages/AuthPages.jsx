@@ -237,7 +237,7 @@ function GoogleGIcon() {
 //     to popup-block, no backgrounded tab waiting on timers.
 // Either way googleReturn.js hands the token back from the document Google
 // returns to, rather than this page polling for it.
-export function GoogleBtn({ next, intent = 'signin', loginHint }) {
+export function GoogleBtn({ next, intent = 'signin', loginHint, label: labelOverride, divider = true }) {
   const t = useT();
   const { setUser } = useAuth();
   const nav = useNavigate();
@@ -449,11 +449,11 @@ export function GoogleBtn({ next, intent = 'signin', loginHint }) {
     timer.current = setTimeout(fallback, 3000);
   };
 
-  const label = t(intent === 'signup' ? 'auth.signUpGoogle' : 'auth.signInGoogle');
+  const label = labelOverride || t(intent === 'signup' ? 'auth.signUpGoogle' : 'auth.signInGoogle');
 
   return (
     <div className="auth-sso">
-      <div className="auth-sep"><span>{t('auth.or')}</span></div>
+      {divider && <div className="auth-sep"><span>{t('auth.or')}</span></div>}
       <Button
         className="auth-google"
         fullWidth

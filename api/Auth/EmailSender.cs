@@ -22,9 +22,9 @@ public sealed record EmailSendResult(EmailSendStatus Status, string? MessageId =
 }
 
 /// <summary>
-/// Outbound email. <paramref name="transactional"/> marks account-critical mail
-/// (verify, password reset) that must reach the user even if they unsubscribed
-/// from non-essential mail (invites, nudges, alerts). Never throws: the result
+/// Outbound email. <paramref name="transactional"/> marks mail that must reach the
+/// user even if they unsubscribed from non-essential mail: account-critical mail
+/// (verify, password reset) and group invites. Nudges and alerts stay non-essential. Never throws: the result
 /// says whether the provider accepted the message.
 /// </summary>
 public interface IEmailSender
@@ -154,7 +154,12 @@ public sealed partial class OneSignalEmailSender(
                 JsonValueKind.Object => errors.EnumerateObject().Select(p => p.Name).FirstOrDefault(),
                 _ => errors.ToString()
             };
-            return string.IsNullOrWhiteSpace(first) ? "." : $": {first[..Math.Min(160, first.Length)]}";
+            if (string.IsNullOrWhiteSpace(first)) return ".";
+            // OneSignal's wording when every recipient's email subscription is unsubscribed
+            // (unsubscribe link, bounce or spam report): non-essential mail skips them.
+            if (first.Contains("not subscribed", StringComparison.OrdinalIgnoreCase))
+                return ": the recipient is unsubscribed from SplitShare emails.";
+            return $": {first[..Math.Min(160, first.Length)]}";
         }
         catch (JsonException) { return "."; }
     }

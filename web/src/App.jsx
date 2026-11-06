@@ -29,6 +29,7 @@ export default function App() {
           <Route path="/g/:token" element={<JoinPage />} />
           {/* Public: emailed per-address invitation — create account (password or Google) and join. */}
           <Route path="/invite/:token" element={<InvitationPage />} />
+          <Route path="/invite/:token/:step" element={<InvitationPage />} />
           <Route path="/profile" element={<Guard><Profile /></Guard>} />
           <Route path="/settings" element={<Guard><Settings /></Guard>} />
           <Route path="/groups/:id/invite" element={<Guard><InvitePage /></Guard>} />

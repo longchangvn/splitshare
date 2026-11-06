@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Button, Center, Loader, PasswordInput, Stack, Text, TextInput, Title,
+  Anchor, Badge, Button, Center, Group, Loader, Paper, PasswordInput,
+  Stack, Text, TextInput, ThemeIcon, Title,
 } from '@mantine/core';
 import { api, setTokens } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
@@ -15,21 +16,51 @@ const LINK_ERRORS = {
   INVITE_USED: 'invitation.used',
 };
 
-// Emailed per-address invitation (/invite/:token). Signed in → join through the
-// link. Anonymous → preview, then create the account: Gmail addresses continue
-// with Google (defaults come from Google), others just choose a password.
+/** Always-visible marker that these screens come from an invitation. */
+function InvitationBanner({ info }) {
+  const t = useT();
+  return (
+    <Paper
+      withBorder
+      radius="md"
+      p="md"
+      role="note"
+      aria-label={t('invitation.badge')}
+      style={{ background: 'var(--mantine-color-teal-0)', borderColor: 'var(--mantine-color-teal-3)' }}
+    >
+      <Group gap="sm" wrap="nowrap" align="flex-start">
+        <ThemeIcon color="teal" variant="filled" radius="xl" size={36} aria-hidden>✉</ThemeIcon>
+        <div style={{ minWidth: 0 }}>
+          <Badge color="teal" variant="light" size="sm">{t('invitation.badge')}</Badge>
+          <Text fw={700} mt={4} c="dark">
+            {t('invitation.banner', { inviter: info.invited_by, group: info.group_name })}
+          </Text>
+          <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+            {t('invitation.members', { count: info.member_count })} · {t('invitation.sentTo', { email: info.email })}
+          </Text>
+        </div>
+      </Group>
+    </Paper>
+  );
+}
+
+// Emailed per-address invitation.
+//   /invite/:token           → choice: Continue with Google | Register new account
+//   /invite/:token/register  → email fixed, choose a password → account + join
+//   /invite/:token/login     → existing account (small link on the choice screen)
+// Signed in on any of them (after Google or login) → join through the link.
 export function InvitationPage() {
   const t = useT();
-  const { token } = useParams();
+  const { token, step } = useParams();
   const nav = useNavigate();
-  const { user, loading, setUser } = useAuth();
+  const { user, loading, setUser, login } = useAuth();
   const [info, setInfo] = useState(null);
   const [e, setE] = useState(null);
-  const [usePassword, setUsePassword] = useState(false);
+  const [id, setId] = useState('');
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
   const accepted = useRef(false);
-  const next = `/invite/${encodeURIComponent(token)}`;
+  const base = `/invite/${encodeURIComponent(token)}`;
   const path = `/api/v1/invitations/${encodeURIComponent(token)}`;
   const googleReady = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
@@ -38,20 +69,21 @@ export function InvitationPage() {
     let live = true;
     setE(null);
     if (user) {
-      // Signed in (returning from Google or login): join through the link.
       if (accepted.current) return undefined;
       api.post(`${path}/join`)
         .then((r) => { if (live) nav(`/groups/${r.group_id}`, { replace: true }); })
         .catch((err) => { if (live) setE(err); });
-    } else {
+    } else if (!info) {
       api.get(path)
-        .then((r) => { if (live) setInfo(r); })
+        .then((r) => { if (live) { setInfo(r); setId(r.email); } })
         .catch((err) => { if (live) setE(err); });
     }
     return () => { live = false; };
-  }, [loading, user, path, nav]);
+  }, [loading, user, path, nav, info]);
 
-  const accept = async (ev) => {
+  useEffect(() => { setPw(''); setE(null); }, [step]);
+
+  const register = async (ev) => {
     ev.preventDefault();
     if (busy) return;
     setBusy(true);
@@ -62,12 +94,27 @@ export function InvitationPage() {
       setTokens(d.access_token, d.refresh_token);
       setUser(d.user);
       nav(`/groups/${d.group_id}`, { replace: true });
-    } catch (err) { setE(err); } finally { setBusy(false); }
+    } catch (err) {
+      if (err.code === 'ACCOUNT_EXISTS') {
+        setInfo((i) => ({ ...i, account_exists: true }));
+        nav(`${base}/login`, { replace: true });
+      } else setE(err);
+    } finally { setBusy(false); }
+  };
+
+  // Logging in sets the user; the effect above then joins through the link.
+  const signIn = async (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setE(null);
+    try { await login(id.trim(), pw); } catch (err) { setE(err); } finally { setBusy(false); }
   };
 
   const linkError = e && LINK_ERRORS[e.code];
-  const exists = info?.account_exists || e?.code === 'ACCOUNT_EXISTS';
-  const google = info?.is_gmail && googleReady && !usePassword;
+  const back = (
+    <Anchor component={Link} to={base} size="sm">← {t('invitation.otherOptions')}</Anchor>
+  );
 
   let body;
   if (linkError) {
@@ -86,50 +133,103 @@ export function InvitationPage() {
         <Text size="sm" ml="sm">{user ? t('invitation.joining') : t('invitation.loading')}</Text>
       </Center>
     );
-  } else if (exists) {
+  } else if (step === 'register' && !info.account_exists) {
     body = (
       <>
-        <Text size="sm">{t('invitation.accountExists', { email: info.email })}</Text>
-        <Button component={Link} to={`/login?next=${encodeURIComponent(next)}`} className="wizard-primary auth-submit" fullWidth>
-          {t('invitation.logInToJoin')}
-        </Button>
-        {info.is_gmail && googleReady && <GoogleBtn next={next} intent="signin" loginHint={info.email} />}
+        {back}
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">{t('invitation.registerTitle')}</Title>
+          <Text size="sm" c="dimmed" className="auth-desc">{t('invitation.createHint')}</Text>
+        </div>
+        <form onSubmit={register}>
+          <Stack gap="sm">
+            <TextInput label={t('auth.email')} value={info.email} readOnly />
+            <PasswordInput
+              label={t('invitation.choosePassword')}
+              description={t('invitation.passwordHint')}
+              required
+              autoFocus
+              autoComplete="new-password"
+              value={pw}
+              onChange={(x) => setPw(x.target.value)}
+            />
+            <AuthSubmit loading={busy} icon="plus">{t('invitation.accept')}</AuthSubmit>
+          </Stack>
+        </form>
+        <Err e={e} />
+      </>
+    );
+  } else if (step === 'login' || step === 'register') {
+    body = (
+      <>
+        {back}
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">{t('auth.logIn')}</Title>
+          <Text size="sm" c="dimmed" className="auth-desc">
+            {info.account_exists ? t('invitation.accountExists', { email: info.email }) : t('invitation.loginHint')}
+          </Text>
+        </div>
+        <form onSubmit={signIn}>
+          <Stack gap="sm">
+            <TextInput
+              label={t('auth.usernameOrEmail')}
+              required
+              autoComplete="username"
+              value={id}
+              onChange={(x) => setId(x.target.value)}
+            />
+            <PasswordInput
+              label={t('auth.password')}
+              required
+              autoFocus
+              autoComplete="current-password"
+              value={pw}
+              onChange={(x) => setPw(x.target.value)}
+            />
+            <AuthSubmit loading={busy}>{t('invitation.loginAction')}</AuthSubmit>
+          </Stack>
+        </form>
+        <Err e={e} />
+        <Text ta="center" size="sm" className="auth-links">
+          <Anchor component={Link} to="/forgot">{t('auth.forgotPassword')}</Anchor>
+        </Text>
       </>
     );
   } else {
+    // Choice screen: the two ways in.
     body = (
       <>
-        <TextInput label={t('invitation.yourEmail')} value={info.email} readOnly />
-        {google ? (
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">{t('invitation.chooseHow')}</Title>
+        </div>
+        {googleReady && (
+          <GoogleBtn
+            next={base}
+            intent="signup"
+            loginHint={info.email}
+            label={t('auth.continueGoogle')}
+            divider={false}
+          />
+        )}
+        {googleReady && <div className="auth-sep"><span>{t('auth.or')}</span></div>}
+        {info.account_exists ? (
           <>
-            <Text size="sm" c="dimmed">{t('invitation.gmailHint')}</Text>
-            <GoogleBtn next={next} intent="signup" loginHint={info.email} />
-            <Anchor component="button" type="button" size="sm" ta="center" onClick={() => setUsePassword(true)}>
-              {t('invitation.usePassword')}
-            </Anchor>
+            <Text size="sm" c="dimmed">{t('invitation.accountExists', { email: info.email })}</Text>
+            <Button component={Link} to={`${base}/login`} className="wizard-primary auth-submit" fullWidth>
+              {t('invitation.loginAction')}
+            </Button>
           </>
         ) : (
-          <form onSubmit={accept}>
-            <Stack gap="sm">
-              <PasswordInput
-                label={t('invitation.choosePassword')}
-                description={t('invitation.passwordHint')}
-                required
-                autoFocus
-                autoComplete="new-password"
-                value={pw}
-                onChange={(x) => setPw(x.target.value)}
-              />
-              <AuthSubmit loading={busy} icon="plus">{t('invitation.accept')}</AuthSubmit>
-              {info.is_gmail && googleReady && (
-                <Anchor component="button" type="button" size="sm" ta="center" onClick={() => setUsePassword(false)}>
-                  {t('invitation.useGoogle')}
-                </Anchor>
-              )}
-            </Stack>
-          </form>
+          <Button component={Link} to={`${base}/register`} className="wizard-primary auth-submit" fullWidth>
+            {t('invitation.register')}
+          </Button>
         )}
-        <Err e={e} />
+        {!info.account_exists && (
+          <Text ta="center" size="sm" className="auth-links">
+            {t('invitation.haveAccount')}{' '}
+            <Anchor component={Link} to={`${base}/login`}>{t('auth.logIn')}</Anchor>
+          </Text>
+        )}
       </>
     );
   }
@@ -137,16 +237,11 @@ export function InvitationPage() {
   return (
     <AuthLayout>
       <Stack gap="md">
-        <div className="auth-heading">
-          <Title order={3} className="auth-title">
-            {info ? t('invitation.title', { name: info.group_name }) : t('invitation.heading')}
-          </Title>
-          {info && (
-            <Text size="sm" c="dimmed" className="auth-desc">
-              {t('invitation.invitedBy', { name: info.invited_by })} · {t('invitation.members', { count: info.member_count })}
-            </Text>
-          )}
-        </div>
+        {info && !user && !linkError ? <InvitationBanner info={info} /> : (
+          <div className="auth-heading">
+            <Title order={3} className="auth-title">{t('invitation.heading')}</Title>
+          </div>
+        )}
         {body}
       </Stack>
     </AuthLayout>

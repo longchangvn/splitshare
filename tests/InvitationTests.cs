@@ -15,10 +15,12 @@ public sealed class InvitationTests
     private sealed class FakeEmail : IEmailSender
     {
         public readonly List<(string To, string Subject, string Body)> Sent = [];
+        public readonly List<bool> Transactional = [];
         public Func<string, EmailSendResult> Respond = _ => EmailSendResult.Accepted("msg-1");
         public Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
         {
             Sent.Add((to, subject, body));
+            Transactional.Add(transactional);
             return Task.FromResult(Respond(to));
         }
     }
@@ -54,6 +56,8 @@ public sealed class InvitationTests
         var owner = await Reg(auth, "owner1");
         var member = await Reg(auth, "member1");
         var gid = await NewGroup(groups, owner.Id);
+        mail.Sent.Clear();
+        mail.Transactional.Clear();
         mail.Respond = to => to == "bounce@x.io"
             ? EmailSendResult.Fail("Email provider rejected the message (HTTP 400).")
             : EmailSendResult.Accepted("msg-ok");
@@ -71,6 +75,9 @@ public sealed class InvitationTests
         Assert.Equal("failed", results[2].EmailStatus);
         Assert.False(results[2].EmailSent);
         Assert.Contains("HTTP 400", results[2].EmailError);
+        // Invites reach addresses unsubscribed from non-essential mail.
+        Assert.Equal(3, mail.Transactional.Count);
+        Assert.All(mail.Transactional, Assert.True);
     }
 
     [Fact]
