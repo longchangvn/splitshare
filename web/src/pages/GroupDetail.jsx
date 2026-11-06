@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ActionIcon, Anchor, Avatar, Box, Button, Card, Collapse, CopyButton, Group, Indicator, Loader,
-  Menu, Modal, Progress, SegmentedControl, Select, Skeleton, Stack, Tabs, Text, Textarea, TextInput, Title,
+  Menu, Modal, Progress, SegmentedControl, Select, Skeleton, Stack, Switch, Tabs, Text, Textarea, TextInput, Title,
   Tooltip,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
@@ -23,6 +23,7 @@ import { ReportPanel } from './Report.jsx';
 import { useT } from '../prefs.jsx';
 import { normalizeDecimalInput as dec } from '../decimalInput.js';
 import { fetchRemovalPreview, isStaleRemoval, removalPath, removalSummary } from '../memberRemoval.js';
+import { canToggleExpense, groupRawDebts, ledgerTotals } from '../expenseToggle.js';
 
 // Kill switch for batch "Scan receipts": false keeps the button visible but disabled.
 const SCAN_RECEIPTS_ENABLED = true;
@@ -99,6 +100,7 @@ export function GroupDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [editExisting, setEditExisting] = useState(null);
   const [editBusy, setEditBusy] = useState(false);
+  const [toggling, setToggling] = useState(null); // expense id whose enable/disable is in flight
   const [payOpen, setPayOpen] = useState(false);
   const [payPreset, setPayPreset] = useState(null);
   // Bumped after each recorded payment so Report/SettlementBox re-fetch their
@@ -386,6 +388,24 @@ export function GroupDetail() {
   };
   const closeEdit = () => { setEditOpen(false); setEditExisting(null); };
 
+  // Enable/disable (persisted for the whole group): a disabled expense stays listed
+  // but is left out of balances, settlement and totals until re-enabled.
+  const toggleExpense = async (item) => {
+    if (!canEditExpense(item) || toggling) return;
+    const excluded = !item.excluded;
+    setToggling(item.id);
+    setE(null);
+    try {
+      await api.patch(`/api/v1/expenses/${item.id}/excluded`, { excluded });
+      notifications.show({
+        message: t(excluded ? 'groupDetail.expenseNowDisabled' : 'groupDetail.expenseNowEnabled', { title: item.title }),
+        color: 'teal',
+      });
+      load(); loadLedger(); loadActivityFeed();
+      setSettleTick((x) => x + 1);
+    } catch (err) { setE(err); } finally { setToggling(null); }
+  };
+
   const nudge = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/nudges`, { user_ids: [uid] });
@@ -554,14 +574,9 @@ export function GroupDetail() {
         : err);
     } finally { setStatusBusy(false); }
   };
-  // Ledger totals over the loaded page.
-  const totals = useMemo(() => {
-    const items = ledger?.items || [];
-    return {
-      amount: items.reduce((a, t) => a + (t.amount_cents || 0), 0),
-      mine: items.reduce((a, t) => a + (t.my_share_cents || 0), 0),
-    };
-  }, [ledger]);
+  // Ledger totals over the loaded page (disabled expenses do not count).
+  const totals = useMemo(() => ledgerTotals(ledger?.items), [ledger]);
+  const rawOwe = useMemo(() => groupRawDebts(plan?.raw_debts), [plan]);
 
   const payments = useMemo(
     () => (ledger?.items || []).filter((t) => t.kind === 'payment'),
@@ -1083,7 +1098,7 @@ export function GroupDetail() {
               {(ledger?.items || []).map((item) => (
                 <div
                   key={item.id}
-                  className={`ledger-row${item.kind === 'expense' ? ' is-link' : ''}${item.reversed ? ' is-reversed' : ''}`}
+                  className={`ledger-row${item.kind === 'expense' ? ' is-link' : ''}${item.reversed ? ' is-reversed' : ''}${item.excluded ? ' is-excluded' : ''}`}
                   tabIndex={item.kind === 'expense' ? 0 : undefined}
                   role={item.kind === 'expense' ? 'link' : undefined}
                   aria-label={item.kind === 'expense' ? t('groupDetail.openItem', { title: item.title }) : undefined}
@@ -1100,6 +1115,7 @@ export function GroupDetail() {
                       {item.title}
                       {item.has_image ? ' 🧾' : ''}
                       {item.reversed ? ` (${t('common.reversed')})` : ''}
+                      {item.excluded ? ` (${t('groupDetail.expenseDisabled')})` : ''}
                     </span>
                     <span className="ledger-meta">
                       {item.kind === 'expense'
@@ -1122,6 +1138,16 @@ export function GroupDetail() {
                   </div>
                   {item.kind === 'expense' && (
                     <div className="ledger-actions" onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
+                      {canToggleExpense(item) && (
+                        <Switch
+                          size="xs"
+                          checked={!item.excluded}
+                          onChange={() => toggleExpense(item)}
+                          disabled={!canEditExpense(item) || !!toggling}
+                          aria-label={t('groupDetail.includeExpense', { title: item.title })}
+                          title={t('groupDetail.includeExpense', { title: item.title })}
+                        />
+                      )}
                       <ActionIcon className="ledger-action-btn is-copy" size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)} disabled={!canWriteGroup}>⧉</ActionIcon>
                       {canEditExpense(item) && (
                         <ActionIcon className="ledger-action-btn is-edit" size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
@@ -1134,6 +1160,9 @@ export function GroupDetail() {
                 <div className="ledger-row is-total">
                   <div className="ledger-copy">
                     <span className="ledger-title">{t('groupDetail.totalCount', { count: ledger.items.length })}</span>
+                    {totals.excluded > 0 && (
+                      <span className="ledger-meta">{t('groupDetail.excludedNotCounted', { count: totals.excluded })}</span>
+                    )}
                   </div>
                   <div className="ledger-amounts">
                     <span className="ledger-amount">{fmt(totals.amount, detail.currency)}</span>
@@ -1155,7 +1184,7 @@ export function GroupDetail() {
                 <span className="is-actions" aria-hidden />
               </div>
               {(ledger?.items || []).map((item) => (
-                <div key={item.id} className={`ledger-row is-desk${item.reversed ? ' is-reversed' : ''}`} role="row">
+                <div key={item.id} className={`ledger-row is-desk${item.reversed ? ' is-reversed' : ''}${item.excluded ? ' is-excluded' : ''}`} role="row">
                   <span className="ledger-cell ledger-title">
                     {item.kind === 'expense' ? (
                       <Anchor component={Link} to={`/groups/${id}/expenses/${item.id}`}>{item.title}</Anchor>
@@ -1164,6 +1193,7 @@ export function GroupDetail() {
                     )}
                     {item.has_image ? ' 🧾' : ''}
                     {item.reversed ? ` (${t('common.reversed')})` : ''}
+                    {item.excluded ? ` (${t('groupDetail.expenseDisabled')})` : ''}
                   </span>
                   <span className="ledger-cell ledger-meta">
                     {item.kind === 'expense' && item.category
@@ -1187,6 +1217,16 @@ export function GroupDetail() {
                   <span className="ledger-cell ledger-actions is-actions">
                     {item.kind === 'expense' ? (
                       <>
+                        {canToggleExpense(item) && (
+                          <Switch
+                            size="xs"
+                            checked={!item.excluded}
+                            onChange={() => toggleExpense(item)}
+                            disabled={!canEditExpense(item) || !!toggling}
+                            aria-label={t('groupDetail.includeExpense', { title: item.title })}
+                            title={t('groupDetail.includeExpense', { title: item.title })}
+                          />
+                        )}
                         <ActionIcon className="ledger-action-btn is-copy" size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)} disabled={!canWriteGroup}>⧉</ActionIcon>
                         {canEditExpense(item) && (
                           <ActionIcon className="ledger-action-btn is-edit" size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
@@ -1198,7 +1238,10 @@ export function GroupDetail() {
               ))}
               {(ledger?.items || []).length > 0 && (
                 <div className="ledger-row is-desk is-total" role="row">
-                  <span className="ledger-cell ledger-title">{t('groupDetail.totalRows', { count: ledger.items.length })}</span>
+                  <span className="ledger-cell ledger-title">
+                    {t('groupDetail.totalRows', { count: ledger.items.length })}
+                    {totals.excluded > 0 ? ` · ${t('groupDetail.excludedNotCounted', { count: totals.excluded })}` : ''}
+                  </span>
                   <span className="ledger-cell" />
                   <span className="ledger-cell" />
                   <span className="ledger-cell ledger-amount is-num">{fmt(totals.amount, detail.currency)}</span>
@@ -1288,6 +1331,9 @@ export function GroupDetail() {
                   </Card>
                 ))}
               </Stack>
+              {Array.isArray(plan?.raw_debts) && (
+                <RawOwePanel groups={rawOwe} members={members} currency={detail.currency} t={t} />
+              )}
             </Tabs.Panel>
 
             <Tabs.Panel value="activity">
@@ -2342,6 +2388,40 @@ export function BalancesPanel({ byDebtor = [], debtors = [], members = [], curre
         </div>
       )}
     </Box>
+  );
+}
+
+// Raw owe: accumulated pairwise debts before the fewest-transfer optimization.
+export function RawOwePanel({ groups = [], members = [], currency = '', t }) {
+  return (
+    <section className="raw-owe" aria-labelledby="raw-owe-title">
+      <Text id="raw-owe-title" size="sm" fw={600} mt="lg">{t('groupDetail.rawOweTitle')}</Text>
+      <Text size="xs" c="dimmed" mb="sm">{t('groupDetail.rawOweHint')}</Text>
+      {groups.length === 0 ? (
+        <Text c="dimmed" size="sm">{t('groupDetail.rawOweEmpty')}</Text>
+      ) : (
+        <Stack gap="sm">
+          {groups.map((g) => {
+            const name = g.from_name || displayNameOf(members, g.from_user_id);
+            return (
+              <Card key={g.from_user_id} withBorder radius="md" padding="sm">
+                <Group gap="sm" wrap="nowrap">
+                  <Avatar color="gray" radius="xl" size="sm">{initialsOf(name)}</Avatar>
+                  <Text size="sm" fw={600} style={{ flex: 1 }}>{t('groupDetail.owes', { name })}</Text>
+                  <Text size="sm" fw={700}>{t('groupDetail.rawOweTotal', { amount: fmt(g.total_cents, currency) })}</Text>
+                </Group>
+                {g.items.map((x) => (
+                  <Group key={x.to_user_id} gap="xs" mt={4} justify="space-between" wrap="nowrap">
+                    <Text size="sm">→ {x.to_name || displayNameOf(members, x.to_user_id)}</Text>
+                    <Text size="sm">{fmt(x.amount_cents, currency)}</Text>
+                  </Group>
+                ))}
+              </Card>
+            );
+          })}
+        </Stack>
+      )}
+    </section>
   );
 }
 

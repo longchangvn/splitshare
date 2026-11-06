@@ -382,7 +382,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         if (net != 0)
         {
             var open = await db.Expenses.Include(e => e.Splits).Include(e => e.Guests)
-                .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+                .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null && !e.Excluded)
                 .OrderBy(e => e.SpentAt).ThenBy(e => e.Id).ToListAsync();
             foreach (var e in open.Where(e => e.PayerId == targetId))
                 blockers.Add($"Paid open expense \"{e.Title}\": reassign the payer or settle first.");
@@ -629,7 +629,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
     {
         var g = await db.Groups.FindAsync(groupId);
         if (g is null || g.BudgetCents is not { } budget) return null;
-        var spent = await db.Expenses.Where(e => e.GroupId == groupId && e.DeletedAt == null)
+        var spent = await db.Expenses.Where(e => e.GroupId == groupId && e.DeletedAt == null && !e.Excluded)
             .SumAsync(e => e.AmountCents);
         return new
         {

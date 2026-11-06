@@ -67,6 +67,7 @@ export default function GroupDetailScreen({ route, navigation }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [itemSheet, setItemSheet] = useState(null);
   const [itemBusy, setItemBusy] = useState(false);
+  const [toggling, setToggling] = useState(null); // expense id whose enable/disable is in flight
 
   // Latest query inputs for loaders called from focus/debounce callbacks (no stale closures).
   const live = useRef({});
@@ -242,6 +243,23 @@ export default function GroupDetailScreen({ route, navigation }) {
     }
   };
 
+  // Enable/disable (persisted, web parity): a disabled expense stays listed but is
+  // left out of balances, settlement and totals until re-enabled.
+  const toggleExcluded = async (item) => {
+    if (!canEditExpense(item, detail, meId) || toggling) return;
+    const excluded = !item.excluded;
+    setToggling(item.id);
+    try {
+      await api.patch(`/api/v1/expenses/${item.id}/excluded`, { excluded });
+      toast({
+        title: t(excluded ? 'groupDetail.expenseNowDisabled' : 'groupDetail.expenseNowEnabled', { title: item.title }),
+        color: 'teal',
+      });
+      await Promise.all([load(), loadLedger()]);
+    } catch (err) { toast({ title: t('m.error.failed'), message: err.message, color: 'red' }); }
+    finally { setToggling(null); }
+  };
+
   const copyExpense = async (item) => {
     setItemBusy(true);
     try {
@@ -387,12 +405,16 @@ export default function GroupDetailScreen({ route, navigation }) {
           emptyKind={ledgerEmptyKind(filters.status, settled, hasLedgerHistory(summary))}
           onOpen={(it) => navigation.navigate('ExpenseDetail', { groupId: id, expenseId: it.id })}
           onItemActions={(it) => setItemSheet(it)}
+          canToggle={(it) => canEditExpense(it, detail, meId)}
+          toggling={toggling}
+          onToggleExcluded={toggleExcluded}
         />
       ) : null}
       {tab === 'balances' ? (
         <BalancesTab
           byDebtor={byDebtor}
           debtors={debtors}
+          rawDebts={plan?.raw_debts}
           members={members}
           currency={currency}
           meId={meId}

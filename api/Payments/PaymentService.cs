@@ -28,7 +28,7 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
 
     private async Task<long> RawOwedAsync(Guid groupId, Guid userId)
         => await db.Expenses
-            .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+            .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null && !e.Excluded)
             .SelectMany(e => e.Splits)
             .Where(s => s.UserId == userId && s.ShareCents > 0)
             .SumAsync(s => (long?)s.ShareCents) ?? 0;
@@ -97,13 +97,17 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
         }
     }
 
-    /// <summary>Locks all OPEN rows once every net hits zero. Returns true when locked.</summary>
+    /// <summary>
+    /// Locks all OPEN rows once every net hits zero. Returns true when locked.
+    /// Disabled (excluded) expenses were not part of what got settled, so they stay
+    /// OPEN and can still be re-enabled later.
+    /// </summary>
     private async Task<bool> TryLockAsync(Guid groupId)
     {
         var snapshot = await ledger.ComputeNetsAsync(groupId);
         if (snapshot is null || snapshot.Nets.Values.Any(v => v != 0)) return false;
         foreach (var e in await db.Expenses
-                     .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+                     .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null && !e.Excluded)
                      .ToListAsync())
             e.Status = ExpenseStatus.Locked;
         foreach (var p in await db.Payments

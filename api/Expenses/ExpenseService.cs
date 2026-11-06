@@ -475,7 +475,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         });
         await db.SaveChangesAsync();
         var (plan, _) = await ledger.RecomputeAsync(e.GroupId);
-        var after = LedgerService.ApplyDelta(before, oldState, (newPayer, newTotal, map));
+        var after = e.Excluded ? before : LedgerService.ApplyDelta(before, oldState, (newPayer, newTotal, map));
         return new(true, null, null, new ExpenseUpdated(e, Unsettled(before, after), plan.VersionSeq));
     }
 
@@ -540,7 +540,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         else return sharesOp;
 
         var before = (await ledger.ComputeNetsAsync(e.GroupId))?.Nets ?? new();
-        var after = LedgerService.ApplyDelta(before,
+        var after = e.Excluded ? before : LedgerService.ApplyDelta(before,
             (e.PayerId, e.AmountCents, e.Splits.ToDictionary(s => s.UserId, s => s.ShareCents)),
             (newPayer, previewTotal, map));
         return new(true, null, null, new EditPreview(map, Unsettled(before, after)));
@@ -563,8 +563,52 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         });
         await db.SaveChangesAsync();
         var (plan, _) = await ledger.RecomputeAsync(e.GroupId);
-        var after = LedgerService.ApplyDelta(before, oldState, null);
+        var after = e.Excluded ? before : LedgerService.ApplyDelta(before, oldState, null);
         return new(true, null, null, new ExpenseDeleted(Unsettled(before, after), plan.VersionSeq));
+    }
+
+    /// <summary>
+    /// Enable/disable an expense. A disabled expense stays in the ledger but is left out
+    /// of balances, settlement and totals for the whole group until re-enabled. Same
+    /// permissions as editing (creator, owner or treasurer; open expense; writable group).
+    /// </summary>
+    public async Task<ExpenseOp> SetExcludedAsync(Guid actorId, Guid expenseId, bool excluded)
+    {
+        var e = await db.Expenses.FirstOrDefaultAsync(x => x.Id == expenseId && x.DeletedAt == null);
+        if (e is null) return new(false, "NOT_FOUND", "Expense not found.");
+        var guard = await GuardAsync(e.GroupId, actorId, expenseId, needWriter: true);
+        if (!guard.Ok) return guard;
+        e = ((GuardData)guard.Data!).Expense!;
+        if (e.Excluded == excluded)
+        {
+            var current = await db.SettlementPlans.Where(s => s.GroupId == e.GroupId)
+                .Select(s => (int?)s.VersionSeq).MaxAsync() ?? 0;
+            return new(true, null, null, new ExpenseUpdated(e, [], current));
+        }
+        if (!excluded)
+        {
+            // Re-enabling must not resurrect debts for people who have left the group.
+            var involved = e.Splits.Select(s => s.UserId).Append(e.PayerId).Distinct().ToList();
+            var current = await db.GroupMembers.CountAsync(m => m.GroupId == e.GroupId && involved.Contains(m.UserId));
+            if (current != involved.Count)
+                return new(false, "VALIDATION", "Cannot enable: the payer or a participant is no longer a group member.");
+        }
+        var before = (await ledger.ComputeNetsAsync(e.GroupId))?.Nets ?? new();
+        var state = (e.PayerId, e.AmountCents, e.Splits.ToDictionary(s => s.UserId, s => s.ShareCents));
+        e.Excluded = excluded;
+        e.Version++;
+        e.UpdatedAt = DateTime.UtcNow;
+        db.ExpenseAudits.Add(new ExpenseAudit
+        {
+            ExpenseId = e.Id, ActorId = actorId,
+            DiffJson = JsonSerializer.Serialize(new { excluded })
+        });
+        await db.SaveChangesAsync();
+        var (plan, _) = await ledger.RecomputeAsync(e.GroupId);
+        var after = excluded
+            ? LedgerService.ApplyDelta(before, state, null)
+            : LedgerService.ApplyDelta(before, null, state);
+        return new(true, null, null, new ExpenseUpdated(e, Unsettled(before, after), plan.VersionSeq));
     }
 
     private static List<Guid> Unsettled(Dictionary<Guid, long> before, Dictionary<Guid, long> after)
@@ -575,7 +619,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
     public async Task CheckBudgetAlertAsync(Group group, long newExpenseCents)
     {
         if (email is null || group.BudgetCents is not { } budget || budget <= 0) return;
-        var spent = await db.Expenses.Where(e => e.GroupId == group.Id && e.DeletedAt == null)
+        var spent = await db.Expenses.Where(e => e.GroupId == group.Id && e.DeletedAt == null && !e.Excluded)
             .SumAsync(e => e.AmountCents);
         var threshold = budget * group.BudgetAlertPct / 100;
         if (spent >= threshold && spent - newExpenseCents < threshold)
@@ -663,6 +707,7 @@ public sealed class ExpenseService(AppDbContext db, LedgerService ledger, IFileS
         created_at = e.CreatedAt,
         updated_at = e.UpdatedAt,
         version = e.Version,
+        excluded = e.Excluded,
         category = e.Category,
         spent_at = e.SpentAt,
         tax_cents = e.TaxCents,

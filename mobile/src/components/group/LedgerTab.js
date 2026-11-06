@@ -1,12 +1,13 @@
 // Ledger tab — web GroupDetail "ledger" panel (mobile layout): search, type filter,
 // collapsible filter sheet with active-count badge, receipt-style rows, archive empty states.
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, Switch, StyleSheet } from 'react-native';
 import { fmt, displayNameOf } from '../../api/client';
 import { colors, type } from '../../theme';
 import { useT } from '../../i18n';
 import { sanitizeMoneyInput } from '../../money';
 import { categoryLabelForKey, categorySelectData } from '../../shared/categories';
+import { canToggleExpense, ledgerTotals } from '../../shared/expenseToggle';
 import { Card, Input, Segmented, Button, SelectField, Field, Sheet, Badge, Row, Skeleton } from '../../ui';
 import { Tile, ListRow, useDateFmt, p as parts } from './parts';
 import { DEFAULT_FILTERS, activeFilterCount, isValidDateInput } from './helpers';
@@ -14,12 +15,14 @@ import { DEFAULT_FILTERS, activeFilterCount, isValidDateInput } from './helpers'
 export default function LedgerTab({
   items, loading, loaded, currency, members, categories, type: kind, onType, q, onQ,
   filters, onApplyFilters, emptyKind, onOpen, onItemActions,
+  canToggle = () => false, toggling = null, onToggleExcluded,
 }) {
   const t = useT();
   const d = useDateFmt();
   const [open, setOpen] = useState(false);
   const count = activeFilterCount(filters);
-  const totals = items.reduce((a, it) => ({ amount: a.amount + (it.amount_cents || 0), mine: a.mine + (it.my_share_cents || 0) }), { amount: 0, mine: 0 });
+  // Disabled expenses stay listed but do not count (API leaves them out of balances).
+  const totals = ledgerTotals(items);
 
   return (
     <View style={{ gap: 10 }}>
@@ -75,27 +78,40 @@ export default function LedgerTab({
               onPress={isExp ? () => onOpen(it) : undefined}
               onLongPress={isExp ? () => onItemActions(it) : undefined}
               accessibilityLabel={isExp ? t('groupDetail.openItem', { title: it.title }) : undefined}
-              style={it.reversed ? { opacity: 0.55 } : null}
+              style={it.reversed || it.excluded ? { opacity: 0.55 } : null}
             >
               <Tile item={it} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[type.h3, it.reversed && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                   {it.title}{it.has_image ? ' 🧾' : ''}{it.reversed ? ` (${t('common.reversed')})` : ''}
+                  {it.excluded ? ` (${t('groupDetail.expenseDisabled')})` : ''}
                 </Text>
                 <Text style={parts.meta} numberOfLines={1}>{meta}</Text>
                 <Text style={[parts.meta, { color: colors.muted }]}>{d.date(it.created_at)}</Text>
               </View>
               <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                <Text style={parts.amount}>{fmt(it.amount_cents, currency)}</Text>
+                <Text style={[parts.amount, it.excluded && { textDecorationLine: 'line-through' }]}>{fmt(it.amount_cents, currency)}</Text>
                 <Text style={parts.meta}>{t('groupDetail.myShare')} {it.my_share_cents != null ? fmt(it.my_share_cents, currency) : '—'}</Text>
                 <Text style={[s.status, locked ? s.stLocked : s.stOpen]}>{locked ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}</Text>
               </View>
+              {canToggleExpense(it) ? (
+                <Switch
+                  value={!it.excluded}
+                  onValueChange={() => onToggleExcluded?.(it)}
+                  disabled={!canToggle(it) || !!toggling}
+                  trackColor={{ true: colors.primary }}
+                  accessibilityLabel={t('groupDetail.includeExpense', { title: it.title })}
+                />
+              ) : null}
             </ListRow>
           );
         })}
         {items.length > 0 ? (
           <ListRow last>
-            <Text style={[type.h3, { flex: 1 }]}>{t('groupDetail.totalCount', { count: items.length })}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={type.h3}>{t('groupDetail.totalCount', { count: items.length })}</Text>
+              {totals.excluded > 0 ? <Text style={parts.meta}>{t('groupDetail.excludedNotCounted', { count: totals.excluded })}</Text> : null}
+            </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={parts.amount}>{fmt(totals.amount, currency)}</Text>
               <Text style={parts.meta}>{t('groupDetail.mine')} {fmt(totals.mine, currency)}</Text>

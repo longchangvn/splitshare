@@ -172,25 +172,128 @@ public sealed partial class OneSignalEmailSender(
 }
 
 /// <summary>
+/// Twilio SendGrid Mail Send v3 (<c>POST https://api.sendgrid.com/v3/mail/send</c>,
+/// <c>Authorization: Bearer &lt;SendGrid API key&gt;</c>). Twilio email is only sendable
+/// with a SendGrid API key — the Twilio Account SID / Auth Token do not authenticate
+/// this API. Key from <c>Email:Twilio:ApiKey</c> (env <c>Email__Twilio__ApiKey</c>);
+/// <c>Email:FromAddress</c> must be a SendGrid-verified sender. 202 + <c>X-Message-Id</c>
+/// = accepted. Failures are logged (without recipient or body) and returned, never thrown.
+/// </summary>
+public sealed class TwilioSendGridEmailSender(
+    IHttpClientFactory httpClientFactory,
+    IConfiguration config,
+    ILogger<TwilioSendGridEmailSender> logger) : IEmailSender
+{
+    public const string HttpClientName = "twilio-sendgrid-email";
+    public const string DefaultEndpoint = "https://api.sendgrid.com/v3/mail/send";
+
+    private static readonly JsonSerializerOptions Json = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
+    public async Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
+    {
+        var apiKey = config["Email:Twilio:ApiKey"];
+        var fromAddress = config["Email:FromAddress"];
+        if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(fromAddress))
+        {
+            logger.LogWarning("Twilio SendGrid email not configured (Email:Twilio:ApiKey / Email:FromAddress); skipping email.");
+            return EmailSendResult.Unconfigured("Email provider credentials are not configured.");
+        }
+
+        var payload = new
+        {
+            personalizations = new[] { new { to = new[] { new { email = to } } } },
+            from = new { email = fromAddress.Trim(), name = NullIfBlank(config["Email:FromName"]) },
+            subject,
+            content = new[]
+            {
+                new { type = "text/plain", value = body },
+                new { type = "text/html", value = OneSignalEmailSender.ToHtml(body) }
+            },
+            // Account-critical mail must reach users who unsubscribed from non-essential mail.
+            mail_settings = transactional
+                ? new { bypass_unsubscribe_management = new { enable = true } }
+                : null,
+            // Links carry single-use tokens: keep them out of click-tracking redirects.
+            tracking_settings = new { click_tracking = new { enable = false, enable_text = false } }
+        };
+
+        var endpoint = NullIfBlank(config["Email:Twilio:Endpoint"]) ?? DefaultEndpoint;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = JsonContent.Create(payload, options: Json)
+            };
+            req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey.Trim()}");
+            using var res = await httpClientFactory.CreateClient(HttpClientName).SendAsync(req);
+            if (!res.IsSuccessStatusCode)
+            {
+                var resBody = await res.Content.ReadAsStringAsync();
+                logger.LogWarning("Twilio SendGrid email send failed: {Status} {Body}", (int)res.StatusCode, resBody);
+                return EmailSendResult.Fail($"Email provider rejected the message (HTTP {(int)res.StatusCode}){ErrorSuffix(resBody)}");
+            }
+            var messageId = res.Headers.TryGetValues("X-Message-Id", out var ids) ? ids.FirstOrDefault() : null;
+            if (string.IsNullOrWhiteSpace(messageId))
+            {
+                logger.LogWarning("Twilio SendGrid email: HTTP {Status} without X-Message-Id.", (int)res.StatusCode);
+                return EmailSendResult.Fail("Email provider did not send the message.");
+            }
+            logger.LogInformation("Twilio SendGrid email accepted (subject={Subject}, id={MessageId}).", subject, messageId);
+            return EmailSendResult.Accepted(messageId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Twilio SendGrid email send failed.");
+            return EmailSendResult.Fail("Email provider unreachable.");
+        }
+    }
+
+    /// <summary>": first SendGrid error message" (bounded), or "." when the body has none.</summary>
+    private static string ErrorSuffix(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("errors", out var errors)
+                || errors.ValueKind != JsonValueKind.Array) return ".";
+            var first = errors.EnumerateArray()
+                .Select(e => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("message", out var m) ? m.GetString() : e.ToString())
+                .FirstOrDefault();
+            return string.IsNullOrWhiteSpace(first) ? "." : $": {first[..Math.Min(160, first.Length)]}";
+        }
+        catch (JsonException) { return "."; }
+    }
+
+    private static string? NullIfBlank(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
+}
+
+/// <summary>
 /// Selects the email sender from <c>Email:Provider</c>: empty → <see cref="StubEmailSender"/>
-/// (logs only), "onesignal" → <see cref="OneSignalEmailSender"/>, anything else → startup error.
+/// (logs only), "twilio"/"sendgrid" → <see cref="TwilioSendGridEmailSender"/> (primary, the
+/// appsettings default), "onesignal" → <see cref="OneSignalEmailSender"/>, anything else → startup error.
 /// </summary>
 public static class EmailSenderFactory
 {
     public static IEmailSender Create(IConfiguration config, IHttpClientFactory? httpClientFactory = null,
-        ILogger<OneSignalEmailSender>? oneSignalLogger = null, ILogger<StubEmailSender>? stubLogger = null)
+        ILogger<OneSignalEmailSender>? oneSignalLogger = null, ILogger<StubEmailSender>? stubLogger = null,
+        ILogger<TwilioSendGridEmailSender>? twilioLogger = null)
     {
         var raw = config["Email:Provider"]?.Trim();
         if (string.IsNullOrEmpty(raw))
             return new StubEmailSender(stubLogger ?? NullLogger<StubEmailSender>.Instance);
-        return raw.ToLowerInvariant() switch
-        {
-            "onesignal" => httpClientFactory is null
-                ? throw new InvalidOperationException(
-                    "Email:Provider 'onesignal' requires an IHttpClientFactory (register the named HttpClient first).")
-                : new OneSignalEmailSender(httpClientFactory, config, oneSignalLogger ?? NullLogger<OneSignalEmailSender>.Instance),
-            _ => throw new InvalidOperationException(
-                $"Unknown Email:Provider '{raw}'. Valid values: onesignal (or unset for the logging stub).")
-        };
+        var provider = raw.ToLowerInvariant();
+        if (provider is not ("twilio" or "sendgrid" or "onesignal"))
+            throw new InvalidOperationException(
+                $"Unknown Email:Provider '{raw}'. Valid values: twilio, onesignal (or unset for the logging stub).");
+        if (httpClientFactory is null)
+            throw new InvalidOperationException(
+                $"Email:Provider '{raw}' requires an IHttpClientFactory (register the named HttpClient first).");
+        return provider == "onesignal"
+            ? new OneSignalEmailSender(httpClientFactory, config, oneSignalLogger ?? NullLogger<OneSignalEmailSender>.Instance)
+            : new TwilioSendGridEmailSender(httpClientFactory, config, twilioLogger ?? NullLogger<TwilioSendGridEmailSender>.Instance);
     }
 }

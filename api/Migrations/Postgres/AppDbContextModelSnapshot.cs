@@ -77,6 +77,9 @@ namespace SplitShare.Api.Migrations.Postgres
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<bool>("Excluded")
+                        .HasColumnType("boolean");
+
                     b.Property<long>("FeeCents")
                         .HasColumnType("bigint");
 

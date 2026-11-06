@@ -152,7 +152,104 @@ public sealed class EmailSenderTests
         Assert.IsType<StubEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = null })));
         Assert.IsType<StubEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = " " })));
         Assert.IsType<OneSignalEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "OneSignal" }), http));
+        Assert.IsType<TwilioSendGridEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "Twilio" }), http));
+        Assert.IsType<TwilioSendGridEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "sendgrid" }), http));
         Assert.Throws<InvalidOperationException>(() => EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "onesignal" })));
+        Assert.Throws<InvalidOperationException>(() => EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "twilio" })));
         Assert.Throws<InvalidOperationException>(() => EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "smtp" }), http));
+    }
+
+    [Fact]
+    public void Twilio_Is_The_Primary_Provider_In_Appsettings()
+    {
+        var cfg = new ConfigurationBuilder()
+            .AddJsonFile(Path.Combine(RepoRoot(), "api", "appsettings.json"))
+            .Build();
+        Assert.Equal("twilio", cfg["Email:Provider"]);
+        Assert.Null(cfg["Email:Twilio:ApiKey"]); // secret: env/user-secrets only
+    }
+
+    private static string RepoRoot()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d is not null && !File.Exists(Path.Combine(d.FullName, "SplitShare.sln"))) d = d.Parent;
+        return d?.FullName ?? throw new DirectoryNotFoundException("SplitShare.sln not found");
+    }
+
+    // --- Twilio SendGrid ---
+
+    private static readonly Dictionary<string, string?> Twilio = new()
+    {
+        ["Email:Provider"] = "twilio",
+        ["Email:Twilio:ApiKey"] = "SG.test-key",
+        ["Email:FromAddress"] = "no-reply@splitshare.test",
+        ["Email:FromName"] = "SplitShare"
+    };
+
+    private static TwilioSendGridEmailSender TwilioSender(CaptureHandler h, Dictionary<string, string?> cfg) =>
+        new(new FakeHttp(h), Cfg(cfg), NullLogger<TwilioSendGridEmailSender>.Instance);
+
+    private static HttpResponseMessage Accepted(string? id)
+    {
+        var r = new HttpResponseMessage(HttpStatusCode.Accepted);
+        if (id is not null) r.Headers.Add("X-Message-Id", id);
+        return r;
+    }
+
+    [Fact]
+    public async Task Twilio_Sends_MailSend_Payload()
+    {
+        var h = new CaptureHandler(() => Accepted("sg-123"));
+        var result = await TwilioSender(h, Twilio).SendAsync("a@x.com", "Reset", "Go: https://app.test/r/abc?x=1&y=2", transactional: true);
+
+        Assert.Equal(EmailSendResult.Accepted("sg-123"), result);
+        var (url, auth, body) = Assert.Single(h.Requests);
+        Assert.Equal(TwilioSendGridEmailSender.DefaultEndpoint, url);
+        Assert.Equal("Bearer SG.test-key", auth);
+        var j = JsonDocument.Parse(body).RootElement;
+        Assert.Equal("a@x.com", j.GetProperty("personalizations")[0].GetProperty("to")[0].GetProperty("email").GetString());
+        Assert.Equal("no-reply@splitshare.test", j.GetProperty("from").GetProperty("email").GetString());
+        Assert.Equal("SplitShare", j.GetProperty("from").GetProperty("name").GetString());
+        Assert.Equal("Reset", j.GetProperty("subject").GetString());
+        Assert.Equal("text/plain", j.GetProperty("content")[0].GetProperty("type").GetString());
+        Assert.Contains("<a href=\"https://app.test/r/abc?x=1&amp;y=2\">",
+            j.GetProperty("content")[1].GetProperty("value").GetString());
+        Assert.True(j.GetProperty("mail_settings").GetProperty("bypass_unsubscribe_management").GetProperty("enable").GetBoolean());
+        Assert.False(j.GetProperty("tracking_settings").GetProperty("click_tracking").GetProperty("enable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Twilio_NonTransactional_Respects_Unsubscribe()
+    {
+        var h = new CaptureHandler(() => Accepted("sg-1"));
+        await TwilioSender(h, Twilio).SendAsync("a@x.com", "Nudge", "Pay up");
+        var j = JsonDocument.Parse(Assert.Single(h.Requests).Body).RootElement;
+        Assert.False(j.TryGetProperty("mail_settings", out _));
+    }
+
+    [Fact]
+    public async Task Twilio_Failures_Returned_Not_Thrown_And_Missing_Config_Skips()
+    {
+        var down = await TwilioSender(new CaptureHandler(() => throw new HttpRequestException("down")), Twilio)
+            .SendAsync("a@x.com", "s", "b");
+        Assert.Equal("Email provider unreachable.", down.Error);
+
+        var rejected = await TwilioSender(new CaptureHandler(() => Json(HttpStatusCode.Forbidden,
+                "{\"errors\":[{\"message\":\"The from address does not match a verified Sender Identity.\",\"field\":\"from\"}]}")), Twilio)
+            .SendAsync("a@x.com", "s", "b");
+        Assert.Equal(EmailSendStatus.Failed, rejected.Status);
+        Assert.Equal("Email provider rejected the message (HTTP 403): The from address does not match a verified Sender Identity.", rejected.Error);
+
+        var noId = await TwilioSender(new CaptureHandler(() => Accepted(null)), Twilio).SendAsync("a@x.com", "s", "b");
+        Assert.Equal(EmailSendStatus.Failed, noId.Status);
+
+        foreach (var missing in new[] { "Email:Twilio:ApiKey", "Email:FromAddress" })
+        {
+            var h = new CaptureHandler(() => Accepted("x"));
+            var cfg = new Dictionary<string, string?>(Twilio) { [missing] = null };
+            var skipped = await TwilioSender(h, cfg).SendAsync("a@x.com", "s", "b");
+            Assert.Empty(h.Requests);
+            Assert.Equal(EmailSendStatus.NotConfigured, skipped.Status);
+        }
     }
 }

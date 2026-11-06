@@ -77,6 +77,9 @@ namespace SplitShare.Api.Migrations.SqlServer
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<bool>("Excluded")
+                        .HasColumnType("bit");
+
                     b.Property<long>("FeeCents")
                         .HasColumnType("bigint");
 

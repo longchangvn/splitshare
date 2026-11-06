@@ -68,7 +68,7 @@ public sealed class LedgerService(AppDbContext db)
 
         var nets = memberIds.ToDictionary(id => id, _ => 0L);
         var expenses = await db.Expenses
-            .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+            .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null && !e.Excluded)
             .Include(e => e.Splits).ToListAsync();
         var payments = await db.Payments
             .Where(p => p.GroupId == groupId && p.Status == ExpenseStatus.Open && p.ReversedAt == null)
@@ -120,6 +120,12 @@ public sealed class LedgerService(AppDbContext db)
     {
         var snapshot = await ComputeNetsAsync(groupId)
             ?? throw new InvalidOperationException("Group not found.");
+        return await RecomputeAsync(groupId, snapshot);
+    }
+
+    /// <summary>Same as <see cref="RecomputeAsync(Guid)"/> for a snapshot the caller already computed.</summary>
+    public async Task<(SettlementPlan Plan, SettlementResult Result)> RecomputeAsync(Guid groupId, GroupNets snapshot)
+    {
         var result = SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts);
 
         // Inputs unchanged vs the current plan -> reuse it instead of writing
@@ -196,7 +202,7 @@ public sealed class LedgerService(AppDbContext db)
         long AmountCents, Guid? PayerId, string? PayerName, Guid? FromUserId, string? FromName,
         Guid? ToUserId, string? ToName,
         long MyShareCents, string Status, bool HasImage, bool Reversed, string? Category = null,
-        Guid? CreatedBy = null);
+        Guid? CreatedBy = null, bool Excluded = false);
 
     public sealed record OweTo(Guid ToUserId, string ToName, long AmountCents);
     public sealed record OwedFrom(Guid FromUserId, string FromName, long AmountCents);
@@ -229,8 +235,8 @@ public sealed class LedgerService(AppDbContext db)
         long TotalPaidCents, long TotalShareCents, long NetCents, long OweCents);
 
     /// <summary>
-    /// Per-member aggregates: total paid and total share across all non-deleted
-    /// expenses (any status — locked history still counts), plus the current
+    /// Per-member aggregates: total paid and total share across all non-deleted,
+    /// enabled expenses (any status — locked history still counts), plus the current
     /// net debt (OPEN ledger only, same basis as settlement).
     /// </summary>
     public async Task<List<MemberSummary>?> BuildSummaryAsync(Guid groupId)
@@ -239,7 +245,7 @@ public sealed class LedgerService(AppDbContext db)
         if (group is null || group.DeletedAt is not null) return null;
 
         var expenses = await db.Expenses
-            .Where(e => e.GroupId == groupId && e.DeletedAt == null)
+            .Where(e => e.GroupId == groupId && e.DeletedAt == null && !e.Excluded)
             .Include(e => e.Splits).ToListAsync();
         var snapshot = await ComputeNetsAsync(groupId);
 
@@ -319,7 +325,7 @@ public sealed class LedgerService(AppDbContext db)
                     e.PayerId, NameOf(names, e.PayerId), null, null, null, null,
                     e.Splits.FirstOrDefault(s => s.UserId == requesterId)?.ShareCents ?? 0L,
                     e.Status.ToString().ToUpperInvariant(), e.Images.Count > 0, false, e.Category,
-                    e.CreatedBy)));
+                    e.CreatedBy, e.Excluded)));
             }
         }
         if (f.Type is "all" or "payment")
@@ -397,6 +403,32 @@ public sealed class LedgerService(AppDbContext db)
 
     private static readonly Dictionary<(Guid, Guid), long> EmptyPairs = new();
 
+    public sealed record RawDebt(Guid FromUserId, string FromName, Guid ToUserId, string ToName, long AmountCents);
+
+    /// <summary>
+    /// Group-wide raw payer-based debts (no settlement optimization): every split share
+    /// owed to its payer, accumulated and netted only within each pair of people
+    /// (payments and reverse-direction expenses offset the pair). Per person,
+    /// sum(owed to them) - sum(they owe) equals their net.
+    /// </summary>
+    public static List<RawDebt> RawDebts(GroupNets snapshot)
+    {
+        var pairs = new Dictionary<(Guid Lo, Guid Hi), long>(); // positive = Lo owes Hi
+        foreach (var ((debtor, creditor), amount) in snapshot.PairDebts ?? EmptyPairs)
+        {
+            var lo = debtor.CompareTo(creditor) < 0;
+            var key = lo ? (debtor, creditor) : (creditor, debtor);
+            pairs.TryGetValue(key, out var c);
+            pairs[key] = c + (lo ? amount : -amount);
+        }
+        return pairs.Where(kv => kv.Value != 0)
+            .Select(kv => kv.Value > 0
+                ? new RawDebt(kv.Key.Lo, NameOf(snapshot.Names, kv.Key.Lo), kv.Key.Hi, NameOf(snapshot.Names, kv.Key.Hi), kv.Value)
+                : new RawDebt(kv.Key.Hi, NameOf(snapshot.Names, kv.Key.Hi), kv.Key.Lo, NameOf(snapshot.Names, kv.Key.Lo), -kv.Value))
+            .OrderByDescending(d => d.AmountCents).ThenBy(d => d.FromUserId).ThenBy(d => d.ToUserId)
+            .ToList();
+    }
+
     /// <summary>Per-group personal view: net + owes/owed-to from current transfers (task 7.2).</summary>
     public async Task<MeView?> BuildMeAsync(Guid groupId, Guid userId)
     {
@@ -431,7 +463,7 @@ public sealed class LedgerService(AppDbContext db)
             .Select(g => new { GroupId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.GroupId, x => x.Count);
         var spentByGroup = await db.Expenses
-            .Where(e => groupIds.Contains(e.GroupId) && e.DeletedAt == null)
+            .Where(e => groupIds.Contains(e.GroupId) && e.DeletedAt == null && !e.Excluded)
             .GroupBy(e => e.GroupId)
             .Select(g => new { GroupId = g.Key, Spent = g.Sum(e => e.AmountCents) })
             .ToDictionaryAsync(x => x.GroupId, x => x.Spent);
@@ -448,7 +480,7 @@ public sealed class LedgerService(AppDbContext db)
             netByCurrency[g.Currency] = (agg.Net + net, agg.Groups + 1);
             var needsSettlement = snapshot.Nets.Values.Any(v => v != 0);
             var oldest = await db.Expenses
-                .Where(e => e.GroupId == g.Id && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+                .Where(e => e.GroupId == g.Id && e.Status == ExpenseStatus.Open && e.DeletedAt == null && !e.Excluded)
                 .Select(e => (DateTime?)e.CreatedAt).MinAsync()
                 ?? await db.Payments
                     .Where(p => p.GroupId == g.Id && p.Status == ExpenseStatus.Open && p.ReversedAt == null)

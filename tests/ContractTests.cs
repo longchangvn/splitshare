@@ -30,6 +30,17 @@ public sealed class ContractTests
     }
 
     [Fact]
+    public void ExcludedToggle_And_RawDebts_AreSnake()
+    {
+        var dto = JsonSerializer.Deserialize<ExpenseEndpoints.ExcludedDto>("""{"excluded":true}""", Opts);
+        Assert.True(dto!.Excluded);
+        var json = JsonSerializer.Serialize(
+            new Api.Services.LedgerService.RawDebt(Guid.Empty, "B", Guid.Empty, "A", 700), Opts);
+        foreach (var k in new[] { "from_user_id", "from_name", "to_user_id", "to_name", "amount_cents" })
+            Assert.Contains($"\"{k}\"", json);
+    }
+
+    [Fact]
     public void Policy_Conversions()
     {
         var p = new SnakeCaseNamingPolicy();

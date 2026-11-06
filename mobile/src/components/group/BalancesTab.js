@@ -1,20 +1,26 @@
-// Balances tab — web BalancesPanel: debtors grouped with their transfers, Nudge + Pay.
-import React from 'react';
+// Balances tab — web BalancesPanel: debtors grouped with their transfers, Nudge + Pay,
+// plus the raw owe section (accumulated pairwise debts before optimization).
+import React, { useMemo } from 'react';
 import { View, Text } from 'react-native';
 import { fmt, displayNameOf } from '../../api/client';
 import { colors, type } from '../../theme';
 import { useT } from '../../i18n';
+import { groupRawDebts } from '../../shared/expenseToggle';
 import { Card, Avatar, Button, Row, Empty } from '../../ui';
 import { ListRow, TextAction, p as parts } from './parts';
 
-export default function BalancesTab({ byDebtor, debtors, members, currency, meId, onNudge, onPay, nudging, canWrite }) {
+export default function BalancesTab({ byDebtor, debtors, rawDebts, members, currency, meId, onNudge, onPay, nudging, canWrite }) {
   const t = useT();
-  if (byDebtor.length === 0 && debtors.length === 0) {
+  const raw = useMemo(() => groupRawDebts(rawDebts), [rawDebts]);
+  if (byDebtor.length === 0 && debtors.length === 0 && raw.length === 0) {
     return <Empty emoji="🎉" title={t('net.allSettled')} sub={t('groupDetail.allSettledNobody')} />;
   }
   return (
     <View style={{ gap: 10 }}>
       <Text style={type.h2}>{t('groupDetail.whoOwes')}</Text>
+      {byDebtor.length === 0 && debtors.length === 0 ? (
+        <Text style={type.small}>{t('groupDetail.allSettledNobody')}</Text>
+      ) : null}
       {byDebtor.map(([from, list]) => {
         const name = displayNameOf(members, from);
         return (
@@ -53,6 +59,34 @@ export default function BalancesTab({ byDebtor, debtors, members, currency, meId
           </Card>
         );
       })}
+
+      {Array.isArray(rawDebts) ? (
+        <View style={{ gap: 10, marginTop: 8 }}>
+          <Text style={type.h2}>{t('groupDetail.rawOweTitle')}</Text>
+          <Text style={type.small}>{t('groupDetail.rawOweHint')}</Text>
+          {raw.length === 0 ? <Text style={type.small}>{t('groupDetail.rawOweEmpty')}</Text> : null}
+          {raw.map((g) => {
+            const name = g.from_name || displayNameOf(members, g.from_user_id);
+            return (
+              <Card key={g.from_user_id}>
+                <Row>
+                  <Avatar name={name} size={34} />
+                  <Text style={[type.h3, { flex: 1 }]} numberOfLines={1}>{t('groupDetail.owes', { name })}</Text>
+                  <Text style={parts.amount}>{t('groupDetail.rawOweTotal', { amount: fmt(g.total_cents, currency) })}</Text>
+                </Row>
+                <View style={{ marginTop: 6 }}>
+                  {g.items.map((x, i) => (
+                    <ListRow key={x.to_user_id} last={i === g.items.length - 1} style={{ paddingVertical: 8 }}>
+                      <Text style={[type.body, { flex: 1 }]} numberOfLines={1}>→ {x.to_name || displayNameOf(members, x.to_user_id)}</Text>
+                      <Text style={parts.amount}>{fmt(x.amount_cents, currency)}</Text>
+                    </ListRow>
+                  ))}
+                </View>
+              </Card>
+            );
+          })}
+        </View>
+      ) : null}
     </View>
   );
 }
