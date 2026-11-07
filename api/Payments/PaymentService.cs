@@ -79,7 +79,7 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
             };
             db.Payments.Add(p);
             await db.SaveChangesAsync();
-            var (plan, _) = await ledger.RecomputeAsync(groupId);
+            var plan = await ledger.ApplyPaymentAsync(groupId, from, to, cents);
             var settled = await TryLockAsync(groupId);
             if (tx is not null) await tx.CommitAsync();
             if (notifier is not null)
@@ -135,7 +135,7 @@ public sealed class PaymentService(AppDbContext db, LedgerService ledger, IDatab
             return new(false, "EXPENSE_LOCKED", "Group locked since; record a counter-payment.");
         p.ReversedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
-        var (plan, _) = await ledger.RecomputeAsync(p.GroupId);
+        var plan = await ledger.ApplyPaymentAsync(p.GroupId, p.FromUserId, p.ToUserId, -p.AmountCents);
         return new(true, null, null, new PaymentReversed(p, plan.VersionSeq));
     }
 }
