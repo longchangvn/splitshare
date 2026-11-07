@@ -35,7 +35,10 @@ Deep link test: `npx uri-scheme open splitshare://g/<token> --ios`.
 server, not a store build — and runs it as container app `mobile-expo[-<label>]`.
 Open `exp://<app>.<env-domain>` (or `exps://…`) in Expo Go; the run summary prints
 the URL + QR. Ingress allows plain HTTP because `exp://` is HTTP to Expo Go, and
-`EXPO_PACKAGER_PROXY_URL` points the manifest at the public origin. Local check:
+`EXPO_PACKAGER_PROXY_URL` points the manifest at the public origin. Expo Go on a
+physical iPhone only opens dev manifests signed for its signed-in account, so the
+GitHub environment needs `secrets.EXPO_TOKEN` (access token of that Expo account) and
+`vars.EXPO_PROJECT_ID` (or `extra.eas.projectId` in `app.json`). Local check:
 
 ```sh
 docker build -t splitshare-mobile mobile

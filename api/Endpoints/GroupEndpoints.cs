@@ -17,7 +17,9 @@ public static class GroupEndpoints
             "FORBIDDEN" => 403,
             "GROUP_READ_ONLY" => 403,
             "GROUP_FULL" => 403,
-            "INVITE_ROTATED" => 410,
+            "INVITE_ROTATED" or "INVITE_INVALID" or "INVITE_EXPIRED" or "INVITE_USED" => 410,
+            "ACCOUNT_EXISTS" => 409,
+            "UNAUTH" => 401,
             "HAS_OPEN_BALANCE" => 422,
             "STALE_LEDGER" => 409,
             _ => 422
@@ -120,6 +122,10 @@ public static class GroupEndpoints
         api.MapPost("/groups/join", async (JoinDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.JoinByTokenAsync(Me(p), d.Token)));
 
+        // Signed-in acceptance of an emailed /invite/{token} (e.g. after Google sign-in).
+        api.MapPost("/invitations/{token}/join", async (string token, ClaimsPrincipal p, GroupService svc) =>
+            ToResult(await svc.JoinInvitationAsync(Me(p), token)));
+
         api.MapPost("/groups/{id:guid}/rotate-invite", async (Guid id, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.RotateInviteAsync(Me(p), id)));
 
@@ -162,7 +168,30 @@ public static class GroupEndpoints
             var memberCount = await db.GroupMembers.CountAsync(m => m.GroupId == g.Id);
             return Results.Ok(new { name = g.Name, currency = g.Currency, member_count = memberCount });
         });
+
+        // Emailed per-address invitation (/invite/{token} landing): preview, then accept
+        // by choosing a password — creates the account with default fields and joins.
+        v1.MapGet("/invitations/{token}", async (string token, GroupService svc) =>
+            ToResult(await svc.InvitationPreviewAsync(token)));
+
+        v1.MapPost("/invitations/{token}/accept", async (string token, AcceptInvitationDto d,
+            GroupService svc, AuthService auth) =>
+        {
+            var r = await svc.AcceptInvitationAsync(token, d.Password, auth);
+            if (!r.Ok) return ToResult(r);
+            var a = (InviteAccepted)r.Data!;
+            var s = await auth.SignInAsync(a.User);
+            return Results.Created($"/api/v1/groups/{a.GroupId}", new
+            {
+                user = AuthEndpoints.UserDto(a.User),
+                access_token = s.Tokens!.AccessToken, token_type = "Bearer",
+                refresh_token = s.Tokens.RefreshToken,
+                group_id = a.GroupId
+            });
+        }).RequireRateLimiting("auth-ip");
     }
+
+    public sealed record AcceptInvitationDto(string? Password);
 
     public sealed record CategoryDto(string Name);
 

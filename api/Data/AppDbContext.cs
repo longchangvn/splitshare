@@ -133,6 +133,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => new { x.GroupId, x.Email }).IsUnique();
+            e.Property(x => x.TokenHash).HasMaxLength(128);
+            e.HasIndex(x => x.TokenHash);
         });
         b.Entity<MembershipArchive>(e =>
         {

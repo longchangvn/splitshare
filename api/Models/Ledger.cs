@@ -31,6 +31,7 @@ public sealed class Expense
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public int Version { get; set; } = 1; // optimistic locking (expected_version)
     public DateTime? DeletedAt { get; set; } // soft delete
+    public bool Excluded { get; set; } // disabled: kept in the ledger, left out of balances/settlement
     public List<ExpenseSplit> Splits { get; set; } = [];
     public List<ExpenseImage> Images { get; set; } = [];
     // Trip-pack richness (all optional, additive).

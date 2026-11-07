@@ -3,6 +3,7 @@
 // Home · Groups · Activity · Settings and a global "+ Add expense" FAB → Quick Add.
 // Deep links: splitshare://g/<token> + https://app/g/<token> -> Join
 // (POST /groups/join idempotent; 410 INVITE_ROTATED / 404).
+// splitshare://invite/<token> -> Invitation (emailed per-address invite: accept / join).
 import React from 'react';
 import { Text, View, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
@@ -30,7 +31,8 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import StatementScreen from './src/screens/StatementScreen';
 import ReportScreen from './src/screens/ReportScreen';
 import InviteScreen from './src/screens/InviteScreen';
-import { api, groupIdOf } from './src/api/client';
+import InvitationScreen from './src/screens/InvitationScreen';
+import JoinScreen from './src/screens/JoinScreen';
 import { colors, shadow } from './src/theme';
 import { ToastHost } from './src/ui';
 import { registerPush, addNotificationResponseListener } from './src/push/notifications';
@@ -52,42 +54,13 @@ const linking = {
         },
       },
       Join: 'g/:token',
+      Invitation: 'invite/:token',
       Reset: 'reset/:token',
       GroupDetail: 'groups/:id',
       ExpenseDetail: 'groups/:groupId/expenses/:expenseId',
     },
   },
 };
-
-function JoinScreen({ route, navigation }) {
-  const { user } = useAuth();
-  const t = useT();
-  const { token } = route.params || {};
-  const [msg, setMsg] = React.useState(null);
-  React.useEffect(() => {
-    if (!user) return;
-    (async () => {
-      try {
-        const g = await api.post('/api/v1/groups/join', { token });
-        const gid = groupIdOf(g);
-        if (gid) navigation.replace('GroupDetail', { id: gid });
-        else setMsg(t('m.join.joinedOpenGroups'));
-      } catch (e) {
-        setMsg(e.code === 'INVITE_ROTATED' ? t('m.join.rotated') : t('m.join.failed', { reason: e.message || e.code }));
-      }
-    })();
-  }, [token, user]);
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12, backgroundColor: colors.screen }}>
-      <Text>{msg || (user ? t('m.join.joining') : t('m.join.signIn'))}</Text>
-      {!user ? (
-        <Text style={{ color: colors.primaryText, fontWeight: '700' }} onPress={() => navigation.navigate('Login')}>
-          {t('m.join.goLogin')}
-        </Text>
-      ) : null}
-    </View>
-  );
-}
 
 const TAB_ICON = { Home: '⌂', Groups: '◫', Activity: '◷', Settings: '⚙' };
 const TAB_LABEL = { Home: 'nav.home', Groups: 'nav.groups', Activity: 'nav.activity', Settings: 'nav.settings' };
@@ -142,10 +115,12 @@ function Main() {
 }
 
 function Root({ navigationRef }) {
-  const { user, loading } = useAuth();
+  const { user, loading, takePostAuthRoute } = useAuth();
   const t = useT();
   React.useEffect(() => {
     if (!user) return undefined;
+    const next = takePostAuthRoute();
+    if (next) setTimeout(() => navigationRef.current?.navigate(next.name, next.params), 0);
     registerPush().catch(() => {});
     return addNotificationResponseListener((name, params) => navigationRef.current?.navigate(name, params));
   }, [user?.id]);
@@ -171,7 +146,8 @@ function Root({ navigationRef }) {
             <Stack.Screen name="Reset" component={ResetScreen} options={{ title: t('auth.resetPassword') }} />
             <Stack.Screen name="GoogleToken" component={GoogleTokenScreen} options={{ title: t('auth.signInGoogle') }} />
           </Stack.Group>
-          <Stack.Screen name="Join" component={JoinScreen} options={{ title: '' }} />
+          <Stack.Screen name="Join" component={JoinScreen} options={{ headerShown: false }} />
+          <Stack.Screen name="Invitation" component={InvitationScreen} options={{ headerShown: false }} />
         </>
       ) : (
         <>
@@ -190,6 +166,7 @@ function Root({ navigationRef }) {
           <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('m.nav.profile') }} />
           <Stack.Screen name="System" component={SystemScreen} options={{ title: t('m.settings.offlinePush') }} />
           <Stack.Screen name="Join" component={JoinScreen} options={{ title: '' }} />
+          <Stack.Screen name="Invitation" component={InvitationScreen} options={{ title: '' }} />
         </>
       )}
     </Stack.Navigator>

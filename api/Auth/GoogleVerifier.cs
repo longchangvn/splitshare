@@ -17,6 +17,10 @@ public sealed class GoogleVerifier(HttpClient http, IConfiguration config)
         var clientId = config["Auth:GoogleClientId"];
         if (string.IsNullOrWhiteSpace(clientId))
             throw new InvalidOperationException("Auth:GoogleClientId not configured.");
+        // Native apps get ID tokens issued to their own iOS/Android OAuth clients.
+        var audiences = (config["Auth:GoogleExtraClientIds"] ?? "")
+            .Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Prepend(clientId).Distinct().ToArray();
 
         if (_cached is null || DateTime.UtcNow - _cachedAt > TimeSpan.FromHours(1))
         {
@@ -36,7 +40,7 @@ public sealed class GoogleVerifier(HttpClient http, IConfiguration config)
             var principal = handler.ValidateToken(idToken, new TokenValidationParameters
             {
                 ValidIssuers = ["https://accounts.google.com", "accounts.google.com"],
-                ValidAudience = clientId,
+                ValidAudiences = audiences,
                 IssuerSigningKeys = _cached.Keys,
                 ValidateLifetime = true,
                 ClockSkew = TimeSpan.FromMinutes(2)

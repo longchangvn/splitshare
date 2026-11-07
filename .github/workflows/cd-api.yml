@@ -6,6 +6,10 @@ name: CD API — Azure Container Apps
 # environment, container app) and updates an existing container app in place —
 # image, env vars, ingress and registry config — without ever deleting it.
 #
+# Env vars: the GitHub environment is the source of truth. Every ENV_MAP entry
+# with a non-empty GitHub var/secret overwrites the container app value; empty
+# ones keep whatever is configured on Azure.
+#
 # Every push/merge is gated by the build-only "CI API" workflow instead; this
 # CD workflow is what turns a green commit into a deployment.
 #
@@ -79,17 +83,21 @@ jobs:
           GH_NOTIFICATION__PROVIDER: ${{ vars.NOTIFICATION__PROVIDER }}
           GH_NOTIFICATION__ONESIGNAL__APPID: ${{ vars.NOTIFICATION__ONESIGNAL__APPID }}
           GH_NOTIFICATION__ONESIGNAL__APIKEY: ${{ secrets.NOTIFICATION__ONESIGNAL__APIKEY }}
-          GH_EMAIL__PROVIDER: ${{ vars.EMAIL__PROVIDER }}
+          GH_EMAIL__PROVIDER: ${{ vars.EMAIL__PROVIDER || 'sendgrid' }}
+          GH_EMAIL__TWILIO__APIKEY: ${{ secrets.EMAIL__TWILIO__APIKEY }}
           GH_EMAIL__FROMNAME: ${{ vars.EMAIL__FROMNAME }}
           GH_EMAIL__FROMADDRESS: ${{ vars.EMAIL__FROMADDRESS }}
           GH_DATABASE__SQLSERVER: ${{ secrets.DATABASE__SQLSERVER }}
-          GH_DATABASE__PROVIDER: ${{ vars.DATABASE__PROVIDER || 'sqlserver' }}
-          GH_ASPNETCORE_ENVIRONMENT: ${{ vars.ASPNETCORE_ENVIRONMENT || 'Production' }}
-          GH_UPLOADS__PATH: ${{ vars.UPLOADS__PATH || '/data/uploads' }}
+          # No `|| 'default'` here: GitHub values overwrite the container app,
+          # so defaults are applied in the script only when nothing is set.
+          GH_DATABASE__PROVIDER: ${{ vars.DATABASE__PROVIDER }}
+          GH_ASPNETCORE_ENVIRONMENT: ${{ vars.ASPNETCORE_ENVIRONMENT }}
+          GH_UPLOADS__PATH: ${{ vars.UPLOADS__PATH }}
           GH_AUTH__GOOGLECLIENTID: ${{ vars.AUTH__GOOGLECLIENTID }}
           GH_OCR__ENABLED: ${{ vars.OCR__ENABLED }}
           GH_OCR__MODEL: ${{ vars.OCR__MODEL }}
           GH_OCR__APIKEY: ${{ secrets.OCR__APIKEY }}
+          GH_CORS__ALLOWEDORIGINS__1: ${{ vars.Cors__AllowedOrigins__1 }}
           # Kept out of the run script: any ${{ }} inside it makes the whole
           # script one expression, which exceeds GitHub's 21000-char limit.
           WEB_BASE_VAR: ${{ vars.SPLITSHARE_WEB_BASE_URL }}
@@ -343,16 +351,30 @@ jobs:
             echo "::warning::Web base URL unknown (no SPLITSHARE_WEB_BASE_URL var; SWA '$SWA_NAME' not found) — App__BaseUrl skipped; links keep the localhost default until a later run."
           fi
 
+          # Defaults apply only when GitHub has no value AND the base revision
+          # doesn't already define the var (so they never clobber Azure values).
+          for d in "Database__Provider:GH_DATABASE__PROVIDER:sqlserver" \
+                   "ASPNETCORE_ENVIRONMENT:GH_ASPNETCORE_ENVIRONMENT:Production" \
+                   "Uploads__Path:GH_UPLOADS__PATH:/data/uploads"; do
+            IFS=':' read -r d_name d_src d_val <<< "$d"
+            if [ -z "${!d_src:-}" ] && [ -z "$(base_env "$d_name")" ]; then
+              printf -v "$d_src" '%s' "$d_val"
+            fi
+          done
+
           # Generic env sync: forward all allowlisted GitHub env vars/secrets to the
-          # container app, but only if not already configured there (existing values win).
+          # container app. GitHub values overwrite what's configured there; vars
+          # with an empty GitHub value are left untouched (never deleted).
           EXISTING_NAMES=$(jq -r '(.containers[0].env // [])[].name' /tmp/base-template.json)
           ENV_SYNC_NAMES=()
           ENV_SYNC_VALUES=()
           env_sync_add() {
-            local name="$1" value="$2" is_secret="$3"
+            local name="$1" value="$2" is_secret="$3" policy="${4:-}"
             if [ -z "$value" ]; then return; fi
-            if echo "$EXISTING_NAMES" | grep -qxF "$name"; then
-              echo "Skipping $name — already configured on container app."
+            local exists=""
+            echo "$EXISTING_NAMES" | grep -qxF "$name" && exists=1
+            if [ -n "$exists" ] && [ "$policy" = "keep" ]; then
+              echo "Keeping $name — already configured on container app."
               return
             fi
             if [ "$is_secret" = "true" ]; then
@@ -360,9 +382,14 @@ jobs:
             fi
             ENV_SYNC_NAMES+=("$name")
             ENV_SYNC_VALUES+=("$value")
-            echo "Will set $name from GitHub environment."
+            if [ -n "$exists" ]; then
+              echo "Overwriting $name from GitHub environment."
+            else
+              echo "Will set $name from GitHub environment."
+            fi
           }
-          # Container env var mapping: "<container-name>:<source-variable>:<isSecret>".
+          # Container env var mapping: "<container-name>:<source-variable>:<isSecret>[:keep]".
+          # `keep` = existing container app value wins (for derived, non-GitHub values).
           # Source is a shell variable name (GitHub value exported in the step env,
           # or a value computed above). To add/change a container env var, edit ONLY
           # this list — no other pipeline change is needed.
@@ -371,6 +398,7 @@ jobs:
             "Notification__OneSignal__AppId:GH_NOTIFICATION__ONESIGNAL__APPID:false"
             "Notification__OneSignal__ApiKey:GH_NOTIFICATION__ONESIGNAL__APIKEY:true"
             "Email__Provider:GH_EMAIL__PROVIDER:false"
+            "Email__Twilio__ApiKey:GH_EMAIL__TWILIO__APIKEY:true"
             "Email__FromName:GH_EMAIL__FROMNAME:false"
             "Email__FromAddress:GH_EMAIL__FROMADDRESS:false"
             "Database__SqlServer:GH_DATABASE__SQLSERVER:true"
@@ -379,14 +407,15 @@ jobs:
             "Jwt__Key:JWT_KEY:true"
             "Uploads__Path:GH_UPLOADS__PATH:false"
             "Auth__GoogleClientId:GOOGLE_CLIENT_ID:false"
-            "Cors__AllowedOrigins__0:SWA_CORS:false"
+            "Cors__AllowedOrigins__0:SWA_CORS:false:keep"
+            "Cors__AllowedOrigins__1:GH_CORS__ALLOWEDORIGINS__1:false"
             "Ocr__Enabled:GH_OCR__ENABLED:false"
             "Ocr__Model:GH_OCR__MODEL:false"
             "Ocr__ApiKey:GH_OCR__APIKEY:true"
           )
           for entry in "${ENV_MAP[@]}"; do
-            IFS=':' read -r name src is_secret <<< "$entry"
-            env_sync_add "$name" "${!src:-}" "$is_secret"
+            IFS=':' read -r name src is_secret policy <<< "$entry"
+            env_sync_add "$name" "${!src:-}" "$is_secret" "$policy"
           done
 
           if [ -n "$APP_EXISTS" ]; then

@@ -46,13 +46,13 @@ const check = (name, cond, extra = '') => {
 };
 
 // 1. no fragment -> totally inert
-calls.replaces.length = 0;
+calls.replaces.length = 0; calls.nav.length = 0;
 globalThis.window = makeWindow({ hash: '', opener: null });
 mod.consumeReturn();
 check('no fragment is a no-op', calls.replaces.length === 0);
 
 // 2. success with an opener -> parks, pings opener, closes
-store.clear(); calls.posts.length = 0; calls.replaces.length = 0;
+store.clear(); calls.posts.length = 0; calls.replaces.length = 0; calls.nav.length = 0;
 const opener = { closed: false, postMessage: (msg, origin) => calls.posts.push({ msg, origin }) };
 globalThis.window = makeWindow({ hash: '#id_token=TK1&state=%2Fgroups%2F5', opener });
 mod.consumeReturn();
@@ -67,7 +67,7 @@ check('did not ALSO navigate (would double-exchange)', !calls.nav.includes('/log
 check('parked token is consumed exactly once', mod.takePending() === null);
 
 // 3. hostile state cannot escape the origin
-store.clear(); calls.replaces.length = 0;
+store.clear(); calls.replaces.length = 0; calls.nav.length = 0;
 globalThis.window = makeWindow({ hash: '#id_token=TK2&state=%2F%2Fevil.com', opener: null });
 mod.consumeReturn();
 parked = mod.takePending();
@@ -76,14 +76,14 @@ check('//host state dropped', parked?.next === null, JSON.stringify(parked));
 // 4. no opener -> finishes the flow in this document, WITHOUT navigating.
 //    A reload here would race the drain and kill the exchange in flight, which
 //    is what bounced users back to the login form after a successful consent.
-store.clear(); calls.replaces.length = 0;
+store.clear(); calls.replaces.length = 0; calls.nav.length = 0;
 globalThis.window = makeWindow({ hash: '#id_token=TK3', opener: null });
 mod.consumeReturn();
-check('no-opener does not navigate', calls.replaces.length === 0, JSON.stringify(calls.replaces));
+check('no-opener does not navigate', calls.nav.length === 0, JSON.stringify(calls.nav));
 check('token still parked for that page', mod.takePending()?.id_token === 'TK3');
 
 // 5. user cancels -> error payload, no token
-store.clear(); calls.replaces.length = 0;
+store.clear(); calls.replaces.length = 0; calls.nav.length = 0;
 globalThis.window = makeWindow({ hash: '#error=access_denied&error_description=User+cancelled', opener: null });
 mod.consumeReturn();
 parked = mod.takePending();
@@ -91,21 +91,21 @@ check('error parked without a token', !parked?.id_token && parked?.error === 'ac
 check('error_description decoded', parked?.error_description === 'User cancelled', JSON.stringify(parked));
 
 // 6. closed opener is treated as no opener -> same no-navigation finish
-store.clear(); calls.replaces.length = 0;
+store.clear(); calls.replaces.length = 0; calls.nav.length = 0;
 globalThis.window = makeWindow({ hash: '#id_token=TK4', opener: { closed: true } });
 mod.consumeReturn();
-check('closed opener does not navigate', calls.replaces.length === 0, JSON.stringify(calls.replaces));
+check('closed opener does not navigate', calls.nav.length === 0, JSON.stringify(calls.nav));
 check('token parked for local finish', mod.takePending()?.id_token === 'TK4');
 
 // 7. browser refuses to close the popup -> still must land somewhere usable
-store.clear(); calls.replaces.length = 0;
+store.clear(); calls.replaces.length = 0; calls.nav.length = 0;
 const opener2 = { closed: false, postMessage: (msg, origin) => calls.posts.push({ msg, origin }) };
 const w7 = makeWindow({ hash: '#id_token=TK5', opener: opener2 });
 w7.close = () => { /* browser blocks script-close */ };
 globalThis.window = w7;
 mod.consumeReturn();
 check('blocked close -> still pinged opener', calls.posts.at(-1)?.msg?.type === mod.PING);
-check('blocked close -> redirects so token is drained', calls.replaces.at(-1) === '/login', calls.replaces.at(-1));
+check('blocked close -> redirects so token is drained', calls.nav.at(-1) === '/login', calls.nav.at(-1));
 check('blocked close still parks token', mod.takePending()?.id_token === 'TK5');
 
 // 8. makeNonce must never throw — the original bug was a TypeError here that
@@ -127,12 +127,12 @@ check('no crypto does not throw (the original crash)', typeof n3 === 'string' &&
 check('nonces are distinct', n1 !== n2 && n2 !== n3 && n1 !== n3);
 
 // 9. storage blocked (private mode / quota): the fragment must survive
-store.clear(); ss.clear(); calls.replaces.length = 0;
+store.clear(); ss.clear(); calls.replaces.length = 0; calls.nav.length = 0;
 failStorage = true;
 globalThis.window = makeWindow({ hash: '#id_token=TK9', opener: null });
 mod.consumeReturn();
 failStorage = false;
-const last9 = calls.replaces.at(-1);
+const last9 = calls.nav.at(-1);
 check('storage failure keeps the fragment', last9.includes('id_token=TK9'), last9);
 check('storage failure still reaches /login', last9.startsWith('/login'), last9);
 
@@ -143,7 +143,7 @@ check('takePending falls back to the URL fragment', rec?.id_token === 'TK9', JSO
 check('the fragment is consumed exactly once', mod.takePending() === null);
 
 // 11. mobile redirect flow must never treat its own tab as a popup
-store.clear(); ss.clear(); calls.posts.length = 0; calls.replaces.length = 0;
+store.clear(); ss.clear(); calls.posts.length = 0; calls.replaces.length = 0; calls.nav.length = 0;
 ss.set(mod.REDIRECT_FLOW_KEY, '1');
 const opener3 = { closed: false, postMessage: (m, o) => calls.posts.push({ m, o }) };
 const w11 = makeWindow({ hash: '#id_token=TK11', opener: opener3 });
@@ -152,11 +152,11 @@ globalThis.window = w11;
 mod.consumeReturn();
 check('redirect flow does not ping an opener', calls.posts.length === 0, JSON.stringify(calls.posts));
 check('redirect flow leaves its own tab open', w11.closed === false);
-check('redirect flow does not reload the tab (the bug that ate the token)', calls.replaces.length === 0, JSON.stringify(calls.replaces));
+check('redirect flow does not reload the tab (the bug that ate the token)', calls.nav.length === 0, JSON.stringify(calls.nav));
 check('redirect flow marker is consumed', !ss.has(mod.REDIRECT_FLOW_KEY));
 
 // 12. the marker only applies to its own flow — desktop still hands off
-store.clear(); ss.clear(); calls.posts.length = 0; calls.replaces.length = 0;
+store.clear(); ss.clear(); calls.posts.length = 0; calls.replaces.length = 0; calls.nav.length = 0;
 const opener4 = { closed: false, postMessage: (m, o) => calls.posts.push({ m, o }) };
 const w12 = makeWindow({ hash: '#id_token=TK12', opener: opener4 });
 w12.close = () => { w12._closed = true; };
@@ -168,11 +168,11 @@ check('popup flow still closes', w12.closed === true);
 // 13. the regression this fix exists for: a successful consent on the redirect
 //     path must leave the token drainable in-place. Reordering these two calls
 //     is what silently discarded the sign-in.
-store.clear(); ss.clear(); calls.replaces.length = 0;
+store.clear(); ss.clear(); calls.replaces.length = 0; calls.nav.length = 0;
 globalThis.window = makeWindow({ hash: '#id_token=TK13&state=%2Fgroups%2F9', opener: null });
 mod.consumeReturn();
 const p13 = mod.takePending();
-check('no reload after a successful consent', calls.replaces.length === 0, JSON.stringify(calls.replaces));
+check('no reload after a successful consent', calls.nav.length === 0, JSON.stringify(calls.nav));
 check('token is drainable in-place', p13?.id_token === 'TK13', JSON.stringify(p13));
 check('dest survives the round trip', p13?.next === '/groups/9', JSON.stringify(p13));
 check('drained exactly once', mod.takePending() === null);

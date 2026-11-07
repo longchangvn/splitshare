@@ -3126,6 +3126,10 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
   text-decoration: line-through;
   opacity: 0.65;
 }
+.ledger-row.is-excluded .ledger-title,
+.ledger-row.is-excluded .ledger-amount,
+.ledger-row.is-excluded .ledger-meta { opacity: 0.5; }
+.ledger-row.is-excluded .ledger-amount { text-decoration: line-through; }
 .ledger-row:not(:last-child)::after {
   content: "";
   position: absolute;
@@ -3149,7 +3153,7 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
     104px
     104px
     92px
-    64px;
+    104px;
   align-items: center;
   column-gap: 16px;
   padding-left: 10px;
@@ -3184,7 +3188,7 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
 }
 .ledger-list.is-table .is-actions {
   justify-self: end;
-  width: 64px;
+  width: 104px;
 }
 .ledger-list.is-table .ledger-actions {
   justify-content: flex-end;
@@ -3415,7 +3419,7 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
       96px
       96px
       88px
-      56px;
+      100px;
     column-gap: 12px;
   }
 }

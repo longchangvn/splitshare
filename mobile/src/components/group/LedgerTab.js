@@ -7,6 +7,7 @@ import { colors, type } from '../../theme';
 import { useT } from '../../i18n';
 import { sanitizeMoneyInput } from '../../money';
 import { categoryLabelForKey, categorySelectData } from '../../shared/categories';
+import { ledgerTotals } from '../../shared/expenseToggle';
 import { Card, Input, Segmented, Button, SelectField, Field, Sheet, Badge, Row, Skeleton } from '../../ui';
 import { Tile, ListRow, useDateFmt, p as parts } from './parts';
 import { DEFAULT_FILTERS, activeFilterCount, isValidDateInput } from './helpers';
@@ -19,7 +20,8 @@ export default function LedgerTab({
   const d = useDateFmt();
   const [open, setOpen] = useState(false);
   const count = activeFilterCount(filters);
-  const totals = items.reduce((a, it) => ({ amount: a.amount + (it.amount_cents || 0), mine: a.mine + (it.my_share_cents || 0) }), { amount: 0, mine: 0 });
+  // Disabled expenses stay listed but do not count (API leaves them out of balances).
+  const totals = ledgerTotals(items);
 
   return (
     <View style={{ gap: 10 }}>
@@ -75,27 +77,43 @@ export default function LedgerTab({
               onPress={isExp ? () => onOpen(it) : undefined}
               onLongPress={isExp ? () => onItemActions(it) : undefined}
               accessibilityLabel={isExp ? t('groupDetail.openItem', { title: it.title }) : undefined}
-              style={it.reversed ? { opacity: 0.55 } : null}
+              style={it.reversed || it.excluded ? { opacity: 0.55 } : null}
             >
               <Tile item={it} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[type.h3, it.reversed && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
                   {it.title}{it.has_image ? ' 🧾' : ''}{it.reversed ? ` (${t('common.reversed')})` : ''}
+                  {it.excluded ? ` (${t('groupDetail.expenseDisabled')})` : ''}
                 </Text>
                 <Text style={parts.meta} numberOfLines={1}>{meta}</Text>
                 <Text style={[parts.meta, { color: colors.muted }]}>{d.date(it.created_at)}</Text>
               </View>
               <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                <Text style={parts.amount}>{fmt(it.amount_cents, currency)}</Text>
+                <Text style={[parts.amount, it.excluded && { textDecorationLine: 'line-through' }]}>{fmt(it.amount_cents, currency)}</Text>
                 <Text style={parts.meta}>{t('groupDetail.myShare')} {it.my_share_cents != null ? fmt(it.my_share_cents, currency) : '—'}</Text>
                 <Text style={[s.status, locked ? s.stLocked : s.stOpen]}>{locked ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}</Text>
               </View>
+              {isExp ? (
+                // ⋮ opens the item sheet (same as long-press); the include switch lives there.
+                <Pressable
+                  onPress={() => onItemActions(it)}
+                  hitSlop={8}
+                  style={s.more}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('groupDetail.expenseMore', { title: it.title })}
+                >
+                  <Text style={s.moreT}>⋮</Text>
+                </Pressable>
+              ) : null}
             </ListRow>
           );
         })}
         {items.length > 0 ? (
           <ListRow last>
-            <Text style={[type.h3, { flex: 1 }]}>{t('groupDetail.totalCount', { count: items.length })}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={type.h3}>{t('groupDetail.totalCount', { count: items.length })}</Text>
+              {totals.excluded > 0 ? <Text style={parts.meta}>{t('groupDetail.excludedNotCounted', { count: totals.excluded })}</Text> : null}
+            </View>
             <View style={{ alignItems: 'flex-end' }}>
               <Text style={parts.amount}>{fmt(totals.amount, currency)}</Text>
               <Text style={parts.meta}>{t('groupDetail.mine')} {fmt(totals.mine, currency)}</Text>
@@ -210,4 +228,6 @@ const s = StyleSheet.create({
   status: { fontSize: 10, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: 'hidden' },
   stOpen: { backgroundColor: colors.openBg, color: colors.openText },
   stLocked: { backgroundColor: colors.lockedBg, color: colors.lockedText },
+  more: { width: 20, height: 32, marginRight: -6, alignItems: 'center', justifyContent: 'center' },
+  moreT: { fontSize: 20, fontWeight: '700', color: colors.text },
 });

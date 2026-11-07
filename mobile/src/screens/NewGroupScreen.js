@@ -13,6 +13,8 @@ import { colors, type } from '../theme';
 import { Button, Card, ChipRow, ErrText, Field, Input, Row, Screen } from '../ui';
 import { getTemplates, subscribeCatalogs } from '../settingsStore';
 import { resolveTemplateKey } from '../shared/wizardUtils';
+import { inviteRows } from '../shared/inviteResults';
+import { InviteResultList, toastInviteResults } from '../components/group/InviteResultList';
 import { PersonRow } from '../components/home/parts';
 import {
   DEFAULT_CURRENCY, asList, boxContacts, nameOk as isNameOk, parseEmails, sortByName,
@@ -91,12 +93,13 @@ export default function NewGroupScreen({ navigation, route }) {
       const trimmed = name.trim();
       let g;
       let link = null;
+      let invites = null;
       if (tplKey) {
         g = await api.post('/api/v1/groups/from-template', { name: trimmed, currency: DEFAULT_CURRENCY, template: tplKey });
         const gid0 = groupIdOf(g);
         if (!gid0) { setE({ message: t('errors.noGroupId') }); return; }
         if (memberIds.length > 0) await api.post(`/api/v1/groups/${gid0}/members`, { user_ids: memberIds });
-        if (emailList.length > 0) await api.post(`/api/v1/groups/${gid0}/invites`, { emails: emailList });
+        if (emailList.length > 0) invites = await api.post(`/api/v1/groups/${gid0}/invites`, { emails: emailList });
         try {
           const sl = await api.post(`/api/v1/groups/${gid0}/share-link`, {});
           link = sl?.invite_link || sl?.link || null;
@@ -109,9 +112,12 @@ export default function NewGroupScreen({ navigation, route }) {
           invite_emails: emailList,
         });
         link = g?.invite_link || null;
+        invites = g?.invites || null;
       }
       const gid = groupIdOf(g);
       if (!gid) { setE({ message: t('errors.noGroupId') }); return; }
+      const inviteResult = invites ? inviteRows(invites) : [];
+      toastInviteResults(t, inviteResult);
       if (forExpense) {
         navigation.replace('AddExpense', { id: gid });
         return;
@@ -123,6 +129,7 @@ export default function NewGroupScreen({ navigation, route }) {
         currency: DEFAULT_CURRENCY,
         template: tplLabel,
         people: [...picked.map((p) => p.display_name), ...emailList],
+        inviteResult,
       });
     } catch (err) { setE(err); } finally { setCreating(false); }
   };
@@ -151,6 +158,9 @@ export default function NewGroupScreen({ navigation, route }) {
           </View>
           {created.people.length > 0 ? <Text style={s.people}>{created.people.join(', ')}</Text> : null}
         </View>
+        {created.inviteResult.length > 0 ? (
+          <Card><InviteResultList rows={created.inviteResult} style={{ marginTop: 0 }} /></Card>
+        ) : null}
         {created.link ? (
           <Card>
             <Text style={type.kicker}>{t('m.home.inviteLink')}</Text>

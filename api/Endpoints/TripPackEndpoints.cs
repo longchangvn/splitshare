@@ -260,7 +260,7 @@ public static class TripPackEndpoints
             if (g is null) return ApiResults.Error("NOT_FOUND", "Share link invalid.", 404);
             var snapshot = await ledger.ComputeNetsAsync(g.Id);
             if (snapshot is null) return ApiResults.Error("NOT_FOUND", "Group not found.", 404);
-            var result = SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts);
+            var transfers = await ledger.CurrentTransfersAsync(g.Id, snapshot);
             var summary = await ledger.BuildSummaryAsync(g.Id);
             string N(Guid u) => snapshot.Names.TryGetValue(u, out var n) ? n : "Unknown";
             return Results.Ok(new
@@ -273,7 +273,7 @@ public static class TripPackEndpoints
                     display_name = m.DisplayName,
                     paid_cents = m.TotalPaidCents, share_cents = m.TotalShareCents, net_cents = m.NetCents
                 }).ToList(),
-                transfers = result.Transfers.Select(t => new
+                transfers = transfers.Select(t => new
                 {
                     from = N(t.FromUserId), to = N(t.ToUserId), amount_cents = t.AmountCents
                 }).ToList()

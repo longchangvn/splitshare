@@ -11,33 +11,34 @@ public static class AuthEndpoints
     public static Guid? CurrentUserId(ClaimsPrincipal p)
         => Guid.TryParse(p.FindFirstValue(JwtRegisteredClaimNames.Sub), out var id) ? id : null;
 
-    private static object UserDto(Models.User u) => new
+    internal static object UserDto(Models.User u) => new
     {
         user_id = u.Id, username = u.Username, email = u.Email,
         display_name = u.DisplayName, phone = u.Phone,
         email_verified = u.EmailVerifiedAt is not null, has_password = u.PasswordHash is not null
     };
 
-    private static object PairDto(AuthResult r, List<Guid>? joined = null) => new
+    private static object PairDto(AuthResult r) => new
     {
         user = UserDto(r.User!),
         access_token = r.Tokens!.AccessToken, token_type = "Bearer",
         refresh_token = r.Tokens.RefreshToken,
-        auto_joined_groups = joined ?? []
+        auto_joined_groups = Array.Empty<Guid>()
     };
 
     public static void Map(RouteGroupBuilder v1)
     {
         var auth = v1.MapGroup("/auth").RequireRateLimiting("auth-ip");
 
-        auth.MapPost("/register", async (RegisterDto d, AuthService svc, Groups.GroupService groups) =>
+        // Email invites are never joined implicitly: only opening the invitation link
+        // (/invitations/{token}) adds the user, so auto_joined_groups stays empty.
+        auth.MapPost("/register", async (RegisterDto d, AuthService svc) =>
         {
             var r = await svc.RegisterAsync(d.Username, d.Email, d.DisplayName, d.Password, d.Phone);
             if (!r.Ok)
                 return ApiResults.Error(r.ErrorCode!, r.Error!,
                     r.ErrorCode == "VALIDATION" ? 422 : StatusCodes.Status409Conflict, r.Fields);
-            var joined = await groups.ConsumePendingInvitesAsync(r.User!.Email, r.User.Id);
-            return Results.Created("/api/v1/me", PairDto(r, joined));
+            return Results.Created("/api/v1/me", PairDto(r));
         });
 
         auth.MapPost("/login", async (LoginDto d, AuthService svc) =>
@@ -49,7 +50,7 @@ public static class AuthEndpoints
                 : ApiResults.Error(r.ErrorCode!, r.Error!, StatusCodes.Status401Unauthorized);
         });
 
-        auth.MapPost("/google", async (GoogleDto d, AuthService svc, GoogleVerifier verifier, Groups.GroupService groups) =>
+        auth.MapPost("/google", async (GoogleDto d, AuthService svc, GoogleVerifier verifier) =>
         {
             GoogleIdentity? g;
             try { g = await verifier.VerifyAsync(d.IdToken); }
@@ -58,8 +59,7 @@ public static class AuthEndpoints
             var r = await svc.GoogleAsync(g);
             if (!r.Ok)
                 return ApiResults.Error(r.ErrorCode!, r.Error!, StatusCodes.Status403Forbidden);
-            var joined = await groups.ConsumePendingInvitesAsync(r.User!.Email, r.User.Id);
-            return Results.Ok(PairDto(r, joined));
+            return Results.Ok(PairDto(r));
         });
 
         auth.MapPost("/refresh", async (RefreshDto d, AuthService svc) =>

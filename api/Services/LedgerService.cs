@@ -68,7 +68,7 @@ public sealed class LedgerService(AppDbContext db)
 
         var nets = memberIds.ToDictionary(id => id, _ => 0L);
         var expenses = await db.Expenses
-            .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+            .Where(e => e.GroupId == groupId && e.Status == ExpenseStatus.Open && e.DeletedAt == null && !e.Excluded)
             .Include(e => e.Splits).ToListAsync();
         var payments = await db.Payments
             .Where(p => p.GroupId == groupId && p.Status == ExpenseStatus.Open && p.ReversedAt == null)
@@ -120,6 +120,12 @@ public sealed class LedgerService(AppDbContext db)
     {
         var snapshot = await ComputeNetsAsync(groupId)
             ?? throw new InvalidOperationException("Group not found.");
+        return await RecomputeAsync(groupId, snapshot);
+    }
+
+    /// <summary>Same as <see cref="RecomputeAsync(Guid)"/> for a snapshot the caller already computed.</summary>
+    public async Task<(SettlementPlan Plan, SettlementResult Result)> RecomputeAsync(Guid groupId, GroupNets snapshot)
+    {
         var result = SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts);
 
         // Inputs unchanged vs the current plan -> reuse it instead of writing
@@ -128,7 +134,88 @@ public sealed class LedgerService(AppDbContext db)
         var current = await LatestPlanAsync(groupId);
         if (current is not null && current.InputsHash == snapshot.InputsHash)
             return (current, result);
+        return (await SavePlanAsync(groupId, snapshot.InputsHash, result), result);
+    }
 
+    /// <summary>
+    /// Plan after a payment is recorded (<paramref name="signedCents"/> &gt; 0) or reversed (&lt; 0).
+    /// Only expense changes re-optimize: a payment that fits a suggested transfer (same
+    /// from → to, no more than what is left) just shrinks it, and a reversal grows it back,
+    /// so the other suggested transfers never reshuffle. Anything else (off-plan payee,
+    /// paying more than the transfer, no or stale plan) falls back to a full re-optimize.
+    /// </summary>
+    public async Task<SettlementPlan> ApplyPaymentAsync(Guid groupId, Guid from, Guid to, long signedCents)
+    {
+        var snapshot = await ComputeNetsAsync(groupId)
+            ?? throw new InvalidOperationException("Group not found.");
+        var current = await LatestPlanAsync(groupId);
+        if (current is not null && current.InputsHash == snapshot.InputsHash) return current;
+
+        var adjusted = current is null ? null : AdjustTransfers(ReadTransfers(current), from, to, signedCents);
+        if (adjusted is null || !Reconciles(adjusted, snapshot.Nets))
+            return (await RecomputeAsync(groupId, snapshot)).Plan;
+        var result = SettlementService.Explain(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts, adjusted);
+        return await SavePlanAsync(groupId, snapshot.InputsHash, result);
+    }
+
+    /// <summary>
+    /// Transfers for the current ledger: the saved plan when it matches the inputs (so a
+    /// payment-adjusted plan is shown as-is), else a fresh optimization (not persisted).
+    /// </summary>
+    public async Task<List<SettlementTransfer>> CurrentTransfersAsync(Guid groupId, GroupNets snapshot)
+    {
+        var current = await LatestPlanAsync(groupId);
+        return current is not null && current.InputsHash == snapshot.InputsHash
+            ? ReadTransfers(current)
+            : SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts).Transfers;
+    }
+
+    private static List<SettlementTransfer>? AdjustTransfers(
+        List<SettlementTransfer> transfers, Guid from, Guid to, long signedCents)
+    {
+        var list = new List<SettlementTransfer>(transfers);
+        var i = list.FindIndex(t => t.FromUserId == from && t.ToUserId == to);
+        if (signedCents > 0)
+        {
+            if (i < 0 || signedCents > list[i].AmountCents) return null;
+            var left = list[i].AmountCents - signedCents;
+            if (left == 0) list.RemoveAt(i);
+            else list[i] = list[i] with { AmountCents = left };
+            return list;
+        }
+        // Reversal: the debt comes back on the same pair (re-added if the payment had cleared it).
+        if (signedCents == 0 || list.Any(t => t.FromUserId == to && t.ToUserId == from)) return null;
+        if (i < 0) list.Add(new SettlementTransfer(from, to, -signedCents));
+        else list[i] = list[i] with { AmountCents = list[i].AmountCents - signedCents };
+        return list;
+    }
+
+    /// <summary>True when the transfers settle exactly the given nets (debtor pays out -net, creditor receives net).</summary>
+    private static bool Reconciles(List<SettlementTransfer> transfers, IDictionary<Guid, long> nets)
+    {
+        var flow = new Dictionary<Guid, long>();
+        void Add(Guid id, long v) { flow.TryGetValue(id, out var c); flow[id] = c + v; }
+        foreach (var t in transfers)
+        {
+            if (t.AmountCents <= 0) return false;
+            Add(t.FromUserId, -t.AmountCents);
+            Add(t.ToUserId, t.AmountCents);
+        }
+        return nets.Keys.Union(flow.Keys).All(id =>
+            (nets.TryGetValue(id, out var n) ? n : 0L) == (flow.TryGetValue(id, out var f) ? f : 0L));
+    }
+
+    private static List<SettlementTransfer> ReadTransfers(SettlementPlan plan)
+    {
+        using var doc = JsonDocument.Parse(plan.TransfersJson);
+        return doc.RootElement.EnumerateArray().Select(t => new SettlementTransfer(
+            t.GetProperty("from_user_id").GetGuid(),
+            t.GetProperty("to_user_id").GetGuid(),
+            t.GetProperty("amount_cents").GetInt64())).ToList();
+    }
+
+    private async Task<SettlementPlan> SavePlanAsync(Guid groupId, string inputsHash, SettlementResult result)
+    {
         var transfersJson = JsonSerializer.Serialize(result.Transfers.Select(t =>
             new { from_user_id = t.FromUserId, to_user_id = t.ToUserId, amount_cents = t.AmountCents }));
         var explanationJson = JsonSerializer.Serialize(new
@@ -152,7 +239,7 @@ public sealed class LedgerService(AppDbContext db)
             {
                 GroupId = groupId,
                 VersionSeq = nextSeq + 1,
-                InputsHash = snapshot.InputsHash,
+                InputsHash = inputsHash,
                 TransfersJson = transfersJson,
                 ExplanationJson = explanationJson
             };
@@ -160,14 +247,14 @@ public sealed class LedgerService(AppDbContext db)
             try
             {
                 await db.SaveChangesAsync();
-                return (plan, result);
+                return plan;
             }
             catch (DbUpdateException ex) when (IsDuplicateKey(ex))
             {
                 db.Entry(plan).State = EntityState.Detached;
                 var winner = await LatestPlanAsync(groupId);
-                if (winner is not null && winner.InputsHash == snapshot.InputsHash)
-                    return (winner, result);
+                if (winner is not null && winner.InputsHash == inputsHash)
+                    return winner;
                 if (attempt >= 4) throw;
             }
         }
@@ -196,7 +283,7 @@ public sealed class LedgerService(AppDbContext db)
         long AmountCents, Guid? PayerId, string? PayerName, Guid? FromUserId, string? FromName,
         Guid? ToUserId, string? ToName,
         long MyShareCents, string Status, bool HasImage, bool Reversed, string? Category = null,
-        Guid? CreatedBy = null);
+        Guid? CreatedBy = null, bool Excluded = false);
 
     public sealed record OweTo(Guid ToUserId, string ToName, long AmountCents);
     public sealed record OwedFrom(Guid FromUserId, string FromName, long AmountCents);
@@ -229,8 +316,8 @@ public sealed class LedgerService(AppDbContext db)
         long TotalPaidCents, long TotalShareCents, long NetCents, long OweCents);
 
     /// <summary>
-    /// Per-member aggregates: total paid and total share across all non-deleted
-    /// expenses (any status — locked history still counts), plus the current
+    /// Per-member aggregates: total paid and total share across all non-deleted,
+    /// enabled expenses (any status — locked history still counts), plus the current
     /// net debt (OPEN ledger only, same basis as settlement).
     /// </summary>
     public async Task<List<MemberSummary>?> BuildSummaryAsync(Guid groupId)
@@ -239,7 +326,7 @@ public sealed class LedgerService(AppDbContext db)
         if (group is null || group.DeletedAt is not null) return null;
 
         var expenses = await db.Expenses
-            .Where(e => e.GroupId == groupId && e.DeletedAt == null)
+            .Where(e => e.GroupId == groupId && e.DeletedAt == null && !e.Excluded)
             .Include(e => e.Splits).ToListAsync();
         var snapshot = await ComputeNetsAsync(groupId);
 
@@ -319,7 +406,7 @@ public sealed class LedgerService(AppDbContext db)
                     e.PayerId, NameOf(names, e.PayerId), null, null, null, null,
                     e.Splits.FirstOrDefault(s => s.UserId == requesterId)?.ShareCents ?? 0L,
                     e.Status.ToString().ToUpperInvariant(), e.Images.Count > 0, false, e.Category,
-                    e.CreatedBy)));
+                    e.CreatedBy, e.Excluded)));
             }
         }
         if (f.Type is "all" or "payment")
@@ -397,6 +484,32 @@ public sealed class LedgerService(AppDbContext db)
 
     private static readonly Dictionary<(Guid, Guid), long> EmptyPairs = new();
 
+    public sealed record RawDebt(Guid FromUserId, string FromName, Guid ToUserId, string ToName, long AmountCents);
+
+    /// <summary>
+    /// Group-wide raw payer-based debts (no settlement optimization): every split share
+    /// owed to its payer, accumulated and netted only within each pair of people
+    /// (payments and reverse-direction expenses offset the pair). Per person,
+    /// sum(owed to them) - sum(they owe) equals their net.
+    /// </summary>
+    public static List<RawDebt> RawDebts(GroupNets snapshot)
+    {
+        var pairs = new Dictionary<(Guid Lo, Guid Hi), long>(); // positive = Lo owes Hi
+        foreach (var ((debtor, creditor), amount) in snapshot.PairDebts ?? EmptyPairs)
+        {
+            var lo = debtor.CompareTo(creditor) < 0;
+            var key = lo ? (debtor, creditor) : (creditor, debtor);
+            pairs.TryGetValue(key, out var c);
+            pairs[key] = c + (lo ? amount : -amount);
+        }
+        return pairs.Where(kv => kv.Value != 0)
+            .Select(kv => kv.Value > 0
+                ? new RawDebt(kv.Key.Lo, NameOf(snapshot.Names, kv.Key.Lo), kv.Key.Hi, NameOf(snapshot.Names, kv.Key.Hi), kv.Value)
+                : new RawDebt(kv.Key.Hi, NameOf(snapshot.Names, kv.Key.Hi), kv.Key.Lo, NameOf(snapshot.Names, kv.Key.Lo), -kv.Value))
+            .OrderByDescending(d => d.AmountCents).ThenBy(d => d.FromUserId).ThenBy(d => d.ToUserId)
+            .ToList();
+    }
+
     /// <summary>Per-group personal view: net + owes/owed-to from current transfers (task 7.2).</summary>
     public async Task<MeView?> BuildMeAsync(Guid groupId, Guid userId)
     {
@@ -406,15 +519,15 @@ public sealed class LedgerService(AppDbContext db)
             && await db.GroupMembers.FindAsync(groupId, userId) is null
             && await db.MembershipArchives.FindAsync(groupId, userId) is null)
             return null;
-        var result = SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts);
+        var transfers = await CurrentTransfersAsync(groupId, snapshot);
         var version = await db.SettlementPlans.Where(s => s.GroupId == groupId)
             .Select(s => (int?)s.VersionSeq).MaxAsync() ?? 0;
         string Name(Guid id) => snapshot.Names.TryGetValue(id, out var n) ? n : "Unknown";
         return new MeView(groupId, snapshot.Currency,
             snapshot.Nets.TryGetValue(userId, out var net) ? net : 0L,
-            result.Transfers.Where(t => t.FromUserId == userId)
+            transfers.Where(t => t.FromUserId == userId)
                 .Select(t => new OweTo(t.ToUserId, Name(t.ToUserId), t.AmountCents)).ToList(),
-            result.Transfers.Where(t => t.ToUserId == userId)
+            transfers.Where(t => t.ToUserId == userId)
                 .Select(t => new OwedFrom(t.FromUserId, Name(t.FromUserId), t.AmountCents)).ToList(),
             version);
     }
@@ -431,7 +544,7 @@ public sealed class LedgerService(AppDbContext db)
             .Select(g => new { GroupId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.GroupId, x => x.Count);
         var spentByGroup = await db.Expenses
-            .Where(e => groupIds.Contains(e.GroupId) && e.DeletedAt == null)
+            .Where(e => groupIds.Contains(e.GroupId) && e.DeletedAt == null && !e.Excluded)
             .GroupBy(e => e.GroupId)
             .Select(g => new { GroupId = g.Key, Spent = g.Sum(e => e.AmountCents) })
             .ToDictionaryAsync(x => x.GroupId, x => x.Spent);
@@ -448,7 +561,7 @@ public sealed class LedgerService(AppDbContext db)
             netByCurrency[g.Currency] = (agg.Net + net, agg.Groups + 1);
             var needsSettlement = snapshot.Nets.Values.Any(v => v != 0);
             var oldest = await db.Expenses
-                .Where(e => e.GroupId == g.Id && e.Status == ExpenseStatus.Open && e.DeletedAt == null)
+                .Where(e => e.GroupId == g.Id && e.Status == ExpenseStatus.Open && e.DeletedAt == null && !e.Excluded)
                 .Select(e => (DateTime?)e.CreatedAt).MinAsync()
                 ?? await db.Payments
                     .Where(p => p.GroupId == g.Id && p.Status == ExpenseStatus.Open && p.ReversedAt == null)
@@ -458,7 +571,7 @@ public sealed class LedgerService(AppDbContext db)
             memberCounts.TryGetValue(g.Id, out var memberCount);
             spentByGroup.TryGetValue(g.Id, out var spentCents);
             var (owes, owedToMe) = RawDebtsFor(snapshot, userId);
-            var myTransfers = OptimizedTransfersFor(snapshot, userId, net);
+            var myTransfers = await OptimizedTransfersForAsync(g.Id, snapshot, userId, net);
             rows.Add(new GroupRow(g.Id, g.Name, g.Currency, net, delinquent,
                 needsSettlement ? oldest : null, g.CreatedAt,
                 myRole, memberCount, spentCents, needsSettlement, g.Status,
@@ -491,18 +604,17 @@ public sealed class LedgerService(AppDbContext db)
     }
 
     /// <summary>
-    /// The settlement optimizer's transfers that involve me in this group — the
+    /// The settlement plan's transfers that involve me in this group — the
     /// "fewest transfers" view, not the raw pairwise debts (see RawDebtsFor).
     /// Zero nets are excluded by the optimizer itself, so a settled (or
     /// uninvolved) group yields an empty list; the sum-zero invariant is checked
     /// defensively instead of letting Compute throw on a malformed ledger.
     /// </summary>
-    private static List<MyTransfer> OptimizedTransfersFor(GroupNets snapshot, Guid userId, long net)
+    private async Task<List<MyTransfer>> OptimizedTransfersForAsync(Guid groupId, GroupNets snapshot, Guid userId, long net)
     {
         var empty = new List<MyTransfer>();
         if (net == 0 || snapshot.Nets.Values.Sum() != 0) return empty;
-        var result = SettlementService.Compute(snapshot.Nets, snapshot.Names, snapshot.Currency, snapshot.RawDebts);
-        return result.Transfers
+        return (await CurrentTransfersAsync(groupId, snapshot))
             .Where(t => t.FromUserId == userId || t.ToUserId == userId)
             .Select(t => new MyTransfer(
                 t.FromUserId, NameOf(snapshot.Names, t.FromUserId),

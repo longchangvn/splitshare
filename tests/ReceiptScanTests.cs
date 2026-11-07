@@ -370,7 +370,7 @@ public sealed class ReceiptScanTests
         var root = doc.RootElement;
         Assert.Equal(1, root.GetProperty("count").GetInt32());
         var listed = root.GetProperty("receipts").EnumerateArray().Single();
-        Assert.Equal("Cafe", listed.GetProperty("summary").GetString());
+        Assert.Equal("Cafe — 2026-10-20", listed.GetProperty("summary").GetString());
         Assert.Equal(9.99m, listed.GetProperty("amount_spent").GetDecimal());
         Assert.Equal(9.99m, root.GetProperty("total").GetDecimal());
         Assert.Equal("high", root.GetProperty("confidence").GetString());

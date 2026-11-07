@@ -1,6 +1,6 @@
 // Auth session — mirrors web/src/auth.jsx Guard + AuthProvider,
 // backed by SecureStore (Keychain/Keystore) + biometric unlock.
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { api, setTokens, clearTokens, getTokens, loadApiUrlOverride } from '../api/client';
 
@@ -35,6 +35,9 @@ export async function clearCredentials() {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Signing in swaps the auth stack for the app stack, dropping the current screen;
+  // Root navigates here once the app stack is mounted.
+  const postAuthRoute = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -66,6 +69,18 @@ export function AuthProvider({ children }) {
       try { setUser(await api.get('/api/v1/me')); } catch { /* ignore */ }
     },
     setUser,
+    /** Save a token-pair response (e.g. invitation accept) and open `route` afterwards. */
+    signIn: async (data, route = null) => {
+      postAuthRoute.current = route;
+      await saveSession(data);
+    },
+    /** Open `route` after the next sign-in (e.g. come back to an invitation after logging in). */
+    setPostAuthRoute: (route) => { postAuthRoute.current = route; },
+    takePostAuthRoute: () => {
+      const r = postAuthRoute.current;
+      postAuthRoute.current = null;
+      return r;
+    },
     login: async (username_or_email, password, rememberBiometric = true) => {
       const d = await api.post('/api/v1/auth/login', { username_or_email, password });
       await saveSession(d);

@@ -222,7 +222,8 @@ public static class ReceiptParser
         => obj.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
 
     private static bool? Bool(JsonElement obj, string name)
-        => obj.TryGetProperty(name, out var p) && p.ValueKind is JsonValueKind.True or JsonValueKind.False
+        => obj.ValueKind == JsonValueKind.Object
+            && obj.TryGetProperty(name, out var p) && p.ValueKind is JsonValueKind.True or JsonValueKind.False
             ? p.GetBoolean()
             : null;
 

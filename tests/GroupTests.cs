@@ -127,7 +127,7 @@ public sealed class GroupTests
     }
 
     [Fact]
-    public async Task Invite_Pending_ConsumedOnRegister()
+    public async Task Invite_Pending_NotJoinedByRegistering()
     {
         var (db, auth, groups) = Setup();
         var a = await Reg(auth, "ga2");
@@ -135,15 +135,14 @@ public sealed class GroupTests
         Guid gid = ((GroupCreated)g.Data!).Group.Id;
         var inv = await groups.InviteEmailsAsync(a.Id, gid, ["newbie@x.io"]);
         Assert.True(inv.Ok);
-        Assert.Empty(await groups.ConsumePendingInvitesAsync("newbie@x.io", Guid.NewGuid())); // unknown user: skip
         var n = await Reg(auth, "newbie");
-        var joined = await groups.ConsumePendingInvitesAsync("newbie@x.io", n.Id);
-        Assert.Equal(new List<Guid> { gid }, joined);
-        Assert.Equal("member", await groups.RoleAsync(gid, n.Id));
+        // Only opening the invitation link joins; registering with the address does not.
+        Assert.Null(await groups.RoleAsync(gid, n.Id));
+        Assert.Null((await db.PendingInvites.SingleAsync()).ConsumedAt);
     }
 
     [Fact]
-    public async Task Invite_RegisteredUser_AddedDirectly()
+    public async Task Invite_RegisteredUser_NotAddedUntilConfirmed()
     {
         var (db, auth, groups) = Setup();
         var a = await Reg(auth, "ga3");
@@ -152,7 +151,9 @@ public sealed class GroupTests
         Guid gid = ((GroupCreated)g.Data!).Group.Id;
         var inv = await groups.InviteEmailsAsync(a.Id, gid, ["gb3@x.io"]);
         Assert.True(inv.Ok);
-        Assert.Equal("member", await groups.RoleAsync(gid, b.Id));
+        Assert.Equal(["gb3@x.io"], ((InvitesResult)inv.Data!).Pending);
+        Assert.Empty(((InvitesResult)inv.Data!).Added);
+        Assert.Null(await groups.RoleAsync(gid, b.Id));
     }
 
     [Fact]

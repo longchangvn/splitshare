@@ -13,6 +13,8 @@ import { QuickAddExpense } from '../components/QuickAddExpense.jsx';
 import { ADD_EXPENSE_STATE } from '../quickAdd.js';
 import { ActivityKindThumb, ChevronRight, initialsOf, pastelFor } from '../components/Net.jsx';
 import { getTemplates, subscribeCatalogs } from '../settingsStore.js';
+import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
+import { inviteRows } from '../inviteResults.js';
 import { useT } from '../prefs.jsx';
 
 const DEFAULT_CURRENCY = 'USD';
@@ -89,6 +91,7 @@ export function Dashboard() {
       const tplLabel = tplKey ? (templates.find((x) => x.key === tplKey)?.label || tplKey) : '';
       let g;
       let link = null;
+      let invites = null;
       if (tplKey) {
         g = await api.post('/api/v1/groups/from-template', {
           name, currency: DEFAULT_CURRENCY, template: tplKey,
@@ -96,7 +99,7 @@ export function Dashboard() {
         const gid0 = g.group_id ?? g.group?.id;
         if (!gid0) { setE({ message: t('errors.noGroupId') }); return; }
         if (memberIds.length > 0) await api.post(`/api/v1/groups/${gid0}/members`, { user_ids: memberIds });
-        if (emailList.length > 0) await api.post(`/api/v1/groups/${gid0}/invites`, { emails: emailList });
+        if (emailList.length > 0) invites = await api.post(`/api/v1/groups/${gid0}/invites`, { emails: emailList });
         try {
           const s = await api.post(`/api/v1/groups/${gid0}/share-link`, {});
           link = s.invite_link || s.link || null;
@@ -109,12 +112,15 @@ export function Dashboard() {
           invite_emails: emailList,
         });
         link = g.invite_link || null;
+        invites = g.invites || null;
       }
       const gid = g.group_id ?? g.group?.id; // create returns nested {group:{id}}
       if (!gid) {
         setE({ message: t('errors.noGroupId') });
         return;
       }
+      const inviteResult = invites ? inviteRows(invites) : [];
+      notifyInviteResults(t, inviteResult);
       if (forExpense) {
         setOpen(false);
         nav(`/groups/${gid}`, { state: ADD_EXPENSE_STATE });
@@ -127,6 +133,7 @@ export function Dashboard() {
         currency: DEFAULT_CURRENCY,
         template: tplLabel,
         people: [...picked.map((p) => p.display_name), ...emailList],
+        inviteResult,
       });
       load();
     } catch (err) { setE(err); } finally { setCreating(false); }
@@ -917,6 +924,7 @@ function GroupCreated({ created, onOpenGroup }) {
         {created.people?.length > 0 && (
           <div className="wizard-success-people">{created.people.join(', ')}</div>
         )}
+        <InviteResults rows={created.inviteResult} />
       </div>
       {created.link && (
         <CopyButton value={created.link}>

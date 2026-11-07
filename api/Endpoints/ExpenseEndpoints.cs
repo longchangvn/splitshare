@@ -103,6 +103,14 @@ public static class ExpenseEndpoints
             return !r.Ok ? ToResult(r) : Results.Ok(UpdatedDto((ExpenseUpdated)r.Data!));
         });
 
+        // Enable/disable: body carries the desired state, so repeats are no-ops.
+        api.MapPatch("/expenses/{id:guid}/excluded", async (Guid id, ExcludedDto d,
+            ClaimsPrincipal p, ExpenseService svc) =>
+        {
+            var r = await svc.SetExcludedAsync(Me(p), id, d.Excluded);
+            return !r.Ok ? ToResult(r) : Results.Ok(UpdatedDto((ExpenseUpdated)r.Data!));
+        });
+
         api.MapPost("/expenses/{id:guid}/preview-edit", async (Guid id, PreviewEditDto d,
             ClaimsPrincipal p, ExpenseService svc) =>
         {
@@ -175,6 +183,7 @@ public static class ExpenseEndpoints
         });
     }
 
+    public sealed record ExcludedDto(bool Excluded);
     public sealed record MoneyEntry(Guid UserId, long AmountCents);
     public sealed record PctEntry(Guid UserId, decimal Percent);
     public sealed record ShrEntry(Guid UserId, int Shares);

@@ -10,6 +10,7 @@ import { Statement } from './pages/Statement.jsx';
 import { Report } from './pages/Report.jsx';
 import { SharePage } from './pages/SharePage.jsx';
 import { ExpenseDetail, JoinPage } from './pages/ExpenseDetail.jsx';
+import { InvitationPage } from './pages/InvitationPage.jsx';
 import './styles.css';
 
 export default function App() {
@@ -26,6 +27,9 @@ export default function App() {
           {/* Public route: anonymous visitors get an invite landing with
               return-to auth links; authed visitors join automatically. */}
           <Route path="/g/:token" element={<JoinPage />} />
+          {/* Public: emailed per-address invitation — create account (password or Google) and join. */}
+          <Route path="/invite/:token" element={<InvitationPage />} />
+          <Route path="/invite/:token/:step" element={<InvitationPage />} />
           <Route path="/profile" element={<Guard><Profile /></Guard>} />
           <Route path="/settings" element={<Guard><Settings /></Guard>} />
           <Route path="/groups/:id/invite" element={<Guard><InvitePage /></Guard>} />

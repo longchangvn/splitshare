@@ -9,6 +9,8 @@ import { colors, type, radius } from '../theme';
 import { Screen, Card, Segmented, Input, Field, Button, Avatar, ErrText, ConfirmSheet, toast } from '../ui';
 import { ListRow, p as parts } from '../components/group/parts';
 import { parseEmails } from '../components/group/helpers';
+import { InviteResultList, toastInviteResults } from '../components/group/InviteResultList';
+import { inviteRows } from '../shared/inviteResults';
 
 export default function InviteScreen({ route, navigation }) {
   const { id } = route.params || {};
@@ -16,6 +18,7 @@ export default function InviteScreen({ route, navigation }) {
   const [detail, setDetail] = useState(null);
   const [tab, setTab] = useState('email');
   const [emails, setEmails] = useState('');
+  const [inviteResult, setInviteResult] = useState([]);
   const [cq, setCq] = useState('');
   const [contacts, setContacts] = useState([]);
   const [searched, setSearched] = useState(false);
@@ -57,15 +60,13 @@ export default function InviteScreen({ route, navigation }) {
   const sendEmails = async () => {
     const list = parseEmails(emails);
     if (list.length === 0) { setE({ message: t('errors.needEmail') }); return; }
-    setBusy('email'); setE(null);
+    setBusy('email'); setE(null); setInviteResult([]);
     try {
-      const r = await api.post(`/api/v1/groups/${id}/invites`, { emails: list });
-      toast({
-        title: t('invite.sent'),
-        message: t('m.group.inviteResult', { added: (r?.added || []).join(', ') || '—', pending: (r?.pending || []).join(', ') || '—' }),
-        color: 'teal',
-      });
-      setEmails('');
+      const rows = inviteRows(await api.post(`/api/v1/groups/${id}/invites`, { emails: list }));
+      setInviteResult(rows);
+      toastInviteResults(t, rows);
+      // Keep failed addresses in the box so "Send invites" retries just those.
+      setEmails(rows.filter((r) => !r.emailSent).map((r) => r.email).join(', '));
     } catch (err) { setE(err); } finally { setBusy(null); }
   };
 
@@ -125,6 +126,7 @@ export default function InviteScreen({ route, navigation }) {
             />
           </Field>
           <Button style={{ marginTop: 14 }} title={t('invite.sendInvites')} busy={busy === 'email'} onPress={sendEmails} />
+          <InviteResultList rows={inviteResult} />
         </Card>
       ) : null}
 

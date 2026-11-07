@@ -10,6 +10,8 @@ import { api, setTokens } from '../api/client';
 import { Button, Field, Input, DevApiUrlCard } from '../ui';
 import { useT } from '../i18n';
 import { AuthLayout, AccountErr, PasswordInput, a } from '../components/account/AccountKit';
+import { nativeGoogleAvailable, useGoogleIdToken } from '../auth/google';
+import { InvitationBanner } from '../components/account/InvitationBanner';
 
 // Same client-side rules as before / server (username 3–30 a-z0-9_.-, pw 8+ letter+digit, name 1–50).
 const USER_RE = /^[a-z0-9_.-]{3,30}$/;
@@ -25,24 +27,60 @@ function OrDivider() {
   );
 }
 
-function GoogleButton({ navigation, intent = 'signin' }) {
-  const t = useT();
-  const label = t(intent === 'signup' ? 'auth.signUpGoogle' : 'auth.signInGoogle');
-  // Native Google ID-token flow is not wired yet (needs expo-auth-session + client id);
-  // keep the paste-token fallback that hands the token to /auth/google.
-  const onPress = () => Alert.alert(t('m.account.googleTitle'), t('m.account.googleBody'), [
-    { text: t('common.cancel'), style: 'cancel' },
-    { text: t('m.account.googlePaste'), onPress: () => navigation.navigate('GoogleToken') },
-  ]);
+function NativeGoogleButton({ label, loginHint, onIdToken }) {
+  const [busy, setBusy] = useState(false);
+  const [e, setE] = useState(null);
+  const { ready, start } = useGoogleIdToken({
+    loginHint,
+    onIdToken: async (tok) => {
+      try { await onIdToken(tok); } catch (err) { setE(err); } finally { setBusy(false); }
+    },
+    onError: (msg) => { setBusy(false); if (msg) setE(localErr(msg)); },
+  });
+  const onPress = () => {
+    if (busy) return;
+    setE(null);
+    setBusy(true);
+    start().catch((err) => { setBusy(false); setE(localErr(err?.message || String(err))); });
+  };
   return (
     <>
-      <OrDivider />
-      <Button style={{ marginTop: 12 }} variant="ghost" icon="G" title={label} onPress={onPress} />
+      <Button style={{ marginTop: 12 }} variant="ghost" icon="G" title={label} busy={busy} disabled={!ready} onPress={onPress} />
+      <AccountErr e={e} />
     </>
   );
 }
 
-export default function AuthScreen({ navigation }) {
+/**
+ * Google sign-in: native ID-token flow when this build has the platform client ID
+ * (see auth/google.js); otherwise the paste-token fallback (GoogleToken screen).
+ * onIdToken overrides the default exchange (useAuth().google).
+ */
+export function GoogleSignInButton({ navigation, intent = 'signin', loginHint, onIdToken, label: labelOverride }) {
+  const t = useT();
+  const { google } = useAuth();
+  const label = labelOverride || t(intent === 'signup' ? 'auth.signUpGoogle' : 'auth.signInGoogle');
+  if (nativeGoogleAvailable()) {
+    return <NativeGoogleButton label={label} loginHint={loginHint} onIdToken={onIdToken || google} />;
+  }
+  const onPress = () => Alert.alert(t('m.account.googleTitle'), t('m.account.googleBody'), [
+    { text: t('common.cancel'), style: 'cancel' },
+    { text: t('m.account.googlePaste'), onPress: () => navigation.navigate('GoogleToken') },
+  ]);
+  return <Button style={{ marginTop: 12 }} variant="ghost" icon="G" title={label} onPress={onPress} />;
+}
+
+function GoogleButton({ navigation, intent = 'signin' }) {
+  return (
+    <>
+      <OrDivider />
+      <GoogleSignInButton navigation={navigation} intent={intent} />
+    </>
+  );
+}
+
+export default function AuthScreen({ navigation, route }) {
+  const invitation = route?.params?.invitation;
   const t = useT();
   const { login, loginWithStored } = useAuth();
   const [id, setId] = useState('');
@@ -94,6 +132,7 @@ export default function AuthScreen({ navigation }) {
       title={t('auth.welcomeBack')}
       desc={t('auth.loginContinue')}
       footer={<DevApiUrlCard />}
+      banner={invitation ? <InvitationBanner {...invitation} /> : null}
     >
       <Field label={t('auth.usernameOrEmail')}>
         <Input
@@ -124,7 +163,8 @@ export default function AuthScreen({ navigation }) {
   );
 }
 
-export function RegisterScreen({ navigation }) {
+export function RegisterScreen({ navigation, route }) {
+  const invitation = route?.params?.invitation;
   const t = useT();
   const { register } = useAuth();
   const [f, setF] = useState({ username: '', email: '', display_name: '', password: '', phone: '' });
@@ -161,7 +201,12 @@ export function RegisterScreen({ navigation }) {
   };
 
   return (
-    <AuthLayout compact title={t('auth.createAccount')} desc={t('auth.startSplitting')}>
+    <AuthLayout
+      compact
+      title={t('auth.createAccount')}
+      desc={t('auth.startSplitting')}
+      banner={invitation ? <InvitationBanner {...invitation} /> : null}
+    >
       <Field label={t('auth.username')} hint={t('m.account.usernameRule')}>
         <Input value={f.username} onChangeText={set('username')} autoCapitalize="none" autoCorrect={false} autoComplete="username-new" maxLength={30} accessibilityLabel={t('auth.username')} />
       </Field>

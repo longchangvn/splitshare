@@ -58,7 +58,7 @@ export function LanguageSwitch({ dark = false, style }) {
 }
 
 /** Web AuthLayout adapted to native: dark atmospheric hero + bright form card. */
-export function AuthLayout({ title, desc, children, footer, compact = false }) {
+export function AuthLayout({ title, desc, children, footer, compact = false, banner }) {
   const t = useT();
   const insets = useSafeAreaInsets();
   return (
@@ -85,6 +85,7 @@ export function AuthLayout({ title, desc, children, footer, compact = false }) {
         </View>
         <View style={a.sheet}>
           <View style={a.card}>
+            {banner ? <View style={{ marginBottom: 16 }}>{banner}</View> : null}
             {title ? <Text style={type.title} accessibilityRole="header">{title}</Text> : null}
             {desc ? <Text style={[type.body, { color: colors.secondary, marginTop: 4 }]}>{desc}</Text> : null}
             {children}

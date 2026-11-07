@@ -12,10 +12,10 @@ public static class SettlementEndpoints
     {
         v1.MapGet("/groups/{id:guid}/settlement", async (Guid id, LedgerService ledger) =>
         {
-            if (await ledger.GetGroupAsync(id) is null)
+            if (await ledger.ComputeNetsAsync(id) is not { } snapshot)
                 return ApiResults.NotFound("Group not found.");
-            var (plan, _) = await ledger.RecomputeAsync(id);
-            return Results.Ok(PlanDto(plan));
+            var (plan, _) = await ledger.RecomputeAsync(id, snapshot);
+            return Results.Ok(PlanDto(plan, LedgerService.RawDebts(snapshot)));
         });
 
         v1.MapGet("/groups/{id:guid}/settlement/history", async (Guid id, AppDbContext db, LedgerService ledger) =>
@@ -38,7 +38,10 @@ public static class SettlementEndpoints
         });
     }
 
-    private static object PlanDto(Models.SettlementPlan p) => new
+    // raw_debts is only present on the live plan; history rows store optimizer output only.
+    private static object PlanDto(Models.SettlementPlan p) => PlanDto(p, null);
+
+    private static object PlanDto(Models.SettlementPlan p, List<LedgerService.RawDebt>? rawDebts) => new
     {
         group_id = p.GroupId,
         version = p.VersionSeq,
@@ -46,6 +49,7 @@ public static class SettlementEndpoints
         inputs_hash = p.InputsHash,
         transfers = JsonSerializer.Deserialize<object>(p.TransfersJson),
         explanation = JsonSerializer.Deserialize<object>(p.ExplanationJson),
-        readonly_history = false
+        readonly_history = false,
+        raw_debts = rawDebts
     };
 }

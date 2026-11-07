@@ -77,6 +77,9 @@ namespace SplitShare.Api.Migrations.SqlServer
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<bool>("Excluded")
+                        .HasColumnType("bit");
+
                     b.Property<long>("FeeCents")
                         .HasColumnType("bigint");
 
@@ -620,7 +623,13 @@ namespace SplitShare.Api.Migrations.SqlServer
                     b.Property<Guid>("InvitedBy")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TokenHash");
 
                     b.HasIndex("GroupId", "Email")
                         .IsUnique();

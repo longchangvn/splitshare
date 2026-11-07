@@ -77,6 +77,9 @@ namespace SplitShare.Api.Migrations.Postgres
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
+                    b.Property<bool>("Excluded")
+                        .HasColumnType("boolean");
+
                     b.Property<long>("FeeCents")
                         .HasColumnType("bigint");
 
@@ -620,7 +623,13 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.Property<Guid>("InvitedBy")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("TokenHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("TokenHash");
 
                     b.HasIndex("GroupId", "Email")
                         .IsUnique();

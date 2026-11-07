@@ -13,6 +13,7 @@ import { displayNameOf } from '../components/Net.jsx';
 import { ExpenseForm } from '../components/Forms.jsx';
 import { categoryLabelForKey } from '../categories.js';
 import { useT } from '../prefs.jsx';
+import { GroupLinkInvitation } from './InvitationPage.jsx';
 
 const statusColor = (s) => (s === 'LOCKED' ? 'gray' : s === 'OPEN' ? 'teal' : 'blue');
 
@@ -323,8 +324,11 @@ export function JoinPage() {
   const t = useT();
   const { token } = useParams();
   const nav = useNavigate();
+  const { user, loading } = useAuth();
   const [msg, setMsg] = useState(t('expense.joining'));
   useEffect(() => {
+    // Anonymous visitors get the invitation landing below; signed in → join.
+    if (loading || !user) return;
     api.post('/api/v1/groups/join', { token })
       .then((r) => {
         const gid = r.group_id ?? r.group?.id;
@@ -332,7 +336,8 @@ export function JoinPage() {
         nav(`/groups/${gid}`);
       })
       .catch((err) => setMsg(`Join failed: ${err.code || ''} ${err.message}`));
-  }, [token, nav]);
+  }, [token, nav, user, loading]);
+  if (!loading && !user) return <GroupLinkInvitation token={token} />;
   return (
     <Shell>
       <Card withBorder shadow="sm" padding="lg" radius="md">

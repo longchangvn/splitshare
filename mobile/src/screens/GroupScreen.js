@@ -5,10 +5,11 @@
 // tabs: Ledger · Balances · People · Activity · Recurring. Refreshes on focus (returning from
 // Pay / AddExpense re-fetches plan + ledger — web settleTick behaviour) and after mutations.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { View, Text, Pressable, FlatList, RefreshControl, StyleSheet, Switch } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, fmt, getCapabilities } from '../api/client';
 import { fetchRemovalPreview, isStaleRemoval, removalPath } from '../shared/memberRemoval';
+import { canToggleExpense } from '../shared/expenseToggle';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
@@ -67,6 +68,7 @@ export default function GroupDetailScreen({ route, navigation }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [itemSheet, setItemSheet] = useState(null);
   const [itemBusy, setItemBusy] = useState(false);
+  const [toggling, setToggling] = useState(null); // expense id whose enable/disable is in flight
 
   // Latest query inputs for loaders called from focus/debounce callbacks (no stale closures).
   const live = useRef({});
@@ -242,6 +244,25 @@ export default function GroupDetailScreen({ route, navigation }) {
     }
   };
 
+  // Enable/disable (persisted, web parity): a disabled expense stays listed but is
+  // left out of balances, settlement and totals until re-enabled.
+  const toggleExcluded = async (item) => {
+    if (!canEditExpense(item, detail, meId) || toggling) return;
+    const excluded = !item.excluded;
+    setToggling(item.id);
+    try {
+      await api.patch(`/api/v1/expenses/${item.id}/excluded`, { excluded });
+      // Keep the open item sheet's switch in sync with the saved state.
+      setItemSheet((cur) => (cur?.id === item.id ? { ...cur, excluded } : cur));
+      toast({
+        title: t(excluded ? 'groupDetail.expenseNowDisabled' : 'groupDetail.expenseNowEnabled', { title: item.title }),
+        color: 'teal',
+      });
+      await Promise.all([load(), loadLedger()]);
+    } catch (err) { toast({ title: t('m.error.failed'), message: err.message, color: 'red' }); }
+    finally { setToggling(null); }
+  };
+
   const copyExpense = async (item) => {
     setItemBusy(true);
     try {
@@ -393,6 +414,7 @@ export default function GroupDetailScreen({ route, navigation }) {
         <BalancesTab
           byDebtor={byDebtor}
           debtors={debtors}
+          rawDebts={plan?.raw_debts}
           members={members}
           currency={currency}
           meId={meId}
@@ -423,6 +445,18 @@ export default function GroupDetailScreen({ route, navigation }) {
       <Sheet visible={!!itemSheet} onClose={() => !itemBusy && setItemSheet(null)} title={itemSheet?.title}>
         {itemSheet ? (
           <View>
+            {canToggleExpense(itemSheet) ? (
+              <MenuRow
+                label={t('groupDetail.includeInBalances')}
+                disabled={!canEditExpense(itemSheet, detail, meId) || !!toggling}
+                onPress={() => toggleExcluded(itemSheet)}
+                right={(
+                  <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                    <Switch value={!itemSheet.excluded} trackColor={{ true: colors.primary }} />
+                  </View>
+                )}
+              />
+            ) : null}
             <MenuRow label={t('common.viewDetails')} onPress={() => { const it = itemSheet; setItemSheet(null); navigation.navigate('ExpenseDetail', { groupId: id, expenseId: it.id }); }} />
             <MenuRow label={t('groupDetail.copyExpense')} disabled={!canWrite || itemBusy} onPress={() => copyExpense(itemSheet)} last={!canEditExpense(itemSheet, detail, meId)} />
             {canEditExpense(itemSheet, detail, meId) ? (
