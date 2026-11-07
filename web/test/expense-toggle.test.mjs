@@ -47,9 +47,16 @@ test('web wires the toggle endpoint and raw owe panel', () => {
   assert.match(groupDetail, /ledgerTotals\(ledger\?\.items\)/);
 });
 
+test('web toggle lives in the per-expense ⋯ menu, not inline', () => {
+  assert.equal((groupDetail.match(/canToggleExpense\(item\) && expenseMoreMenu\(item\)/g) || []).length, 2);
+  assert.match(groupDetail, /<RowMenu className="ledger-action-btn is-more"[^>]*icon="⋮"[^>]*withinPortal/);
+  assert.match(groupDetail, /role="menuitemcheckbox"/);
+  assert.doesNotMatch(groupDetail, /<Switch[^>]*onChange=\{\(\) => toggleExpense/);
+});
+
 test('i18n keys exist in every locale', () => {
   const keys = ['groupDetail.rawOweTitle', 'groupDetail.rawOweHint', 'groupDetail.rawOweEmpty',
-    'groupDetail.rawOweTotal', 'groupDetail.includeExpense', 'groupDetail.expenseDisabled',
+    'groupDetail.rawOweTotal', 'groupDetail.includeExpense', 'groupDetail.includeInBalances', 'groupDetail.expenseMore', 'groupDetail.expenseDisabled',
     'groupDetail.expenseNowDisabled', 'groupDetail.expenseNowEnabled', 'groupDetail.excludedNotCounted'];
   for (const [loc, msgs] of Object.entries(MESSAGES)) {
     for (const k of keys) assert.ok(msgs[k], `${loc} missing ${k}`);
@@ -61,7 +68,11 @@ test('mobile mirrors toggle + raw owe', async () => {
   const balances = await mobileFile('components/group/BalancesTab.js');
   const screen = await mobileFile('screens/GroupScreen.js');
   assert.match(ledger, /ledgerTotals/);
-  assert.match(ledger, /onToggleExcluded/);
+  // Mobile: ⋯ per expense opens the item sheet; the include switch lives in that sheet.
+  assert.doesNotMatch(ledger, /<Switch/);
+  assert.match(ledger, /onPress=\{\(\) => onItemActions\(it\)\}/);
+  assert.match(screen, /label=\{t\('groupDetail\.includeInBalances'\)\}/);
+  assert.match(screen, /onPress=\{\(\) => toggleExcluded\(itemSheet\)\}/);
   assert.match(balances, /groupDetail\.rawOweTitle/);
   assert.match(screen, /\/excluded`/);
 });

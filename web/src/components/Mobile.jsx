@@ -4,11 +4,12 @@ import { useT } from '../prefs.jsx';
 
 // Shared ⋯ row menu (mobile-simplify quiet rows): one pattern for
 // payment reverse, recurring pause/delete, debtor details.
-export function RowMenu({ label, children }) {
+// withinPortal: render the dropdown in a portal when the row clips overflow.
+export function RowMenu({ label, children, className, size, icon = '⋯', withinPortal = false }) {
   return (
-    <Menu position="bottom-end" withinPortal={false}>
+    <Menu position="bottom-end" withinPortal={withinPortal}>
       <Menu.Target>
-        <ActionIcon variant="subtle" title={label} aria-label={label}>⋯</ActionIcon>
+        <ActionIcon className={className} size={size} variant="subtle" title={label} aria-label={label}>{icon}</ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>{children}</Menu.Dropdown>
     </Menu>

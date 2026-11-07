@@ -17,6 +17,7 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
     private string BaseUrl => (config?["App:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
 
     private const int MaxFailed = 10;
+    private const int ResetMinutes = 15;
     private static readonly TimeSpan LockoutFor = TimeSpan.FromMinutes(15);
     private static readonly Regex UsernameRe = new("^[a-z0-9_.-]{3,30}$", RegexOptions.Compiled);
 
@@ -226,13 +227,11 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         db.PasswordResetTokens.Add(new PasswordResetToken
         {
             UserId = user.Id, TokenHash = TokenService.HashToken(raw),
-            ExpiresAt = DateTime.UtcNow.AddMinutes(15)
+            ExpiresAt = DateTime.UtcNow.AddMinutes(ResetMinutes)
         });
         await db.SaveChangesAsync();
-        await email.SendAsync(em, "Reset your SplitShare password",
-            $"Hi {user.DisplayName},\n\nReset your SplitShare password here (valid 15 minutes, single use):\n" +
-            $"{BaseUrl}/reset/{raw}\n\nIf you didn't request a password reset, you can ignore this email.",
-            transactional: true);
+        var mail = EmailTemplates.PasswordReset(user.DisplayName, $"{BaseUrl}/reset/{raw}", ResetMinutes, em);
+        await email.SendAsync(em, mail.Subject, mail.Text, transactional: true, html: mail.Html);
     }
 
     public async Task<AuthResult> ResetAsync(string token, string newPassword)

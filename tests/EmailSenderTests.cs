@@ -224,6 +224,21 @@ public sealed class EmailSenderTests
     }
 
     [Fact]
+    public async Task Explicit_Html_Replaces_Derived_Html()
+    {
+        var os = new CaptureHandler(() => Json(HttpStatusCode.OK, "{\"id\":\"m\"}"));
+        await Sender(os, Base).SendAsync("a@x.com", "s", "plain", html: "<p>branded</p>");
+        Assert.Equal("<p>branded</p>", JsonDocument.Parse(Assert.Single(os.Requests).Body).RootElement
+            .GetProperty("email_body").GetString());
+
+        var sg = new CaptureHandler(() => Accepted("sg"));
+        await TwilioSender(sg, Twilio).SendAsync("a@x.com", "s", "plain", html: "<p>branded</p>");
+        var content = JsonDocument.Parse(Assert.Single(sg.Requests).Body).RootElement.GetProperty("content");
+        Assert.Equal("plain", content[0].GetProperty("value").GetString());
+        Assert.Equal("<p>branded</p>", content[1].GetProperty("value").GetString());
+    }
+
+    [Fact]
     public async Task Twilio_NonTransactional_Respects_Unsubscribe()
     {
         var h = new CaptureHandler(() => Accepted("sg-1"));

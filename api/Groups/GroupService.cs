@@ -163,7 +163,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
             return new(false, "VALIDATION", $"Invalid email: {bad}");
         var added = new List<string>();
         var pending = new List<string>();
-        var outbox = new List<(string To, string Status, string Subject, string Body)>();
+        var outbox = new List<(string To, string Status, EmailContent Mail)>();
         var inviter = await db.Users.Where(u => u.Id == actorId).Select(u => u.DisplayName).FirstOrDefaultAsync()
             ?? "A friend";
         foreach (var em in normalized)
@@ -187,11 +187,8 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
                 : IsGmail(em)
                     ? "Open the link and continue with your Google account to join the group."
                     : "Open the link and choose a password to join the group.";
-            outbox.Add((em, "invited", $"{inviter} invited you to {g.Name} on SplitShare",
-                $"Hi{(user is not null ? $" {user.DisplayName}" : "")},\n\n" +
-                $"{inviter} invited you to split expenses in \"{g.Name}\" on SplitShare.\n" +
-                $"Accept the invitation: {InvitationLink(BaseUrl, raw)}\n\n" +
-                $"{how} You're not added until you accept. The link works for {InviteDays} days."));
+            outbox.Add((em, "invited", EmailTemplates.GroupInvite(inviter, g.Name, user?.DisplayName, how,
+                InvitationLink(BaseUrl, raw), InviteDays)));
         }
         await db.SaveChangesAsync();
         // Only after the invite rows are committed. Each address reports whether the
@@ -201,7 +198,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         {
             // Product decision: invites are action-triggered and must arrive even for
             // addresses unsubscribed from non-essential mail, so they go as transactional.
-            var sent = await email.SendAsync(m.To, m.Subject, m.Body, transactional: true);
+            var sent = await email.SendAsync(m.To, m.Mail.Subject, m.Mail.Text, transactional: true, html: m.Mail.Html);
             results.Add(new InviteOutcome(m.To, m.Status, sent.Sent, EmailStatusName(sent.Status), sent.Error));
         }
         return new(true, null, null, new InvitesResult(added, pending, results));

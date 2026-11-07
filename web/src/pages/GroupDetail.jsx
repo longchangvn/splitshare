@@ -405,6 +405,24 @@ export function GroupDetail() {
       setSettleTick((x) => x + 1);
     } catch (err) { setE(err); } finally { setToggling(null); }
   };
+  // ⋮ per expense row; the include switch shows only once the menu is opened.
+  const expenseMoreMenu = (item) => (
+    <RowMenu className="ledger-action-btn is-more" size="sm" icon="⋮" withinPortal label={t('groupDetail.expenseMore', { title: item.title })}>
+      <Menu.Item
+        role="menuitemcheckbox"
+        aria-checked={!item.excluded}
+        aria-label={t('groupDetail.includeExpense', { title: item.title })}
+        closeMenuOnClick={false}
+        disabled={!canEditExpense(item) || !!toggling}
+        onClick={() => toggleExpense(item)}
+        rightSection={(
+          <Switch size="xs" checked={!item.excluded} readOnly tabIndex={-1} aria-hidden style={{ pointerEvents: 'none' }} />
+        )}
+      >
+        {t('groupDetail.includeInBalances')}
+      </Menu.Item>
+    </RowMenu>
+  );
 
   const nudge = async (uid, name) => {
     try {
@@ -1138,16 +1156,7 @@ export function GroupDetail() {
                   </div>
                   {item.kind === 'expense' && (
                     <div className="ledger-actions" onClick={(ev) => ev.stopPropagation()} onKeyDown={(ev) => ev.stopPropagation()}>
-                      {canToggleExpense(item) && (
-                        <Switch
-                          size="xs"
-                          checked={!item.excluded}
-                          onChange={() => toggleExpense(item)}
-                          disabled={!canEditExpense(item) || !!toggling}
-                          aria-label={t('groupDetail.includeExpense', { title: item.title })}
-                          title={t('groupDetail.includeExpense', { title: item.title })}
-                        />
-                      )}
+                      {canToggleExpense(item) && expenseMoreMenu(item)}
                       <ActionIcon className="ledger-action-btn is-copy" size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)} disabled={!canWriteGroup}>⧉</ActionIcon>
                       {canEditExpense(item) && (
                         <ActionIcon className="ledger-action-btn is-edit" size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>
@@ -1217,16 +1226,7 @@ export function GroupDetail() {
                   <span className="ledger-cell ledger-actions is-actions">
                     {item.kind === 'expense' ? (
                       <>
-                        {canToggleExpense(item) && (
-                          <Switch
-                            size="xs"
-                            checked={!item.excluded}
-                            onChange={() => toggleExpense(item)}
-                            disabled={!canEditExpense(item) || !!toggling}
-                            aria-label={t('groupDetail.includeExpense', { title: item.title })}
-                            title={t('groupDetail.includeExpense', { title: item.title })}
-                          />
-                        )}
+                        {canToggleExpense(item) && expenseMoreMenu(item)}
                         <ActionIcon className="ledger-action-btn is-copy" size="sm" variant="subtle" title={t('groupDetail.copyExpense')} aria-label={t('groupDetail.copyNamed', { title: item.title })} onClick={() => copyExpense(item)} disabled={!canWriteGroup}>⧉</ActionIcon>
                         {canEditExpense(item) && (
                           <ActionIcon className="ledger-action-btn is-edit" size="sm" variant="subtle" title={t('groupDetail.editExpense')} aria-label={t('groupDetail.editNamed', { title: item.title })} onClick={() => editExpense(item)} loading={editBusy}>✎</ActionIcon>

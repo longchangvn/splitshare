@@ -25,17 +25,18 @@ public sealed record EmailSendResult(EmailSendStatus Status, string? MessageId =
 /// Outbound email. <paramref name="transactional"/> marks mail that must reach the
 /// user even if they unsubscribed from non-essential mail: account-critical mail
 /// (verify, password reset) and group invites. Nudges and alerts stay non-essential. Never throws: the result
-/// says whether the provider accepted the message.
+/// says whether the provider accepted the message. <paramref name="html"/> is the HTML
+/// alternative of <paramref name="body"/>; when null it is derived via <see cref="OneSignalEmailSender.ToHtml"/>.
 /// </summary>
 public interface IEmailSender
 {
-    Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false);
+    Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false, string? html = null);
 }
 
 /// <summary>Dev stub: logs emails (default when <c>Email:Provider</c> is unset). Nothing is delivered.</summary>
 public sealed class StubEmailSender(ILogger<StubEmailSender> logger) : IEmailSender
 {
-    public Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
+    public Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false, string? html = null)
     {
         logger.LogInformation("EMAIL to={To} subject={Subject} body={Body}", to, subject, body);
         return Task.FromResult(EmailSendResult.Unconfigured("Email provider not configured; the email was only logged."));
@@ -71,7 +72,7 @@ public sealed partial class OneSignalEmailSender(
         return $"<div style=\"font-family:sans-serif;font-size:14px;line-height:1.5\">{html.Replace("\n", "<br>")}</div>";
     }
 
-    public async Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
+    public async Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false, string? html = null)
     {
         var appId = config["Email:OneSignal:AppId"] ?? config["Notification:OneSignal:AppId"];
         var apiKey = config["Email:OneSignal:ApiKey"] ?? config["Notification:OneSignal:ApiKey"];
@@ -87,7 +88,7 @@ public sealed partial class OneSignalEmailSender(
             target_channel = "email",
             email_to = new[] { to },
             email_subject = subject,
-            email_body = ToHtml(body),
+            email_body = html ?? ToHtml(body),
             email_from_name = NullIfBlank(config["Email:FromName"]),
             email_from_address = NullIfBlank(config["Email:FromAddress"]),
             include_unsubscribed = transactional ? true : (bool?)null,
@@ -192,7 +193,7 @@ public sealed class TwilioSendGridEmailSender(
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public async Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
+    public async Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false, string? html = null)
     {
         var apiKey = config["Email:Twilio:ApiKey"];
         var fromAddress = config["Email:FromAddress"];
@@ -210,7 +211,7 @@ public sealed class TwilioSendGridEmailSender(
             content = new[]
             {
                 new { type = "text/plain", value = body },
-                new { type = "text/html", value = OneSignalEmailSender.ToHtml(body) }
+                new { type = "text/html", value = html ?? OneSignalEmailSender.ToHtml(body) }
             },
             // Account-critical mail must reach users who unsubscribed from non-essential mail.
             mail_settings = transactional

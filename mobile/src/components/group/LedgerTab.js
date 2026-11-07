@@ -1,13 +1,13 @@
 // Ledger tab — web GroupDetail "ledger" panel (mobile layout): search, type filter,
 // collapsible filter sheet with active-count badge, receipt-style rows, archive empty states.
 import React, { useState } from 'react';
-import { View, Text, Pressable, Switch, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { fmt, displayNameOf } from '../../api/client';
 import { colors, type } from '../../theme';
 import { useT } from '../../i18n';
 import { sanitizeMoneyInput } from '../../money';
 import { categoryLabelForKey, categorySelectData } from '../../shared/categories';
-import { canToggleExpense, ledgerTotals } from '../../shared/expenseToggle';
+import { ledgerTotals } from '../../shared/expenseToggle';
 import { Card, Input, Segmented, Button, SelectField, Field, Sheet, Badge, Row, Skeleton } from '../../ui';
 import { Tile, ListRow, useDateFmt, p as parts } from './parts';
 import { DEFAULT_FILTERS, activeFilterCount, isValidDateInput } from './helpers';
@@ -15,7 +15,6 @@ import { DEFAULT_FILTERS, activeFilterCount, isValidDateInput } from './helpers'
 export default function LedgerTab({
   items, loading, loaded, currency, members, categories, type: kind, onType, q, onQ,
   filters, onApplyFilters, emptyKind, onOpen, onItemActions,
-  canToggle = () => false, toggling = null, onToggleExcluded,
 }) {
   const t = useT();
   const d = useDateFmt();
@@ -94,14 +93,17 @@ export default function LedgerTab({
                 <Text style={parts.meta}>{t('groupDetail.myShare')} {it.my_share_cents != null ? fmt(it.my_share_cents, currency) : '—'}</Text>
                 <Text style={[s.status, locked ? s.stLocked : s.stOpen]}>{locked ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}</Text>
               </View>
-              {canToggleExpense(it) ? (
-                <Switch
-                  value={!it.excluded}
-                  onValueChange={() => onToggleExcluded?.(it)}
-                  disabled={!canToggle(it) || !!toggling}
-                  trackColor={{ true: colors.primary }}
-                  accessibilityLabel={t('groupDetail.includeExpense', { title: it.title })}
-                />
+              {isExp ? (
+                // ⋮ opens the item sheet (same as long-press); the include switch lives there.
+                <Pressable
+                  onPress={() => onItemActions(it)}
+                  hitSlop={8}
+                  style={s.more}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('groupDetail.expenseMore', { title: it.title })}
+                >
+                  <Text style={s.moreT}>⋮</Text>
+                </Pressable>
               ) : null}
             </ListRow>
           );
@@ -226,4 +228,6 @@ const s = StyleSheet.create({
   status: { fontSize: 10, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: 'hidden' },
   stOpen: { backgroundColor: colors.openBg, color: colors.openText },
   stLocked: { backgroundColor: colors.lockedBg, color: colors.lockedText },
+  more: { width: 20, height: 32, marginRight: -6, alignItems: 'center', justifyContent: 'center' },
+  moreT: { fontSize: 20, fontWeight: '700', color: colors.text },
 });

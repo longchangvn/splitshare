@@ -3194,7 +3194,6 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
   justify-content: flex-end;
   width: 100%;
 }
-.ledger-actions .mantine-Switch-root { margin-right: 4px; }
 .ledger-thumb {
   flex: none;
   box-shadow: inset 0 0 0 999px rgba(15, 33, 28, 0.16);

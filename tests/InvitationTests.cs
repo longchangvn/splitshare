@@ -17,7 +17,7 @@ public sealed class InvitationTests
         public readonly List<(string To, string Subject, string Body)> Sent = [];
         public readonly List<bool> Transactional = [];
         public Func<string, EmailSendResult> Respond = _ => EmailSendResult.Accepted("msg-1");
-        public Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false)
+        public Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false, string? html = null)
         {
             Sent.Add((to, subject, body));
             Transactional.Add(transactional);

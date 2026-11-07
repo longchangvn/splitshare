@@ -5,10 +5,11 @@
 // tabs: Ledger · Balances · People · Activity · Recurring. Refreshes on focus (returning from
 // Pay / AddExpense re-fetches plan + ledger — web settleTick behaviour) and after mutations.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, RefreshControl, StyleSheet } from 'react-native';
+import { View, Text, Pressable, FlatList, RefreshControl, StyleSheet, Switch } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, fmt, getCapabilities } from '../api/client';
 import { fetchRemovalPreview, isStaleRemoval, removalPath } from '../shared/memberRemoval';
+import { canToggleExpense } from '../shared/expenseToggle';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
@@ -251,6 +252,8 @@ export default function GroupDetailScreen({ route, navigation }) {
     setToggling(item.id);
     try {
       await api.patch(`/api/v1/expenses/${item.id}/excluded`, { excluded });
+      // Keep the open item sheet's switch in sync with the saved state.
+      setItemSheet((cur) => (cur?.id === item.id ? { ...cur, excluded } : cur));
       toast({
         title: t(excluded ? 'groupDetail.expenseNowDisabled' : 'groupDetail.expenseNowEnabled', { title: item.title }),
         color: 'teal',
@@ -405,9 +408,6 @@ export default function GroupDetailScreen({ route, navigation }) {
           emptyKind={ledgerEmptyKind(filters.status, settled, hasLedgerHistory(summary))}
           onOpen={(it) => navigation.navigate('ExpenseDetail', { groupId: id, expenseId: it.id })}
           onItemActions={(it) => setItemSheet(it)}
-          canToggle={(it) => canEditExpense(it, detail, meId)}
-          toggling={toggling}
-          onToggleExcluded={toggleExcluded}
         />
       ) : null}
       {tab === 'balances' ? (
@@ -445,6 +445,18 @@ export default function GroupDetailScreen({ route, navigation }) {
       <Sheet visible={!!itemSheet} onClose={() => !itemBusy && setItemSheet(null)} title={itemSheet?.title}>
         {itemSheet ? (
           <View>
+            {canToggleExpense(itemSheet) ? (
+              <MenuRow
+                label={t('groupDetail.includeInBalances')}
+                disabled={!canEditExpense(itemSheet, detail, meId) || !!toggling}
+                onPress={() => toggleExcluded(itemSheet)}
+                right={(
+                  <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                    <Switch value={!itemSheet.excluded} trackColor={{ true: colors.primary }} />
+                  </View>
+                )}
+              />
+            ) : null}
             <MenuRow label={t('common.viewDetails')} onPress={() => { const it = itemSheet; setItemSheet(null); navigation.navigate('ExpenseDetail', { groupId: id, expenseId: it.id }); }} />
             <MenuRow label={t('groupDetail.copyExpense')} disabled={!canWrite || itemBusy} onPress={() => copyExpense(itemSheet)} last={!canEditExpense(itemSheet, detail, meId)} />
             {canEditExpense(itemSheet, detail, meId) ? (
