@@ -273,8 +273,8 @@ public sealed class TwilioSendGridEmailSender(
 
 /// <summary>
 /// Selects the email sender from <c>Email:Provider</c>: empty → <see cref="StubEmailSender"/>
-/// (logs only), "twilio"/"sendgrid" → <see cref="TwilioSendGridEmailSender"/> (primary, the
-/// appsettings default), "onesignal" → <see cref="OneSignalEmailSender"/>, anything else → startup error.
+/// (logs only), "onesignal" → <see cref="OneSignalEmailSender"/> (primary, the appsettings
+/// default), "twilio"/"sendgrid" → <see cref="TwilioSendGridEmailSender"/>, anything else → startup error.
 /// </summary>
 public static class EmailSenderFactory
 {

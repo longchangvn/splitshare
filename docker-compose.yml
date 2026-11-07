@@ -57,10 +57,11 @@ services:
       Notification__Provider: ${NOTIFICATION_PROVIDER:-}
       Notification__OneSignal__AppId: ${ONESIGNAL_APP_ID:-}
       Notification__OneSignal__ApiKey: ${ONESIGNAL_REST_API_KEY:-}
-      # Email (verify, reset password, invites, nudges): "twilio" (primary) sends via
+      # Email (verify, reset password, invites, nudges): "onesignal" (primary) uses
+      # OneSignal's email channel (reuses the OneSignal app id/key above); "twilio" sends via
       # Twilio SendGrid with TWILIO_SENDGRID_API_KEY from a verified EMAIL_FROM_ADDRESS;
-      # "onesignal" uses OneSignal's email channel; EMAIL_PROVIDER= (empty) = log only.
-      Email__Provider: ${EMAIL_PROVIDER-twilio}
+      # EMAIL_PROVIDER= (empty) = log only.
+      Email__Provider: ${EMAIL_PROVIDER-onesignal}
       Email__Twilio__ApiKey: ${TWILIO_SENDGRID_API_KEY:-}
       Email__FromName: ${EMAIL_FROM_NAME:-}
       Email__FromAddress: ${EMAIL_FROM_ADDRESS:-}

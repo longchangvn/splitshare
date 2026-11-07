@@ -78,7 +78,7 @@ else
 builder.Services.AddScoped<ReceiptScanService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
-// Email: Email:Provider "twilio" (primary, Twilio SendGrid) | "onesignal" | unset = logging stub.
+// Email: Email:Provider "onesignal" (primary) | "twilio" (Twilio SendGrid) | unset = logging stub.
 builder.Services.AddHttpClient(OneSignalEmailSender.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddHttpClient(TwilioSendGridEmailSender.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddSingleton<IEmailSender>(sp => EmailSenderFactory.Create(

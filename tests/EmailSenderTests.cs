@@ -160,13 +160,18 @@ public sealed class EmailSenderTests
     }
 
     [Fact]
-    public void Twilio_Is_The_Primary_Provider_In_Appsettings()
+    public void OneSignal_Is_The_Primary_Provider_In_Appsettings()
     {
-        var cfg = new ConfigurationBuilder()
-            .AddJsonFile(Path.Combine(RepoRoot(), "api", "appsettings.json"))
-            .Build();
-        Assert.Equal("twilio", cfg["Email:Provider"]);
-        Assert.Null(cfg["Email:Twilio:ApiKey"]); // secret: env/user-secrets only
+        foreach (var file in new[] { "appsettings.json", "appsettings.Development.json" })
+        {
+            var cfg = new ConfigurationBuilder()
+                .AddJsonFile(Path.Combine(RepoRoot(), "api", "appsettings.json"))
+                .AddJsonFile(Path.Combine(RepoRoot(), "api", file))
+                .Build();
+            Assert.Equal("onesignal", cfg["Email:Provider"]);
+            Assert.Null(cfg["Email:OneSignal:ApiKey"]); // secrets: env/user-secrets only
+            Assert.Null(cfg["Email:Twilio:ApiKey"]);
+        }
     }
 
     private static string RepoRoot()
