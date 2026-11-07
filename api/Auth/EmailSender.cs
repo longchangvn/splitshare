@@ -273,8 +273,8 @@ public sealed class TwilioSendGridEmailSender(
 
 /// <summary>
 /// Selects the email sender from <c>Email:Provider</c>: empty → <see cref="StubEmailSender"/>
-/// (logs only), "onesignal" → <see cref="OneSignalEmailSender"/> (primary, the appsettings
-/// default), "twilio"/"sendgrid" → <see cref="TwilioSendGridEmailSender"/>, anything else → startup error.
+/// (logs only), "sendgrid"/"twilio" → <see cref="TwilioSendGridEmailSender"/> (primary, the
+/// appsettings default), "onesignal" → <see cref="OneSignalEmailSender"/>, anything else → startup error.
 /// </summary>
 public static class EmailSenderFactory
 {
@@ -288,7 +288,7 @@ public static class EmailSenderFactory
         var provider = raw.ToLowerInvariant();
         if (provider is not ("twilio" or "sendgrid" or "onesignal"))
             throw new InvalidOperationException(
-                $"Unknown Email:Provider '{raw}'. Valid values: twilio, onesignal (or unset for the logging stub).");
+                $"Unknown Email:Provider '{raw}'. Valid values: sendgrid, twilio, onesignal (or unset for the logging stub).");
         if (httpClientFactory is null)
             throw new InvalidOperationException(
                 $"Email:Provider '{raw}' requires an IHttpClientFactory (register the named HttpClient first).");

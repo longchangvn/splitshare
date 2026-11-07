@@ -160,7 +160,7 @@ public sealed class EmailSenderTests
     }
 
     [Fact]
-    public void OneSignal_Is_The_Primary_Provider_In_Appsettings()
+    public void SendGrid_Is_The_Primary_Provider_In_Appsettings()
     {
         foreach (var file in new[] { "appsettings.json", "appsettings.Development.json" })
         {
@@ -168,7 +168,7 @@ public sealed class EmailSenderTests
                 .AddJsonFile(Path.Combine(RepoRoot(), "api", "appsettings.json"))
                 .AddJsonFile(Path.Combine(RepoRoot(), "api", file))
                 .Build();
-            Assert.Equal("onesignal", cfg["Email:Provider"]);
+            Assert.Equal("sendgrid", cfg["Email:Provider"]);
             Assert.Null(cfg["Email:OneSignal:ApiKey"]); // secrets: env/user-secrets only
             Assert.Null(cfg["Email:Twilio:ApiKey"]);
         }
