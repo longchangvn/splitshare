@@ -13,7 +13,8 @@ const checks = [
   ['Groups board', 'src/screens/GroupsScreen.js', ['GroupTile', 'groupStatus.']],
   ['Activity feed', 'src/screens/ActivityScreen.js', ['fetchActivity', 'activityPageTokens']],
   ['Quick add (web QuickAddExpense)', 'src/screens/QuickAddScreen.js', ['resolveQuickAddFlow', 'defaultGroupName', 'mergeMembers']],
-  ['New group wizard', 'src/screens/NewGroupScreen.js', ['/groups', '/invites', '/contacts', 'from-template', 'share-link']],
+  // No template step for now: plain POST /groups carries invites and returns the invite link.
+  ['New group wizard', 'src/screens/NewGroupScreen.js', ['/groups', 'invite_emails', '/contacts', 'invite_link']],
   ['Group detail (tabs + settings + scan entry)', 'src/screens/GroupScreen.js', ['/groups/${id}/me', 'LedgerTab', 'BalancesTab', 'PeopleTab', 'RecurringTab', 'GroupSettingsSheet', 'ScanReceipts']],
   ['Ledger filters + archive scope', 'src/components/group/LedgerTab.js', ["status: 'LOCKED'", 'viewArchive']],
   ['Invite (email/contacts/link)', 'src/screens/InviteScreen.js', ['/invites', '/contacts', '/rotate-invite', 'inviteRows']],

@@ -33,14 +33,11 @@ test('search results and the contacts box share one pick/unpick row', () => {
   assert.equal((dashboard.match(/<WizardPersonRow /g) ?? []).length, 2);
 });
 
-test('template field is a free-input combobox offering a None option', () => {
-  assert.match(dashboard, /<Autocomplete\s+label=\{t\('wizard\.template'\)\}/);
-  // Suggestions: localized "None" first, then catalog labels (free text allowed).
-  assert.match(dashboard, /\[t\('common\.none'\), \.\.\.templates\.map\(/);
-  // The chosen value is resolved to a key before hitting the API.
-  assert.match(dashboard, /import \{ resolveTemplateKey \} from '\.\.\/wizardUtils\.js'/);
-  assert.match(dashboard, /resolveTemplateKey\(templates, tpl, t\('common\.none'\)\)/);
-  assert.match(dashboard, /template: tplKey/);
+test('group creation has no template field and always creates a plain group', () => {
+  // Templates are out of group creation for now (product decision).
+  assert.doesNotMatch(dashboard, /wizard\.template/);
+  assert.doesNotMatch(dashboard, /api\.post\('\/api\/v1\/groups\/from-template'/);
+  assert.match(dashboard, /api\.post\('\/api\/v1\/groups', \{/);
 });
 
 // --- Executable coverage for the template-value resolution. ---
