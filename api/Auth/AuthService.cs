@@ -8,19 +8,30 @@ using SplitShare.Api.Services;
 namespace SplitShare.Api.Auth;
 
 public sealed record AuthResult(bool Ok, string? ErrorCode, string? Error, User? User, TokenPair? Tokens,
-    Dictionary<string, string[]>? Fields = null);
+    Dictionary<string, string[]>? Fields = null, bool Created = false);
+
+/// <summary>Outcome of an OTP request. <see cref="RetryAfterSeconds"/> is set on cooldown.</summary>
+public sealed record OtpRequestResult(bool Ok, string? ErrorCode = null, string? Error = null, int? RetryAfterSeconds = null);
 
 public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSender email, LedgerService ledger,
-    IConfiguration? config = null)
+    IConfiguration? config = null, ILogger<AuthService>? logger = null)
 {
     // Web origin for links in emails (same App:BaseUrl as invite links).
     private string BaseUrl => (config?["App:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
 
     private const int MaxFailed = 10;
     private const int ResetMinutes = 15;
+    public const int OtpMinutes = 10;
+    public const int OtpMaxAttempts = 5;
+    public const int OtpCooldownSeconds = 60;
+    public const int OtpMaxPerHour = 5;
     private static readonly TimeSpan LockoutFor = TimeSpan.FromMinutes(15);
     private static readonly Regex UsernameRe = new("^[a-z0-9_.-]{3,30}$", RegexOptions.Compiled);
 
+    public const int MaxDisplayName = 50;
+
+    /// <param name="username">Legacy handle (a-z 0-9 _ . -, 3-30) or the email itself (email sign-ups).</param>
+    /// <param name="displayName">Optional: empty means "show the email" (see <see cref="User.Name"/>).</param>
     public static Dictionary<string, string[]>? ValidateRegister(string username, string email, string displayName, string password)
     {
         var fields = new Dictionary<string, List<string>>();
@@ -29,11 +40,12 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
             if (!fields.TryGetValue(k, out var list)) fields[k] = list = [];
             list.Add(m);
         }
-        if (!UsernameRe.IsMatch(username.ToLowerInvariant()))
+        var u = username.ToLowerInvariant();
+        if (u != email.ToLowerInvariant() && !UsernameRe.IsMatch(u))
             Add("username", "3-30 chars: a-z 0-9 _ . -");
         if (!IsEmail(email)) Add("email", "Invalid email.");
-        if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 50)
-            Add("display_name", "Required, max 50 chars.");
+        if (displayName.Length > MaxDisplayName)
+            Add("display_name", $"Max {MaxDisplayName} chars.");
         var pw = ValidatePassword(password);
         if (pw is not null) Add("password", pw);
         return fields.Count == 0 ? null : fields.ToDictionary(kv => kv.Key, kv => kv.Value.ToArray());
@@ -73,21 +85,20 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
     }
 
     /// <summary>
-    /// Adds (unsaved) the account for an emailed-invite acceptance: default username and
-    /// display name from the address, email verified — the link was delivered to it.
-    /// The caller saves it together with the group membership.
+    /// Adds (unsaved) the account for an emailed-invite acceptance: the email is the
+    /// username, no display name (the email shows until one is set), email verified —
+    /// the link was delivered to it. The caller saves it together with the group membership.
     /// </summary>
-    public async Task<User> StageInvitedUserAsync(string emailAddr, string password)
+    public Task<User> StageInvitedUserAsync(string emailAddr, string password)
     {
         emailAddr = emailAddr.Trim().ToLowerInvariant();
         var user = new User
         {
-            Username = await DefaultUsernameAsync(emailAddr), Email = emailAddr,
-            DisplayName = DefaultDisplayName(emailAddr), PasswordHash = PasswordHasher.Hash(password),
-            EmailVerifiedAt = DateTime.UtcNow
+            Username = emailAddr, Email = emailAddr,
+            PasswordHash = PasswordHasher.Hash(password), EmailVerifiedAt = DateTime.UtcNow
         };
         db.Users.Add(user);
-        return user;
+        return Task.FromResult(user);
     }
 
     public async Task<AuthResult> SignInAsync(User user) => new(true, null, null, user, await IssueTokensAsync(user));
@@ -105,25 +116,32 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         return new TokenPair(tokens.CreateAccessToken(user), refresh, DateTime.UtcNow.AddDays(30));
     }
 
-    public async Task<AuthResult> RegisterAsync(string username, string emailAddr, string displayName, string password, string? phone)
+    /// <summary>
+    /// Password sign-up. Only email + password are required: a blank username becomes the
+    /// email and a blank display name stays empty (the email is shown instead).
+    /// </summary>
+    public async Task<AuthResult> RegisterAsync(string? username, string emailAddr, string? displayName, string password, string? phone)
     {
-        username = username.ToLowerInvariant();
-        emailAddr = emailAddr.Trim().ToLowerInvariant();
+        emailAddr = (emailAddr ?? "").Trim().ToLowerInvariant();
+        username = string.IsNullOrWhiteSpace(username) ? emailAddr : username.Trim().ToLowerInvariant();
+        displayName = displayName?.Trim() ?? "";
+        password ??= "";
         var invalid = ValidateRegister(username, emailAddr, displayName, password);
         if (invalid is not null) return new(false, "VALIDATION", "Invalid registration.", null, null, invalid);
-        if (await db.Users.AnyAsync(u => u.Username == username))
-            return new(false, "USERNAME_TAKEN", "Username taken.", null, null,
-                new() { ["username"] = ["Username taken."] });
+        // Email first: for email sign-ups the username is the email, and "email taken" is the useful answer.
         if (await db.Users.AnyAsync(u => u.Email == emailAddr))
             return new(false, "EMAIL_TAKEN", "Email taken.", null, null,
                 new() { ["email"] = ["Email taken."] });
+        if (await db.Users.AnyAsync(u => u.Username == username))
+            return new(false, "USERNAME_TAKEN", "Username taken.", null, null,
+                new() { ["username"] = ["Username taken."] });
         if (phone is not null && await db.Users.AnyAsync(u => u.Phone == phone))
             return new(false, "PHONE_TAKEN", "Phone taken.", null, null,
                 new() { ["phone"] = ["Phone taken."] });
 
         var user = new User
         {
-            Username = username, Email = emailAddr, DisplayName = displayName.Trim(),
+            Username = username, Email = emailAddr, DisplayName = displayName,
             Phone = phone, PasswordHash = PasswordHasher.Hash(password)
         };
         db.Users.Add(user);
@@ -135,11 +153,96 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
             UserId = user.Id, TokenHash = TokenService.HashToken(raw)
         });
         await db.SaveChangesAsync();
-        await email.SendAsync(emailAddr, "Verify your SplitShare email",
-            $"Hi {user.DisplayName},\n\nConfirm your email address for SplitShare:\n{BaseUrl}/verify/{raw}\n\n" +
-            "If you didn't create a SplitShare account, you can ignore this email.", transactional: true);
+        var mail = EmailTemplates.VerifyEmail(user.Name, $"{BaseUrl}/verify/{raw}", emailAddr);
+        await email.SendAsync(emailAddr, mail.Subject, mail.Text, transactional: true, html: mail.Html);
 
-        return new(true, null, null, user, await IssueTokensAsync(user));
+        return new(true, null, null, user, await IssueTokensAsync(user), Created: true);
+    }
+
+    private static string OtpHash(string emailAddr, string code) => TokenService.HashToken($"{emailAddr}:{code}");
+
+    /// <summary>
+    /// Emails a 6-digit sign-in code. Same answer whether or not the address has an
+    /// account (no enumeration); earlier unused codes for the address are revoked.
+    /// Limited to one code per <see cref="OtpCooldownSeconds"/> and <see cref="OtpMaxPerHour"/> per hour.
+    /// </summary>
+    public async Task<OtpRequestResult> RequestOtpAsync(string? emailAddr)
+    {
+        emailAddr = (emailAddr ?? "").Trim().ToLowerInvariant();
+        if (!IsEmail(emailAddr)) return new(false, "VALIDATION", "Invalid email.");
+        var now = DateTime.UtcNow;
+        var recent = await db.EmailOtps.Where(o => o.Email == emailAddr && o.CreatedAt > now.AddHours(-1))
+            .OrderByDescending(o => o.CreatedAt).ToListAsync();
+        if (recent.Count > 0)
+        {
+            var wait = OtpCooldownSeconds - (int)(now - recent[0].CreatedAt).TotalSeconds;
+            if (wait > 0) return new(false, "OTP_COOLDOWN", $"Wait {wait}s before requesting another code.", wait);
+        }
+        if (recent.Count >= OtpMaxPerHour)
+        {
+            var wait = (int)Math.Ceiling((recent[^1].CreatedAt.AddHours(1) - now).TotalSeconds);
+            return new(false, "OTP_COOLDOWN", "Too many codes requested. Try again later.", Math.Max(wait, 1));
+        }
+        foreach (var o in recent.Where(o => o.UsedAt is null)) o.UsedAt = now;
+
+        var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
+        var otp = new EmailOtp
+        {
+            Email = emailAddr, CodeHash = OtpHash(emailAddr, code), CreatedAt = now,
+            ExpiresAt = now.AddMinutes(OtpMinutes)
+        };
+        db.EmailOtps.Add(otp);
+        await db.SaveChangesAsync();
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == emailAddr);
+        var mail = EmailTemplates.LoginCode(user?.Name, code, OtpMinutes, emailAddr);
+        var sent = await email.SendAsync(emailAddr, mail.Subject, mail.Text, transactional: true, html: mail.Html);
+        if (sent.Status == EmailSendStatus.NotConfigured)
+            logger?.LogWarning("Sign-in code not delivered: email provider is not configured ({Error}).", sent.Error);
+        if (sent.Status != EmailSendStatus.Failed) return new(true); // NotConfigured = dev stub: code is only logged
+        // Undelivered code: drop it so it neither counts toward the cooldown/hourly cap nor works.
+        db.EmailOtps.Remove(otp);
+        await db.SaveChangesAsync();
+        return new(false, "EMAIL_FAILED", "Could not send the code. Try again shortly.");
+    }
+
+    /// <summary>
+    /// Checks the latest code for the address. Signs in the existing account, or creates one
+    /// (username = email, no display name, email verified). Wrong codes count toward
+    /// <see cref="OtpMaxAttempts"/>, after which the code is burned.
+    /// </summary>
+    public async Task<AuthResult> VerifyOtpAsync(string? emailAddr, string? code)
+    {
+        emailAddr = (emailAddr ?? "").Trim().ToLowerInvariant();
+        code = (code ?? "").Trim();
+        const string invalidMsg = "Invalid or expired code.";
+        var now = DateTime.UtcNow;
+        var otp = await db.EmailOtps.Where(o => o.Email == emailAddr && o.UsedAt == null && o.ExpiresAt > now)
+            .OrderByDescending(o => o.CreatedAt).FirstOrDefaultAsync();
+        if (otp is null || otp.Attempts >= OtpMaxAttempts)
+            return new(false, "INVALID_CODE", invalidMsg, null, null);
+        var match = System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.ASCII.GetBytes(OtpHash(emailAddr, code)),
+            System.Text.Encoding.ASCII.GetBytes(otp.CodeHash));
+        if (!match)
+        {
+            otp.Attempts++;
+            if (otp.Attempts >= OtpMaxAttempts) otp.UsedAt = now;
+            await db.SaveChangesAsync();
+            return new(false, "INVALID_CODE", invalidMsg, null, null);
+        }
+        otp.UsedAt = now;
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Email == emailAddr);
+        var created = user is null;
+        if (user is null)
+        {
+            user = new User { Username = emailAddr, Email = emailAddr, EmailVerifiedAt = now };
+            db.Users.Add(user);
+        }
+        else user.EmailVerifiedAt ??= now;
+        await db.SaveChangesAsync();
+        return new(true, null, null, user, await IssueTokensAsync(user), Created: created);
     }
 
     public async Task<AuthResult> LoginAsync(string? usernameOrEmail, string? password)
@@ -230,7 +333,7 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
             ExpiresAt = DateTime.UtcNow.AddMinutes(ResetMinutes)
         });
         await db.SaveChangesAsync();
-        var mail = EmailTemplates.PasswordReset(user.DisplayName, $"{BaseUrl}/reset/{raw}", ResetMinutes, em);
+        var mail = EmailTemplates.PasswordReset(user.Name, $"{BaseUrl}/reset/{raw}", ResetMinutes, em);
         await email.SendAsync(em, mail.Subject, mail.Text, transactional: true, html: mail.Html);
     }
 
@@ -316,8 +419,8 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
             query = query.Where(u => u.DisplayName.ToLower().Contains(s)
                 || u.Username.Contains(s) || u.Email.ToLower().Contains(s));
         }
-        return (await query.OrderBy(u => u.DisplayName).Take(limit).ToListAsync())
-            .Select(u => (object)new { user_id = u.Id, display_name = u.DisplayName, username = u.Username, avatar_url = (string?)null })
+        return (await query.OrderBy(u => u.DisplayName == "" ? u.Email : u.DisplayName).Take(limit).ToListAsync())
+            .Select(u => (object)new { user_id = u.Id, display_name = u.Name, username = u.Username, avatar_url = (string?)null })
             .ToList();
     }
 }

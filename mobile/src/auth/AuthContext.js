@@ -7,6 +7,9 @@ import { api, setTokens, clearTokens, getTokens, loadApiUrlOverride } from '../a
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
 
+// Email sign-ups use the email as username: never show that as a public @handle.
+export const publicHandle = (username) => (username && !username.includes('@') ? username : null);
+
 const CRED_USER_KEY = 'ss_cred_user';
 const CRED_PW_KEY = 'ss_cred_pw';
 
@@ -94,10 +97,18 @@ export function AuthProvider({ children }) {
       await saveSession(d);
       return d;
     },
+    // Email-only sign-up: payload { email, password }; the email is the username.
     register: async (payload) => {
       const d = await api.post('/api/v1/auth/register', payload);
       await saveSession(d);
       return d; // includes auto_joined_groups
+    },
+    // Email one-time code: request → { resend_after_seconds }, verify → token pair.
+    requestOtp: async (email) => api.post('/api/v1/auth/otp/request', { email }),
+    verifyOtp: async (email, code) => {
+      const d = await api.post('/api/v1/auth/otp/verify', { email, code });
+      await saveSession(d);
+      return d;
     },
     google: async (id_token) => {
       const d = await api.post('/api/v1/auth/google', { id_token });

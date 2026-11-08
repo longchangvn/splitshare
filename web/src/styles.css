@@ -1228,6 +1228,12 @@ a {
   color: #0c7a4b;
   font-weight: 600;
 }
+.auth-pin {
+  justify-content: center;
+}
+.auth-email-chip {
+  overflow-wrap: anywhere;
+}
 @keyframes auth-drift-a {
   from { transform: translate(0, 0) scale(1); }
   to { transform: translate(24px, 18px) scale(1.06); }

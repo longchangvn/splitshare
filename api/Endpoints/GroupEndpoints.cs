@@ -33,7 +33,7 @@ public static class GroupEndpoints
         var members = await db.GroupMembers.Where(m => m.GroupId == groupId).ToListAsync();
         var ids = members.Select(m => m.UserId).ToList();
         var users = await db.Users.Where(u => ids.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => new { u.DisplayName, u.Username });
+            .ToDictionaryAsync(u => u.Id, u => new { DisplayName = u.Name, u.Username });
         var myRole = members.FirstOrDefault(m => m.UserId == me)?.Role;
         var baseUrl = (config["App:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
         // Stable join link for owners/treasurers — same token as email invites.

@@ -7,7 +7,7 @@ import {
 import { api, fmt } from '../api.js';
 import { buildBalance, signPrefix, toneForNet } from '../balance.js';
 import { resolveTemplateKey } from '../wizardUtils.js';
-import { Err } from '../auth.jsx';
+import { Err, publicHandle } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { QuickAddExpense } from '../components/QuickAddExpense.jsx';
 import { ADD_EXPENSE_STATE } from '../quickAdd.js';
@@ -888,7 +888,7 @@ function WizardPersonRow({ c, picked, setPicked }) {
     <div className="wizard-person">
       <div style={{ minWidth: 0 }}>
         <Text size="sm" fw={600} truncate>{c.display_name}</Text>
-        <Text size="xs" c="dimmed" truncate>@{c.username}</Text>
+        {publicHandle(c.username) && <Text size="xs" c="dimmed" truncate>@{c.username}</Text>}
       </div>
       <button
         type="button"

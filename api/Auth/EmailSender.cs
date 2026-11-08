@@ -273,23 +273,106 @@ public sealed class TwilioSendGridEmailSender(
 }
 
 /// <summary>
+/// Plain SMTP (default: Gmail, <c>smtp.gmail.com:587</c> + STARTTLS). Settings under
+/// <c>Email:Smtp</c>: <c>Host</c>, <c>Port</c>, <c>EnableSsl</c>, <c>Username</c>, <c>Password</c>
+/// (a Gmail App Password — secret, env <c>Email__Smtp__Password</c> only). The sender is
+/// <c>Email:FromAddress</c> (falls back to the SMTP username). Sends multipart text + HTML.
+/// Failures are logged (without recipient or body) and returned, never thrown.
+/// </summary>
+public sealed class SmtpEmailSender(IConfiguration config, ILogger<SmtpEmailSender> logger) : IEmailSender
+{
+    public const string DefaultHost = "smtp.gmail.com";
+    public const int DefaultPort = 587;
+
+    /// <summary>Delivery seam for tests; production sends through <see cref="System.Net.Mail.SmtpClient"/>.</summary>
+    public Func<System.Net.Mail.MailMessage, Task>? Deliver { get; init; }
+
+    public async Task<EmailSendResult> SendAsync(string to, string subject, string body, bool transactional = false, string? html = null)
+    {
+        var username = config["Email:Smtp:Username"]?.Trim();
+        // Tolerate .env values pasted with quotes or Google's display spaces ("abcd efgh ijkl mnop").
+        var password = config["Email:Smtp:Password"]?.Trim().Trim('"', '\'').Replace(" ", "");
+        var fromAddress = NullIfBlank(config["Email:FromAddress"])?.Trim() ?? username;
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(fromAddress))
+        {
+            logger.LogWarning("SMTP email not configured (Email:Smtp:Username / :Password / Email:FromAddress); skipping email.");
+            return EmailSendResult.Unconfigured("Email provider credentials are not configured.");
+        }
+
+        var messageId = $"<{Guid.NewGuid():N}@{fromAddress.Split('@').Last()}>";
+        try
+        {
+            using var msg = new System.Net.Mail.MailMessage
+            {
+                From = new System.Net.Mail.MailAddress(fromAddress, NullIfBlank(config["Email:FromName"]) ?? ""),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = false,
+                BodyEncoding = System.Text.Encoding.UTF8,
+                SubjectEncoding = System.Text.Encoding.UTF8
+            };
+            msg.To.Add(to);
+            msg.Headers.Add("Message-ID", messageId);
+            // System mail: keeps auto-responders from replying to the no-reply mailbox.
+            msg.Headers.Add("Auto-Submitted", "auto-generated");
+            msg.AlternateViews.Add(System.Net.Mail.AlternateView.CreateAlternateViewFromString(
+                html ?? OneSignalEmailSender.ToHtml(body), System.Text.Encoding.UTF8, "text/html"));
+
+            if (Deliver is not null) await Deliver(msg);
+            else
+            {
+                using var client = new System.Net.Mail.SmtpClient(
+                    NullIfBlank(config["Email:Smtp:Host"]) ?? DefaultHost,
+                    config.GetValue("Email:Smtp:Port", DefaultPort))
+                {
+                    EnableSsl = config.GetValue("Email:Smtp:EnableSsl", true),
+                    DeliveryMethod = System.Net.Mail.SmtpDeliveryMethod.Network,
+                    UseDefaultCredentials = false,
+                    Credentials = new NetworkCredential(username, password),
+                    Timeout = config.GetValue("Email:Smtp:TimeoutMs", 15000)
+                };
+                await client.SendMailAsync(msg);
+            }
+            logger.LogInformation("SMTP email accepted (subject={Subject}, id={MessageId}).", subject, messageId);
+            return EmailSendResult.Accepted(messageId);
+        }
+        catch (System.Net.Mail.SmtpException ex)
+        {
+            // StatusCode only: the message text can echo addresses.
+            logger.LogWarning("SMTP email send failed: {Status}.", ex.StatusCode);
+            return EmailSendResult.Fail($"Email provider rejected the message (SMTP {ex.StatusCode}).");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning("SMTP email send failed: {Type}.", ex.GetType().Name);
+            return EmailSendResult.Fail("Email provider unreachable.");
+        }
+    }
+
+    private static string? NullIfBlank(string? v) => string.IsNullOrWhiteSpace(v) ? null : v;
+}
+
+/// <summary>
 /// Selects the email sender from <c>Email:Provider</c>: empty → <see cref="StubEmailSender"/>
-/// (logs only), "sendgrid"/"twilio" → <see cref="TwilioSendGridEmailSender"/> (primary, the
-/// appsettings default), "onesignal" → <see cref="OneSignalEmailSender"/>, anything else → startup error.
+/// (logs only), "smtp"/"gmail" → <see cref="SmtpEmailSender"/> (primary, the appsettings default),
+/// "sendgrid"/"twilio" → <see cref="TwilioSendGridEmailSender"/>, "onesignal" →
+/// <see cref="OneSignalEmailSender"/>, anything else → startup error.
 /// </summary>
 public static class EmailSenderFactory
 {
     public static IEmailSender Create(IConfiguration config, IHttpClientFactory? httpClientFactory = null,
         ILogger<OneSignalEmailSender>? oneSignalLogger = null, ILogger<StubEmailSender>? stubLogger = null,
-        ILogger<TwilioSendGridEmailSender>? twilioLogger = null)
+        ILogger<TwilioSendGridEmailSender>? twilioLogger = null, ILogger<SmtpEmailSender>? smtpLogger = null)
     {
         var raw = config["Email:Provider"]?.Trim();
         if (string.IsNullOrEmpty(raw))
             return new StubEmailSender(stubLogger ?? NullLogger<StubEmailSender>.Instance);
         var provider = raw.ToLowerInvariant();
+        if (provider is "smtp" or "gmail")
+            return new SmtpEmailSender(config, smtpLogger ?? NullLogger<SmtpEmailSender>.Instance);
         if (provider is not ("twilio" or "sendgrid" or "onesignal"))
             throw new InvalidOperationException(
-                $"Unknown Email:Provider '{raw}'. Valid values: sendgrid, twilio, onesignal (or unset for the logging stub).");
+                $"Unknown Email:Provider '{raw}'. Valid values: smtp, gmail, sendgrid, twilio, onesignal (or unset for the logging stub).");
         if (httpClientFactory is null)
             throw new InvalidOperationException(
                 $"Email:Provider '{raw}' requires an IHttpClientFactory (register the named HttpClient first).");

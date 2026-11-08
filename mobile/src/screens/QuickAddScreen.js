@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { api, groupIdOf } from '../api/client';
-import { useAuth } from '../auth/AuthContext';
+import { publicHandle, useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
 import { Avatar, Button, Card, CheckRow, ErrText, Field, Input, Screen, Skeleton } from '../ui';
@@ -123,7 +123,7 @@ export default function QuickAddScreen({ navigation }) {
             <CheckRow
               key={c.user_id}
               label={c.display_name}
-              sub={c.username ? `@${c.username}` : null}
+              sub={publicHandle(c.username) ? `@${c.username}` : null}
               checked={selected.includes(c.user_id)}
               onPress={() => toggle(c.user_id)}
             />

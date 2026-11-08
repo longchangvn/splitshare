@@ -4,7 +4,7 @@ import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { Err, useAuth } from '../auth.jsx';
+import { Err, publicHandle, useAuth } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { useT } from '../prefs.jsx';
 
@@ -13,7 +13,7 @@ export function Profile() {
   const { user, setUser, logout } = useAuth();
   const nav = useNavigate();
   const [me, setMe] = useState(user || null);
-  const [name, setName] = useState(user?.display_name || '');
+  const [name, setName] = useState(user?.display_name === user?.email ? '' : user?.display_name || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
@@ -26,9 +26,12 @@ export function Profile() {
   const [tab, setTab] = useState('account');
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const hasPw = me?.has_password !== false;
+  // The API shows the email when no display name is set: edit an empty field then.
+  const ownName = (d) => (d?.display_name === d?.email ? '' : d?.display_name || '');
 
   useEffect(() => {
-    api.get('/api/v1/me').then((d) => { setMe(d); setUser(d); setName(d.display_name); setPhone(d.phone || ''); }).catch(setE);
+    api.get('/api/v1/me').then((d) => { setMe(d); setUser(d); setName(ownName(d)); setPhone(d.phone || ''); }).catch(setE);
     api.get('/api/v1/me/handles').then(setHandles).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -63,6 +66,7 @@ export function Profile() {
     try {
       await api.patch('/api/v1/me/password', { current_password: cur || null, new_password: next });
       setCur(''); setNext('');
+      if (!hasPw) { const d = { ...me, has_password: true }; setMe(d); setUser(d); }
       notifications.show({ title: t('profile.passwordChanged'), color: 'teal' });
       setE(null);
     } catch (err) { setE(err); } finally { setPwBusy(false); }
@@ -121,8 +125,17 @@ export function Profile() {
           <Tabs.Panel value="account" className="profile-panel">
             <form onSubmit={save}>
               <Stack gap="sm">
-                <Text size="sm" c="dimmed">@{me?.username} · {me?.email} {me && !me.email_verified && t('profile.unverified')}</Text>
-                <TextInput label={t('profile.displayName')} required value={name} onChange={(x) => setName(x.target.value)} />
+                <Text size="sm" c="dimmed">
+                  {publicHandle(me?.username) && `@${me.username} · `}{me?.email} {me && !me.email_verified && t('profile.unverified')}
+                </Text>
+                <TextInput
+                  label={t('profile.displayName')}
+                  description={t('profile.displayNameHint')}
+                  placeholder={me?.email}
+                  maxLength={50}
+                  value={name}
+                  onChange={(x) => setName(x.target.value)}
+                />
                 <TextInput label={t('profile.phone')} value={phone} onChange={(x) => setPhone(x.target.value)} />
                 <button type="submit" className="gd-action-btn profile-primary-btn" disabled={saving}>
                   <ProfileIcon name="save" />
@@ -135,12 +148,14 @@ export function Profile() {
           <Tabs.Panel value="password" className="profile-panel">
             <form onSubmit={changePw}>
               <Stack gap="sm">
-                <Text size="sm" c="dimmed">{t('profile.passwordHint')}</Text>
-                <PasswordInput label={t('profile.currentPassword')} autoComplete="current-password" value={cur} onChange={(x) => setCur(x.target.value)} />
+                <Text size="sm" c="dimmed">{t(hasPw ? 'profile.passwordHint' : 'profile.setPasswordHint')}</Text>
+                {hasPw && (
+                  <PasswordInput label={t('profile.currentPassword')} autoComplete="current-password" value={cur} onChange={(x) => setCur(x.target.value)} />
+                )}
                 <PasswordInput label={t('profile.newPassword')} description={t('profile.passwordRule')} autoComplete="new-password" value={next} onChange={(x) => setNext(x.target.value)} />
                 <button type="submit" className="gd-action-btn profile-primary-btn" disabled={pwBusy}>
                   <ProfileIcon name="lock" />
-                  <span>{pwBusy ? t('profile.saving') : t('profile.changePassword')}</span>
+                  <span>{pwBusy ? t('profile.saving') : t(hasPw ? 'profile.changePassword' : 'auth.setPassword')}</span>
                 </button>
               </Stack>
             </form>

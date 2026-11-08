@@ -26,7 +26,7 @@ public sealed class ActivityService(AppDbContext db)
             .Select(a => a.UserId).ToListAsync();
         var all = ids.Concat(archived).Distinct().ToList();
         return await db.Users.Where(u => all.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+            .ToDictionaryAsync(u => u.Id, u => u.Name);
     }
 
     /// <summary>Newest-first feed for one group; at most <paramref name="take"/> rows.</summary>

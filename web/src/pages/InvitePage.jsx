@@ -6,7 +6,7 @@ import {
 } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { api } from '../api.js';
-import { Err } from '../auth.jsx';
+import { Err, publicHandle } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { initialsOf } from '../components/Net.jsx';
 import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
@@ -122,7 +122,7 @@ export function InvitePage() {
             <Group key={c.user_id} justify="space-between" wrap="nowrap">
               <Group gap="sm" wrap="nowrap">
                 <Avatar color="blue" radius="xl" size="sm">{initialsOf(c.display_name)}</Avatar>
-                <Text size="sm">{c.display_name} <Text span c="dimmed">@{c.username}</Text></Text>
+                <Text size="sm">{c.display_name}{publicHandle(c.username) && <> <Text span c="dimmed">@{c.username}</Text></>}</Text>
               </Group>
               <ActionIcon
                 variant="light"

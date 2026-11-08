@@ -57,14 +57,19 @@ services:
       Notification__Provider: ${NOTIFICATION_PROVIDER:-}
       Notification__OneSignal__AppId: ${ONESIGNAL_APP_ID:-}
       Notification__OneSignal__ApiKey: ${ONESIGNAL_REST_API_KEY:-}
-      # Email (verify, reset password, invites, nudges): "sendgrid" (primary) sends via
-      # Twilio SendGrid with TWILIO_SENDGRID_API_KEY from a verified EMAIL_FROM_ADDRESS;
+      # Email (sign-in codes, verify, reset password, invites, nudges): "smtp" (primary)
+      # sends via Gmail SMTP as noreply.splitshares@gmail.com with SMTP_PASSWORD (a Gmail
+      # App Password); "sendgrid" sends via Twilio SendGrid with TWILIO_SENDGRID_API_KEY;
       # "onesignal" uses OneSignal's email channel (reuses the OneSignal app id/key above);
       # EMAIL_PROVIDER= (empty) = log only.
-      Email__Provider: ${EMAIL_PROVIDER-sendgrid}
+      Email__Provider: ${EMAIL_PROVIDER-smtp}
+      Email__Smtp__Host: ${SMTP_HOST:-smtp.gmail.com}
+      Email__Smtp__Port: ${SMTP_PORT:-587}
+      Email__Smtp__Username: ${SMTP_USERNAME:-noreply.splitshares@gmail.com}
+      Email__Smtp__Password: ${SMTP_PASSWORD:-}
       Email__Twilio__ApiKey: ${TWILIO_SENDGRID_API_KEY:-}
-      Email__FromName: ${EMAIL_FROM_NAME:-}
-      Email__FromAddress: ${EMAIL_FROM_ADDRESS:-}
+      Email__FromName: ${EMAIL_FROM_NAME:-SplitShare}
+      Email__FromAddress: ${EMAIL_FROM_ADDRESS:-noreply.splitshares@gmail.com}
       # Receipt scan (OpenCode Console by default; local Ollama works keyless).
       # Off unless OCR_ENABLED=true + OCR_API_KEY (or a loopback OCR_BASE_URL).
       Ocr__Enabled: ${OCR_ENABLED:-false}

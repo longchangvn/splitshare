@@ -8,7 +8,7 @@ import {
 import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
-import { Err, useAuth } from '../auth.jsx';
+import { Err, publicHandle, useAuth } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
 import { RowMenu } from '../components/Mobile.jsx';
@@ -1523,7 +1523,7 @@ export function GroupDetail() {
                             </span>
                           )}
                         </div>
-                        <Text className="gd-person-handle" truncate>@{m.username}</Text>
+                        {publicHandle(m.username) && <Text className="gd-person-handle" truncate>@{m.username}</Text>}
                       </div>
                       <span className={`gd-person-tag gd-person-role ${roleClass}`}>{roleLabel}</span>
                       {canAct && (
@@ -2019,7 +2019,7 @@ export function GroupDetail() {
                         </span>
                         <div style={{ minWidth: 0 }}>
                           <Text size="sm" fw={600} truncate>{c.display_name}</Text>
-                          <Text size="xs" c="dimmed" truncate>@{c.username}</Text>
+                          {publicHandle(c.username) && <Text size="xs" c="dimmed" truncate>@{c.username}</Text>}
                         </div>
                       </Group>
                       <button

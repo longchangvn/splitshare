@@ -6,7 +6,7 @@ import { View, Text, Pressable } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../api/client';
 import { colors, type } from '../theme';
-import { useAuth } from '../auth/AuthContext';
+import { publicHandle, useAuth } from '../auth/AuthContext';
 import {
   Screen, Card, Row, Avatar, Badge, Button, Segmented, Field, Input, ConfirmSheet, Skeleton, toast, DevApiUrlCard,
 } from '../ui';
@@ -42,7 +42,9 @@ export default function ProfileScreen() {
           <Avatar name={user?.display_name || user?.username} size={52} />
           <View style={{ flex: 1 }}>
             <Text style={type.h1} numberOfLines={1}>{user?.display_name || user?.username || '…'}</Text>
-            <Text style={type.small} numberOfLines={1}>@{user?.username || '…'}{user?.email ? ` · ${user.email}` : ''}</Text>
+            <Text style={type.small} numberOfLines={1}>
+              {publicHandle(user?.username) ? `@${user.username} · ` : ''}{user?.email || '…'}
+            </Text>
             {user ? (
               <View style={{ marginTop: 6 }}>
                 <Badge
@@ -59,7 +61,7 @@ export default function ProfileScreen() {
       <AccountErr e={e} style={{ marginTop: 0 }} />
 
       {tab === 'account' ? <AccountTab user={user} setUser={setUser} onError={setE} /> : null}
-      {tab === 'password' ? <PasswordTab onError={setE} /> : null}
+      {tab === 'password' ? <PasswordTab hasPw={user?.has_password !== false} onDone={refreshMe} onError={setE} /> : null}
       {tab === 'payments' ? <PaymentsTab onError={setE} /> : null}
       {tab === 'danger' ? <DangerTab onError={setE} logout={logout} /> : null}
 
@@ -80,22 +82,25 @@ export default function ProfileScreen() {
   );
 }
 
+// The API shows the email when no display name is set: edit an empty field then.
+const ownName = (u) => (u?.display_name === u?.email ? '' : u?.display_name || '');
+
 function AccountTab({ user, setUser, onError }) {
   const t = useT();
-  const [name, setName] = useState(user?.display_name || '');
+  const [name, setName] = useState(ownName(user));
   const [phone, setPhone] = useState(user?.phone || '');
   const [saving, setSaving] = useState(false);
   const [fieldErr, setFieldErr] = useState(null);
 
   useEffect(() => {
-    if (user) { setName(user.display_name || ''); setPhone(user.phone || ''); }
+    if (user) { setName(ownName(user)); setPhone(user.phone || ''); }
   }, [user?.user_id, user?.display_name, user?.phone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (saving) return;
     const n = name.trim();
     setFieldErr(null); onError(null);
-    if (!n || n.length > 50) return setFieldErr(t('m.account.displayNameRule'));
+    if (n.length > 50) return setFieldErr(t('m.account.displayNameRule'));
     setSaving(true);
     try {
       const d = await api.patch('/api/v1/me', { display_name: n, phone: phone.trim() || null });
@@ -108,8 +113,8 @@ function AccountTab({ user, setUser, onError }) {
     <Card>
       {!user ? <Skeleton h={46} /> : (
         <>
-          <Field label={t('profile.displayName')} error={fieldErr} hint={t('m.account.displayNameRule')} style={{ marginTop: 0 }}>
-            <Input value={name} onChangeText={setName} maxLength={50} error={!!fieldErr} accessibilityLabel={t('profile.displayName')} />
+          <Field label={t('profile.displayName')} error={fieldErr} hint={t('profile.displayNameHint')} style={{ marginTop: 0 }}>
+            <Input value={name} onChangeText={setName} maxLength={50} placeholder={user.email} error={!!fieldErr} accessibilityLabel={t('profile.displayName')} />
           </Field>
           <Field label={t('profile.phone')}>
             <Input value={phone} onChangeText={setPhone} keyboardType="phone-pad" accessibilityLabel={t('profile.phone')} />
@@ -121,7 +126,8 @@ function AccountTab({ user, setUser, onError }) {
   );
 }
 
-function PasswordTab({ onError }) {
+// Email-code accounts have no password yet: no "current password", and "Set password".
+function PasswordTab({ hasPw, onDone, onError }) {
   const t = useT();
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
@@ -135,18 +141,28 @@ function PasswordTab({ onError }) {
       await api.patch('/api/v1/me/password', { current_password: cur || null, new_password: next });
       setCur(''); setNext('');
       toast({ title: t('profile.passwordChanged'), color: 'teal' });
+      if (!hasPw) onDone?.();
     } catch (err) { onError(err); } finally { setBusy(false); }
   };
   return (
     <Card>
-      <Text style={[type.small, { marginBottom: 4 }]}>{t('profile.passwordHint')}</Text>
-      <Field label={t('profile.currentPassword')}>
-        <PasswordInput value={cur} onChangeText={setCur} autoComplete="current-password" />
-      </Field>
+      <Text style={[type.small, { marginBottom: 4 }]}>{t(hasPw ? 'profile.passwordHint' : 'profile.setPasswordHint')}</Text>
+      {hasPw ? (
+        <Field label={t('profile.currentPassword')}>
+          <PasswordInput value={cur} onChangeText={setCur} autoComplete="current-password" />
+        </Field>
+      ) : null}
       <Field label={t('profile.newPassword')} hint={t('m.account.passwordRule')}>
         <PasswordInput value={next} onChangeText={setNext} autoComplete="new-password" />
       </Field>
-      <Button style={{ marginTop: 16 }} icon="🔒" title={busy ? t('profile.saving') : t('profile.changePassword')} busy={busy} disabled={!next} onPress={change} />
+      <Button
+        style={{ marginTop: 16 }}
+        icon="🔒"
+        title={busy ? t('profile.saving') : t(hasPw ? 'profile.changePassword' : 'auth.setPassword')}
+        busy={busy}
+        disabled={!next}
+        onPress={change}
+      />
     </Card>
   );
 }

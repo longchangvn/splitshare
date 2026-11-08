@@ -20,7 +20,7 @@ public static class TripPackEndpoints
         var ids = await db.GroupMembers.Where(m => m.GroupId == groupId).Select(m => m.UserId).ToListAsync();
         var arch = await db.MembershipArchives.Where(a => a.GroupId == groupId).Select(a => a.UserId).ToListAsync();
         var all = ids.Concat(arch).Distinct().ToList();
-        return await db.Users.Where(u => all.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+        return await db.Users.Where(u => all.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Name);
     }
 
     public static void Map(RouteGroupBuilder api)

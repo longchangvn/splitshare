@@ -164,7 +164,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         var added = new List<string>();
         var pending = new List<string>();
         var outbox = new List<(string To, string Status, EmailContent Mail)>();
-        var inviter = await db.Users.Where(u => u.Id == actorId).Select(u => u.DisplayName).FirstOrDefaultAsync()
+        var inviter = await db.Users.Where(u => u.Id == actorId).Select(u => u.DisplayName == "" ? u.Email : u.DisplayName).FirstOrDefaultAsync()
             ?? "A friend";
         foreach (var em in normalized)
         {
@@ -187,7 +187,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
                 : IsGmail(em)
                     ? "Open the link and continue with your Google account to join the group."
                     : "Open the link and choose a password to join the group.";
-            outbox.Add((em, "invited", EmailTemplates.GroupInvite(inviter, g.Name, user?.DisplayName, how,
+            outbox.Add((em, "invited", EmailTemplates.GroupInvite(inviter, g.Name, user?.Name, how,
                 InvitationLink(BaseUrl, raw), InviteDays)));
         }
         await db.SaveChangesAsync();
@@ -251,7 +251,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         if (err is not null) return err;
         if (inv!.ConsumedAt is not null) return InviteUsed();
         var memberCount = await db.GroupMembers.CountAsync(m => m.GroupId == g!.Id);
-        var inviter = await db.Users.Where(u => u.Id == inv.InvitedBy).Select(u => u.DisplayName).FirstOrDefaultAsync()
+        var inviter = await db.Users.Where(u => u.Id == inv.InvitedBy).Select(u => u.DisplayName == "" ? u.Email : u.DisplayName).FirstOrDefaultAsync()
             ?? "A friend";
         var exists = await db.Users.AnyAsync(u => u.Email == inv.Email);
         return new(true, null, null, new InvitePreview(inv.Email, g!.Name, g.Currency, memberCount, inviter,

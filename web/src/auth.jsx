@@ -18,17 +18,19 @@ export function AuthProvider({ children }) {
 
   useEffect(() => onSessionExpired(() => setUser(null)), []);
 
-  const login = async (username_or_email, password) => {
-    const d = await api.post('/api/v1/auth/login', { username_or_email, password });
-    setTokens(d.access_token, d.refresh_token);
-    setUser(d.user);
-  };
-  const register = async (username, email, display_name, password) => {
-    const d = await api.post('/api/v1/auth/register', { username, email, display_name, password });
+  const signedIn = (d) => {
     setTokens(d.access_token, d.refresh_token);
     setUser(d.user);
     return d;
   };
+  const login = async (username_or_email, password) =>
+    signedIn(await api.post('/api/v1/auth/login', { username_or_email, password }));
+  // Email-only sign-up: the email is the username; display name is set later in Profile.
+  const register = async (email, password) =>
+    signedIn(await api.post('/api/v1/auth/register', { email, password }));
+  const requestOtp = (email) => api.post('/api/v1/auth/otp/request', { email });
+  const verifyOtp = async (email, code) =>
+    signedIn(await api.post('/api/v1/auth/otp/verify', { email, code }));
   const logout = async () => {
     try {
       const rt = localStorage.getItem('ss_rt');
@@ -37,8 +39,15 @@ export function AuthProvider({ children }) {
     clearTokens();
     setUser(null);
   };
-  return <Ctx.Provider value={{ user, loading, login, register, logout, setUser }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider value={{ user, loading, login, register, requestOtp, verifyOtp, logout, setUser }}>
+      {children}
+    </Ctx.Provider>
+  );
 }
+
+// Email sign-ups use the email as username: never show that as a public @handle.
+export const publicHandle = (username) => (username && !username.includes('@') ? username : null);
 
 export function Guard({ children }) {
   const { user, loading } = useAuth();

@@ -4,7 +4,7 @@ import {
   Button, Checkbox, Loader, Modal, MultiSelect, Radio, Stack, Text,
 } from '@mantine/core';
 import { api } from '../api.js';
-import { Err, useAuth } from '../auth.jsx';
+import { Err, publicHandle, useAuth } from '../auth.jsx';
 import { useT } from '../prefs.jsx';
 import {
   ADD_EXPENSE_STATE, defaultGroupName, mergeMembers, resolveQuickAddFlow,
@@ -146,7 +146,7 @@ export function QuickAddExpense({ onCreateGroup }) {
                   label={(
                     <span className="qa-contact-copy">
                       <span className="qa-contact-name">{c.display_name}</span>
-                      <span className="qa-contact-user">@{c.username}</span>
+                      {publicHandle(c.username) && <span className="qa-contact-user">@{c.username}</span>}
                     </span>
                   )}
                 />

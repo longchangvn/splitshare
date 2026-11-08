@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Button, PasswordInput, Stack, Text, TextInput, Title,
+  Anchor, Button, PasswordInput, PinInput, SegmentedControl, Stack, Text, TextInput, Title,
 } from '@mantine/core';
 import { useAuth, Err } from '../auth.jsx';
 import { api, setTokens } from '../api.js';
@@ -95,37 +95,183 @@ function AuthActionIcon({ name }) {
   );
 }
 
-export function Login() {
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const isEmail = (v) => EMAIL_RE.test(v.trim());
+
+/** Email field + Continue. Calls onContinue(normalizedEmail) when the format is valid. */
+function EmailStep({ initial = '', submitLabel, onContinue, busy, autoFocus = true }) {
   const t = useT();
-  const { login } = useAuth();
-  const nav = useNavigate();
-  const location = useLocation();
-  const next = safeNext(location.search);
-  const invitation = location.state?.invitation;
-  const [id, setId] = useState('');
-  const [pw, setPw] = useState('');
+  const [email, setEmail] = useState(initial);
+  const [err, setErr] = useState(null);
+  const go = (ev) => {
+    ev.preventDefault();
+    const v = email.trim().toLowerCase();
+    if (!isEmail(v)) { setErr(t('auth.emailInvalid')); return; }
+    setErr(null);
+    onContinue(v);
+  };
+  return (
+    <form onSubmit={go} noValidate>
+      <Stack gap="sm">
+        <TextInput
+          label={t('auth.email')}
+          placeholder={t('auth.emailPlaceholder')}
+          type="email"
+          inputMode="email"
+          required
+          autoFocus={autoFocus}
+          autoComplete="email"
+          name="email"
+          value={email}
+          error={err}
+          onChange={(x) => setEmail(x.target.value)}
+        />
+        <AuthSubmit loading={busy} icon="mail">{submitLabel || t('auth.continue')}</AuthSubmit>
+      </Stack>
+    </form>
+  );
+}
+
+/** The chosen email, with a "Change" link when onChange is given. */
+function EmailChip({ email, onChange }) {
+  const t = useT();
+  return (
+    <Text size="sm" className="auth-email-chip">
+      <b>{email}</b>{' '}
+      {onChange && <Anchor component="button" type="button" size="sm" onClick={onChange}>{t('auth.changeEmail')}</Anchor>}
+    </Text>
+  );
+}
+
+/**
+ * 6-digit code entry for an email that was just sent a code. Verifies on the
+ * 6th digit or on submit; Resend re-requests after the server cooldown.
+ */
+export function OtpStep({ email, onBack, onSignedIn, resendAfter = 60 }) {
+  const t = useT();
+  const { requestOtp, verifyOtp } = useAuth();
+  const [code, setCode] = useState('');
   const [e, setE] = useState(null);
   const [busy, setBusy] = useState(false);
-  const go = async (ev) => {
+  const [left, setLeft] = useState(resendAfter);
+  const [resent, setResent] = useState(false);
+
+  useEffect(() => {
+    if (left <= 0) return undefined;
+    const id = setTimeout(() => setLeft((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [left]);
+
+  const verify = async (value = code) => {
+    if (busy || value.length !== 6) return;
+    setBusy(true);
+    setE(null);
+    try { onSignedIn(await verifyOtp(email, value)); } catch (err) { setE(err); setCode(''); } finally { setBusy(false); }
+  };
+  const resend = async () => {
+    setE(null);
+    try {
+      const r = await requestOtp(email);
+      setLeft(r?.resend_after_seconds ?? resendAfter);
+      setResent(true);
+    } catch (err) { setE(err); }
+  };
+
+  return (
+    <form onSubmit={(ev) => { ev.preventDefault(); verify(); }}>
+      <Stack gap="sm">
+        <Text size="sm" aria-live="polite">{t('auth.codeSentTo', { email })}</Text>
+        {onBack && <EmailChip email={email} onChange={onBack} />}
+        <PinInput
+          length={6}
+          type="number"
+          oneTimeCode
+          autoFocus
+          size="md"
+          value={code}
+          onChange={setCode}
+          onComplete={verify}
+          disabled={busy}
+          aria-label={t('auth.code')}
+          className="auth-pin"
+        />
+        <AuthSubmit loading={busy} icon="lock" disabled={code.length !== 6}>{t('auth.verifyCode')}</AuthSubmit>
+        <Text ta="center" size="sm">
+          {left > 0
+            ? <Text span c="dimmed" size="sm">{t('auth.resendIn', { seconds: left })}</Text>
+            : <Anchor component="button" type="button" size="sm" onClick={resend}>{t('auth.resendCode')}</Anchor>}
+        </Text>
+        {resent && left > 0 && <Text size="xs" c="dimmed" ta="center">{t('auth.codeResent')}</Text>}
+        <Err e={e} />
+      </Stack>
+    </form>
+  );
+}
+
+/** Sends the first code, then hands over to OtpStep. Returns [send, sending, error]. */
+function useSendCode(onSent) {
+  const { requestOtp } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [e, setE] = useState(null);
+  const send = async (email) => {
+    if (busy) return;
+    setBusy(true);
+    setE(null);
+    try {
+      const r = await requestOtp(email);
+      onSent(email, r?.resend_after_seconds ?? 60);
+    } catch (err) {
+      // A code sent moments ago is still valid: go straight to entering it.
+      if (err?.code === 'OTP_COOLDOWN') onSent(email, 60); else setE(err);
+    } finally { setBusy(false); }
+  };
+  return [send, busy, e];
+}
+
+/**
+ * The one login form: Password (email + password) or Email code.
+ * Shared by /login and the invitation login step. onSignedIn runs after the
+ * session is stored (useAuth().user is already set).
+ */
+export function LoginForm({ initialEmail = '', onSignedIn, submitLabel }) {
+  const t = useT();
+  const { login } = useAuth();
+  const [method, setMethod] = useState('password');
+  const [id, setId] = useState(initialEmail);
+  const [pw, setPw] = useState('');
+  const [codeFor, setCodeFor] = useState(null);
+  const [e, setE] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [send, sending, sendErr] = useSendCode((email, wait) => setCodeFor({ email, wait }));
+
+  const signIn = async (ev) => {
     ev.preventDefault();
     if (busy) return;
     setBusy(true);
-    try { await login(id, pw); nav(next || '/'); } catch (err) { setE(err); } finally { setBusy(false); }
+    setE(null);
+    try { onSignedIn(await login(id.trim(), pw)); } catch (err) { setE(err); } finally { setBusy(false); }
   };
+
   return (
-    <AuthLayout>
-      <Stack gap="md">
-        {invitation && <InvitationBanner {...invitation} />}
-        <div className="auth-heading">
-          <Title order={3} className="auth-title">{t('auth.welcomeBack')}</Title>
-          <Text size="sm" c="dimmed" className="auth-desc">{t('auth.loginContinue')}</Text>
-        </div>
-        <form onSubmit={go}>
+    <Stack gap="sm">
+      <SegmentedControl
+        fullWidth
+        value={method}
+        onChange={(m) => { setMethod(m); setE(null); setCodeFor(null); }}
+        data={[
+          { value: 'password', label: t('auth.methodPassword') },
+          { value: 'code', label: t('auth.methodCode') },
+        ]}
+        aria-label={t('auth.chooseMethod')}
+      />
+      {method === 'password' ? (
+        <form onSubmit={signIn}>
           <Stack gap="sm">
             <TextInput
-              label={t('auth.usernameOrEmail')}
+              label={t('auth.email')}
+              placeholder={t('auth.emailPlaceholder')}
               required
-              autoFocus
+              autoFocus={!initialEmail}
               autoComplete="username"
               name="username"
               value={id}
@@ -134,16 +280,52 @@ export function Login() {
             <PasswordInput
               label={t('auth.password')}
               required
+              autoFocus={Boolean(initialEmail)}
               autoComplete="current-password"
               name="password"
               value={pw}
               onChange={(x) => setPw(x.target.value)}
               onKeyDown={(ev) => { if (ev.key === 'Enter' && !busy) ev.currentTarget.form?.requestSubmit(); }}
             />
-            <AuthSubmit loading={busy}>{t('auth.logIn')}</AuthSubmit>
+            <AuthSubmit loading={busy}>{submitLabel || t('auth.logIn')}</AuthSubmit>
           </Stack>
         </form>
-        <Err e={e} />
+      ) : codeFor ? (
+        <OtpStep
+          key={codeFor.email}
+          email={codeFor.email}
+          resendAfter={codeFor.wait}
+          onBack={() => setCodeFor(null)}
+          onSignedIn={onSignedIn}
+        />
+      ) : (
+        <EmailStep
+          initial={isEmail(id) ? id.trim() : initialEmail}
+          submitLabel={t('auth.sendCode')}
+          busy={sending}
+          onContinue={(email) => { setId(email); send(email); }}
+        />
+      )}
+      <Err e={e || (method === 'code' && !codeFor ? sendErr : null)} />
+    </Stack>
+  );
+}
+
+export function Login() {
+  const t = useT();
+  const nav = useNavigate();
+  const location = useLocation();
+  const next = safeNext(location.search);
+  const invitation = location.state?.invitation;
+  return (
+    <AuthLayout>
+      <Stack gap="md">
+        {invitation && <InvitationBanner {...invitation} />}
+        <div className="auth-heading">
+          <Title order={3} className="auth-title">{t('auth.welcomeBack')}</Title>
+          <Text size="sm" c="dimmed" className="auth-desc">{t('auth.loginContinue')}</Text>
+        </div>
+        <LoginForm onSignedIn={() => nav(next || '/')} />
         <GoogleBtn next={next} intent="signin" />
         <Text ta="center" size="sm" className="auth-links">
           <Anchor component={Link} to={withNext('/register', next)} state={location.state}>{t('auth.register')}</Anchor>
@@ -155,28 +337,92 @@ export function Login() {
   );
 }
 
-export function Register() {
+/**
+ * The one registration form (used by /register and the invitation register step):
+ * email → choose "Email me a code" | "Use a password" → code / password.
+ * The email becomes the username; the display name is set later in Profile.
+ * lockEmail skips the email step (invited address). onEmailTaken, when given,
+ * handles an address that already has an account (otherwise the error shows).
+ */
+export function RegisterForm({ initialEmail = '', lockEmail = false, submitLabel, onSignedIn, onEmailTaken }) {
   const t = useT();
   const { register } = useAuth();
+  const [step, setStep] = useState(lockEmail ? 'method' : 'email'); // email | method | code | password
+  const [email, setEmail] = useState(initialEmail.trim().toLowerCase());
+  const [wait, setWait] = useState(60);
+  const [pw, setPw] = useState('');
+  const [e, setE] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [send, sending, sendErr] = useSendCode((_, w) => { setWait(w); setStep('code'); });
+  const toEmail = lockEmail ? null : () => { setStep('email'); setE(null); setPw(''); };
+  const toMethod = () => { setStep('method'); setE(null); setPw(''); };
+
+  const create = async (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setE(null);
+    try { onSignedIn(await register(email, pw)); } catch (err) {
+      if (err?.code === 'EMAIL_TAKEN' && onEmailTaken) onEmailTaken(); else setE(err);
+    } finally { setBusy(false); }
+  };
+
+  let body;
+  if (step === 'email') {
+    body = (
+      <>
+        <EmailStep initial={email} onContinue={(v) => { setEmail(v); setStep('method'); }} />
+        <Text size="xs" c="dimmed">{t('auth.displayNameLater')}</Text>
+      </>
+    );
+  } else if (step === 'method') {
+    body = (
+      <Stack gap="sm">
+        <EmailChip email={email} onChange={toEmail} />
+        <Text size="sm" c="dimmed">{t('auth.chooseMethod')}</Text>
+        <AuthSubmit type="button" icon="mail" loading={sending} onClick={() => send(email)}>
+          {t('auth.useCode')}
+        </AuthSubmit>
+        <Button className="auth-google" fullWidth type="button" leftSection={<AuthActionIcon name="lock" />}
+          onClick={() => setStep('password')} disabled={sending}>
+          {t('auth.usePassword')}
+        </Button>
+        <Err e={sendErr} />
+      </Stack>
+    );
+  } else if (step === 'code') {
+    body = <OtpStep email={email} resendAfter={wait} onBack={toEmail || toMethod} onSignedIn={onSignedIn} />;
+  } else {
+    body = (
+      <form onSubmit={create}>
+        <Stack gap="sm">
+          <EmailChip email={email} onChange={toEmail || toMethod} />
+          {/* Hidden username field lets password managers save the pair. */}
+          <input type="email" name="username" autoComplete="username" value={email} readOnly hidden />
+          <PasswordInput
+            label={t('auth.password')}
+            description={t('auth.passwordRule')}
+            required
+            autoFocus
+            autoComplete="new-password"
+            value={pw}
+            onChange={(x) => setPw(x.target.value)}
+          />
+          <AuthSubmit loading={busy} icon="plus">{submitLabel || t('auth.createAccount')}</AuthSubmit>
+          <Err e={e} />
+        </Stack>
+      </form>
+    );
+  }
+  return body;
+}
+
+export function Register() {
+  const t = useT();
   const nav = useNavigate();
   const location = useLocation();
   const next = safeNext(location.search);
   const invitation = location.state?.invitation;
-  const [f, setF] = useState({ username: '', email: '', display_name: '', password: '' });
-  const [e, setE] = useState(null);
-  const [done, setDone] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const go = async (ev) => {
-    ev.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    try {
-      const d = await register(f.username, f.email, f.display_name, f.password);
-      setDone(d);
-      nav(next || '/');
-    } catch (err) { setE(err); } finally { setBusy(false); }
-  };
-  const set = (k) => (x) => setF({ ...f, [k]: x.target.value });
   return (
     <AuthLayout>
       <Stack gap="md">
@@ -185,19 +431,7 @@ export function Register() {
           <Title order={3} className="auth-title">{t('auth.createAccount')}</Title>
           <Text size="sm" c="dimmed" className="auth-desc">{t('auth.startSplitting')}</Text>
         </div>
-        <form onSubmit={go}>
-          <Stack gap="sm">
-            <TextInput label={t('auth.username')} required value={f.username} onChange={set('username')} />
-            <TextInput label={t('auth.email')} required value={f.email} onChange={set('email')} />
-            <TextInput label={t('auth.displayName')} required value={f.display_name} onChange={set('display_name')} />
-            <PasswordInput label={t('auth.password')} required value={f.password} onChange={set('password')} />
-            <AuthSubmit loading={busy} icon="plus">{t('auth.register')}</AuthSubmit>
-          </Stack>
-        </form>
-        <Err e={e} />
-        {done && done.auto_joined_groups?.length > 0 && (
-          <Text size="sm">{t('auth.autoJoined', { count: done.auto_joined_groups.length })}</Text>
-        )}
+        <RegisterForm onSignedIn={() => nav(next || '/')} />
         <GoogleBtn next={next} intent="signup" />
         <Text ta="center" size="sm" className="auth-links">
           <Anchor component={Link} to={withNext('/login', next)} state={location.state}>{t('auth.backToLogin')}</Anchor>

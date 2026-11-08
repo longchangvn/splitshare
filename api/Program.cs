@@ -78,7 +78,7 @@ else
 builder.Services.AddScoped<ReceiptScanService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
-// Email: Email:Provider "sendgrid"/"twilio" (Twilio SendGrid, primary) | "onesignal" | unset = logging stub.
+// Email: Email:Provider "smtp"/"gmail" (Gmail SMTP, primary) | "sendgrid"/"twilio" | "onesignal" | unset = logging stub.
 builder.Services.AddHttpClient(OneSignalEmailSender.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddHttpClient(TwilioSendGridEmailSender.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddSingleton<IEmailSender>(sp => EmailSenderFactory.Create(
@@ -86,7 +86,8 @@ builder.Services.AddSingleton<IEmailSender>(sp => EmailSenderFactory.Create(
     sp.GetRequiredService<IHttpClientFactory>(),
     sp.GetRequiredService<ILogger<OneSignalEmailSender>>(),
     sp.GetRequiredService<ILogger<StubEmailSender>>(),
-    sp.GetRequiredService<ILogger<TwilioSendGridEmailSender>>()));
+    sp.GetRequiredService<ILogger<TwilioSendGridEmailSender>>(),
+    sp.GetRequiredService<ILogger<SmtpEmailSender>>()));
 // Push notifications (add-onesignal-group-notifications): provider is config-driven
 // (Notification:Provider — unset = null provider, "onesignal" = OneSignal REST).
 builder.Services.AddHttpClient(OneSignalProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));

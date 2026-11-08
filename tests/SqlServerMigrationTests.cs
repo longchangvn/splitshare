@@ -84,6 +84,9 @@ public sealed class SqlServerMigrationTests
     {
         var db = SqlServerDb();
         var gen = db.GetService<IMigrationsSqlGenerator>();
+        // Design-time model: AlterColumn on an indexed column (Username) re-creates the index,
+        // which reads index metadata the read-optimized runtime model does not keep.
+        var model = db.GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>().Model;
         const string SqlServer = "Microsoft.EntityFrameworkCore.SqlServer";
         var sql = "";
         foreach (var type in Set(db))
@@ -92,7 +95,7 @@ public sealed class SqlServerMigrationTests
             var b = new MigrationBuilder(SqlServer);
             type.GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)!
                 .Invoke(m, [b]);
-            sql += string.Join("\n", gen.Generate(b.Operations, db.Model).Select(c => c.CommandText));
+            sql += string.Join("\n", gen.Generate(b.Operations, model).Select(c => c.CommandText));
         }
         Assert.Contains("CREATE TABLE", sql);
         Assert.Contains("uniqueidentifier", sql);

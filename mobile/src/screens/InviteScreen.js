@@ -11,6 +11,7 @@ import { ListRow, p as parts } from '../components/group/parts';
 import { parseEmails } from '../components/group/helpers';
 import { InviteResultList, toastInviteResults } from '../components/group/InviteResultList';
 import { inviteRows } from '../shared/inviteResults';
+import { publicHandle } from '../auth/AuthContext';
 
 export default function InviteScreen({ route, navigation }) {
   const { id } = route.params || {};
@@ -141,7 +142,7 @@ export default function InviteScreen({ route, navigation }) {
                 <Avatar name={c.display_name} size={36} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={type.h3} numberOfLines={1}>{c.display_name}</Text>
-                  {c.username ? <Text style={parts.meta} numberOfLines={1}>@{c.username}</Text> : null}
+                  {publicHandle(c.username) ? <Text style={parts.meta} numberOfLines={1}>@{c.username}</Text> : null}
                 </View>
                 <Button small variant="soft" title={t('common.add')} busy={busy === c.user_id} accessibilityLabel={t('invite.addNamed', { name: c.display_name })} onPress={() => addContact(c)} />
               </ListRow>

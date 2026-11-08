@@ -36,7 +36,7 @@ public sealed class GroupNotifier(
             targets.Remove(actorId); // never self-notify
             if (targets.Count == 0) return;
             var actorName = await db.Users.Where(u => u.Id == actorId)
-                .Select(u => u.DisplayName).FirstOrDefaultAsync();
+                .Select(u => u.DisplayName == "" ? u.Email : u.DisplayName).FirstOrDefaultAsync();
             var baseUrl = (config["App:BaseUrl"] ?? "").TrimEnd('/');
             var url = baseUrl.Length > 0 ? $"{baseUrl}/groups/{groupId}" : null;
             await provider.SendToUsersAsync(targets,
