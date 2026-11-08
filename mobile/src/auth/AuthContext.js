@@ -122,6 +122,14 @@ export function AuthProvider({ children }) {
       return d;
     },
     verifyEmail: async (token) => api.post('/api/v1/auth/verify-email', { token }),
+    // Profile → Verify email: in-app 6-digit code, or a fresh /verify/{token} link.
+    requestVerifyCode: async () => api.post('/api/v1/me/verify-email/code'),
+    confirmVerifyCode: async (code) => {
+      const u = await api.post('/api/v1/me/verify-email/confirm', { code });
+      if (u) setUser(u);
+      return u;
+    },
+    sendVerifyLink: async () => api.post('/api/v1/me/verify-email/link'),
     forgot: async (email) => api.post('/api/v1/auth/forgot', { email }),
     logout: async () => {
       const t = await getTokens();

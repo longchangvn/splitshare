@@ -83,10 +83,16 @@ function useSendCode(onSent) {
   return [send, busy, e];
 }
 
-/** 6-digit code entry with resend countdown. Verifies on the 6th digit. */
-export function OtpStep({ email, onBack, resendAfter = 60 }) {
+/**
+ * 6-digit code entry with resend countdown. Verifies on the 6th digit.
+ * Defaults to sign-in; pass submit(code) / request() to reuse it (Profile → Verify email),
+ * with onDone(result) after a successful submit.
+ */
+export function OtpStep({ email, onBack, resendAfter = 60, submit, request, submitLabel, onDone }) {
   const t = useT();
-  const { requestOtp, verifyOtp } = useAuth();
+  const auth = useAuth();
+  const verifyOtp = (_, value) => (submit ? submit(value) : auth.verifyOtp(email, value));
+  const requestOtp = () => (request ? request() : auth.requestOtp(email));
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [e, setE] = useState(null);
@@ -99,11 +105,14 @@ export function OtpStep({ email, onBack, resendAfter = 60 }) {
     return () => clearTimeout(id);
   }, [left]);
 
-  // Success swaps the auth stack for the app stack, so there is nothing to do after.
+  // Sign-in success swaps the auth stack for the app stack (this unmounts); reuse calls onDone.
   const verify = async (value = code) => {
     if (busy || value.length !== 6) return;
     setBusy(true); setE(null);
-    try { await verifyOtp(email, value); } catch (err) { setE(err); setCode(''); setBusy(false); }
+    try {
+      const r = await verifyOtp(email, value);
+      if (onDone) { setBusy(false); onDone(r); }
+    } catch (err) { setE(err); setCode(''); setBusy(false); }
   };
   const onChange = (v) => {
     const digits = v.replace(/\D/g, '').slice(0, 6);
@@ -138,7 +147,7 @@ export function OtpStep({ email, onBack, resendAfter = 60 }) {
         />
       </Field>
       <AccountErr e={e} />
-      <Button style={{ marginTop: 16 }} icon="🔒" title={t('auth.verifyCode')} busy={busy} disabled={code.length !== 6} onPress={() => verify()} />
+      <Button style={{ marginTop: 16 }} icon="🔒" title={submitLabel || t('auth.verifyCode')} busy={busy} disabled={code.length !== 6} onPress={() => verify()} />
       <View style={a.links}>
         {left > 0
           ? <Text style={type.small}>{t('auth.resendIn', { seconds: left })}</Text>

@@ -6,7 +6,7 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const checks = [
   // Auth: login/register/google live in AuthContext; screens cover forgot/reset/biometric.
-  ['Auth context (login/register/google/email code)', 'src/auth/AuthContext.js', ['/auth/login', '/auth/register', '/auth/google', '/auth/otp/request', '/auth/otp/verify']],
+  ['Auth context (login/register/google/email code)', 'src/auth/AuthContext.js', ['/auth/login', '/auth/register', '/auth/google', '/auth/otp/request', '/auth/otp/verify', '/me/verify-email/code', '/me/verify-email/confirm', '/me/verify-email/link']],
   ['Auth screens (biometric/forgot/reset/google fallback)', 'src/screens/AuthScreen.js', ['/auth/forgot', '/auth/reset', 'LocalAuthentication', 'savedCredentials', 'GoogleToken']],
   ['Home dashboard (my balance, skeleton, recent activity)', 'src/screens/HomeScreen.js', ['SkeletonCard', 'setOwedBadge']],
   ['Balances loader', 'src/components/home/data.js', ['/me/balances', '/activity']],

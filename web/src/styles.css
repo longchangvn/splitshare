@@ -2463,6 +2463,13 @@ a {
   box-shadow: 0 8px 22px rgba(16, 42, 36, 0.04);
   min-width: 0;
 }
+.profile-verify {
+  background: #fff8eb;
+  border: 1px solid #f3dfb5;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
 .profile-panel .gd-action-btn {
   flex: none !important;
 }

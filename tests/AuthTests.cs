@@ -154,6 +154,73 @@ public sealed class AuthTests
     }
 
     [Fact]
+    public async Task VerifyCode_From_Profile_Marks_Email_Verified()
+    {
+        var (db, svc, mail) = SetupWithMail();
+        var u = (await svc.RegisterAsync(null, "v@x.io", null, "pass1234", null)).User!;
+        Assert.Null(u.EmailVerifiedAt);
+
+        Assert.True((await svc.RequestVerifyCodeAsync(u.Id)).Ok);
+        Assert.Contains("confirmation code", mail.Sent.Last().Subject);
+        var code = CodeIn(mail, "v@x.io");
+        var wrong = code == "000000" ? "111111" : "000000";
+        Assert.Equal("INVALID_CODE", (await svc.ConfirmVerifyCodeAsync(u.Id, wrong)).ErrorCode);
+        Assert.Null((await db.Users.FindAsync(u.Id))!.EmailVerifiedAt);
+
+        var ok = await svc.ConfirmVerifyCodeAsync(u.Id, code);
+        Assert.True(ok.Ok, ok.Error);
+        Assert.NotNull(ok.User!.EmailVerifiedAt);
+        Assert.Null(ok.Tokens); // verification never issues a session
+        Assert.Equal("ALREADY_VERIFIED", (await svc.RequestVerifyCodeAsync(u.Id)).ErrorCode);
+        Assert.Equal("ALREADY_VERIFIED", (await svc.SendVerifyLinkAsync(u.Id)).ErrorCode);
+    }
+
+    [Fact]
+    public async Task VerifyCode_Shares_Cooldown_With_Signin_Codes()
+    {
+        var (_, svc, _) = SetupWithMail();
+        var u = (await svc.RegisterAsync(null, "w@x.io", null, "pass1234", null)).User!;
+        Assert.True((await svc.RequestVerifyCodeAsync(u.Id)).Ok);
+        Assert.Equal("OTP_COOLDOWN", (await svc.RequestVerifyCodeAsync(u.Id)).ErrorCode);
+        Assert.Equal("OTP_COOLDOWN", (await svc.RequestOtpAsync("w@x.io")).ErrorCode);
+    }
+
+    [Fact]
+    public async Task VerifyLink_Replaces_Old_Link_And_Works_With_VerifyEmail()
+    {
+        var (db, svc, mail) = SetupWithMail();
+        var u = (await svc.RegisterAsync(null, "l@x.io", null, "pass1234", null)).User!;
+        string Token() => System.Text.RegularExpressions.Regex
+            .Match(mail.Sent.Last(m => m.To == "l@x.io").Body, @"/verify/([0-9A-F]+)").Groups[1].Value;
+        var original = Token(); // from the sign-up email
+
+        // Cooldown: the sign-up link was just created.
+        Assert.Equal("OTP_COOLDOWN", (await svc.SendVerifyLinkAsync(u.Id)).ErrorCode);
+        foreach (var t in db.EmailVerificationTokens) t.ExpiresAt -= TimeSpan.FromMinutes(2);
+        await db.SaveChangesAsync();
+
+        Assert.True((await svc.SendVerifyLinkAsync(u.Id)).Ok);
+        var fresh = Token();
+        Assert.NotEqual(original, fresh);
+        Assert.False(await svc.VerifyEmailAsync(original)); // superseded
+        Assert.True(await svc.VerifyEmailAsync(fresh));
+        Assert.NotNull((await db.Users.FindAsync(u.Id))!.EmailVerifiedAt);
+    }
+
+    [Fact]
+    public async Task VerifyLink_Send_Failure_Keeps_Previous_Link()
+    {
+        var (db, svc, mail) = SetupWithMail();
+        var u = (await svc.RegisterAsync(null, "k@x.io", null, "pass1234", null)).User!;
+        var original = System.Text.RegularExpressions.Regex.Match(mail.Sent.Last().Body, @"/verify/([0-9A-F]+)").Groups[1].Value;
+        foreach (var t in db.EmailVerificationTokens) t.ExpiresAt -= TimeSpan.FromMinutes(2);
+        await db.SaveChangesAsync();
+        mail.Result = EmailSendResult.Fail("down");
+        Assert.Equal("EMAIL_FAILED", (await svc.SendVerifyLinkAsync(u.Id)).ErrorCode);
+        Assert.True(await svc.VerifyEmailAsync(original));
+    }
+
+    [Fact]
     public async Task Otp_Send_Failure_Is_Reported_But_Stub_Is_Not()
     {
         var (_, svc, mail) = SetupWithMail();

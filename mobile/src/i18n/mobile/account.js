@@ -41,6 +41,7 @@ export default {
     'm.account.err.INVALID_CODE': 'That code is wrong or expired. Check the email or request a new code.',
     'm.account.err.OTP_COOLDOWN': 'A code was just sent. Wait a moment before requesting another.',
     'm.account.err.EMAIL_FAILED': 'We couldn’t send the email. Try again shortly.',
+    'm.account.err.ALREADY_VERIFIED': 'Your email is already verified.',
     'm.account.err.network': 'Can’t reach SplitShare. Check your connection and try again.',
 
     // Profile
@@ -123,6 +124,7 @@ export default {
     'm.account.err.INVALID_CODE': 'Mã không đúng hoặc đã hết hạn. Hãy kiểm tra email hoặc yêu cầu mã mới.',
     'm.account.err.OTP_COOLDOWN': 'Mã vừa được gửi. Hãy đợi một chút trước khi yêu cầu mã khác.',
     'm.account.err.EMAIL_FAILED': 'Không gửi được email. Hãy thử lại sau ít phút.',
+    'm.account.err.ALREADY_VERIFIED': 'Email của bạn đã được xác minh.',
     'm.account.err.network': 'Không kết nối được SplitShare. Hãy kiểm tra mạng và thử lại.',
 
     'm.account.verified': 'Đã xác minh',

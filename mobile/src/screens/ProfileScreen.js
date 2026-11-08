@@ -12,6 +12,7 @@ import {
 } from '../ui';
 import { useT } from '../i18n';
 import { AccountErr, PasswordInput, a } from '../components/account/AccountKit';
+import { OtpStep } from './AuthScreen';
 
 export default function ProfileScreen() {
   const t = useT();
@@ -57,6 +58,8 @@ export default function ProfileScreen() {
         </Row>
       </Card>
 
+      {user && !user.email_verified ? <VerifyEmailPanel email={user.email} /> : null}
+
       <Segmented options={tabs} value={tab} onChange={(v) => { setTab(v); setE(null); }} />
       <AccountErr e={e} style={{ marginTop: 0 }} />
 
@@ -79,6 +82,60 @@ export default function ProfileScreen() {
         onClose={() => !logoutBusy && setLogoutOpen(false)}
       />
     </Screen>
+  );
+}
+
+/**
+ * Unverified email (web VerifyEmailPanel parity): verify in-app with a 6-digit code
+ * (shared OtpStep) or email a fresh link that opens in the browser. Profile refreshes
+ * the user on focus, so a link confirmed in the browser shows up on return.
+ */
+function VerifyEmailPanel({ email }) {
+  const t = useT();
+  const { requestVerifyCode, confirmVerifyCode, sendVerifyLink, refreshMe } = useAuth();
+  const [mode, setMode] = useState(null); // null | 'code'
+  const [wait, setWait] = useState(60);
+  const [busy, setBusy] = useState(null); // 'code' | 'link'
+  const [linkSent, setLinkSent] = useState(false);
+  const [e, setE] = useState(null);
+
+  const run = async (kind, call, ok) => {
+    if (busy) return;
+    setBusy(kind); setE(null);
+    try { ok(await call()); } catch (err) {
+      if (err?.code === 'ALREADY_VERIFIED') refreshMe();
+      else if (kind === 'code' && err?.code === 'OTP_COOLDOWN') setMode('code'); // a code is already out
+      else setE(err);
+    } finally { setBusy(null); }
+  };
+  const sendCode = () => run('code', requestVerifyCode, (r) => { setWait(r?.resend_after_seconds ?? 60); setMode('code'); });
+  const sendLink = () => run('link', sendVerifyLink, () => setLinkSent(true));
+
+  return (
+    <Card tone="open" accessibilityLabel={t('profile.verifyTitle')}>
+      <Text style={type.h3}>{t('profile.verifyTitle')}</Text>
+      {mode === 'code' ? (
+        <OtpStep
+          email={email}
+          resendAfter={wait}
+          submitLabel={t('profile.verifyEmail')}
+          submit={confirmVerifyCode}
+          request={requestVerifyCode}
+          onDone={() => toast({ title: t('profile.emailVerifiedToast'), color: 'teal' })}
+        />
+      ) : (
+        <>
+          <Text style={[type.small, { marginTop: 4 }]}>{t('profile.verifyHint', { email })}</Text>
+          <Button style={{ marginTop: 12 }} icon="✉" title={t('profile.verifyEmail')} busy={busy === 'code'} disabled={busy === 'link'} onPress={sendCode} />
+        </>
+      )}
+      {linkSent ? (
+        <Text style={[type.small, { marginTop: 10 }]} accessibilityLiveRegion="polite">{t('profile.verifyLinkSent', { email })}</Text>
+      ) : (
+        <Button style={{ marginTop: 10 }} variant="ghost" title={t('profile.sendLinkInstead')} busy={busy === 'link'} disabled={busy === 'code'} onPress={sendLink} />
+      )}
+      <AccountErr e={e} />
+    </Card>
   );
 }
 

@@ -13,6 +13,8 @@ Before starting any task, read this file completely and follow its instructions.
 
 Do not begin implementation before completing the required preparation.
 
+**Roadmap work:** when asked to "work on the roadmap / next task" without a specific task, use `specs/006-product-roadmap/tasks.md`. Follow its "How an agent uses this file" section and only start a task whose "Start when" gate is fully true.
+
 If an instruction file or Skill is missing or unreadable, report the issue. Continue following the instructions that are available without inventing missing content.
 
 ## 2. Subagent Orchestration

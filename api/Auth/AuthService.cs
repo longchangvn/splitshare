@@ -166,7 +166,10 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
     /// account (no enumeration); earlier unused codes for the address are revoked.
     /// Limited to one code per <see cref="OtpCooldownSeconds"/> and <see cref="OtpMaxPerHour"/> per hour.
     /// </summary>
-    public async Task<OtpRequestResult> RequestOtpAsync(string? emailAddr)
+    public Task<OtpRequestResult> RequestOtpAsync(string? emailAddr) => SendCodeAsync(emailAddr, verify: false);
+
+    /// <param name="verify">Word the email as "confirm your email" (Profile) instead of a sign-in code.</param>
+    private async Task<OtpRequestResult> SendCodeAsync(string? emailAddr, bool verify)
     {
         emailAddr = (emailAddr ?? "").Trim().ToLowerInvariant();
         if (!IsEmail(emailAddr)) return new(false, "VALIDATION", "Invalid email.");
@@ -195,7 +198,9 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         await db.SaveChangesAsync();
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.Email == emailAddr);
-        var mail = EmailTemplates.LoginCode(user?.Name, code, OtpMinutes, emailAddr);
+        var mail = verify
+            ? EmailTemplates.VerifyCode(user?.Name, code, OtpMinutes, emailAddr)
+            : EmailTemplates.LoginCode(user?.Name, code, OtpMinutes, emailAddr);
         var sent = await email.SendAsync(emailAddr, mail.Subject, mail.Text, transactional: true, html: mail.Html);
         if (sent.Status == EmailSendStatus.NotConfigured)
             logger?.LogWarning("Sign-in code not delivered: email provider is not configured ({Error}).", sent.Error);
@@ -214,25 +219,9 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
     public async Task<AuthResult> VerifyOtpAsync(string? emailAddr, string? code)
     {
         emailAddr = (emailAddr ?? "").Trim().ToLowerInvariant();
-        code = (code ?? "").Trim();
-        const string invalidMsg = "Invalid or expired code.";
+        if (!await ConsumeOtpAsync(emailAddr, code))
+            return new(false, "INVALID_CODE", InvalidCodeMsg, null, null);
         var now = DateTime.UtcNow;
-        var otp = await db.EmailOtps.Where(o => o.Email == emailAddr && o.UsedAt == null && o.ExpiresAt > now)
-            .OrderByDescending(o => o.CreatedAt).FirstOrDefaultAsync();
-        if (otp is null || otp.Attempts >= OtpMaxAttempts)
-            return new(false, "INVALID_CODE", invalidMsg, null, null);
-        var match = System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
-            System.Text.Encoding.ASCII.GetBytes(OtpHash(emailAddr, code)),
-            System.Text.Encoding.ASCII.GetBytes(otp.CodeHash));
-        if (!match)
-        {
-            otp.Attempts++;
-            if (otp.Attempts >= OtpMaxAttempts) otp.UsedAt = now;
-            await db.SaveChangesAsync();
-            return new(false, "INVALID_CODE", invalidMsg, null, null);
-        }
-        otp.UsedAt = now;
-
         var user = await db.Users.FirstOrDefaultAsync(u => u.Email == emailAddr);
         var created = user is null;
         if (user is null)
@@ -243,6 +232,94 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         else user.EmailVerifiedAt ??= now;
         await db.SaveChangesAsync();
         return new(true, null, null, user, await IssueTokensAsync(user), Created: created);
+    }
+
+    private const string InvalidCodeMsg = "Invalid or expired code.";
+
+    /// <summary>
+    /// Checks <paramref name="code"/> against the latest live code for the (normalized) address
+    /// and uses it up on a match. Wrong codes count toward <see cref="OtpMaxAttempts"/>, after
+    /// which the code is burned. Changes are saved before returning.
+    /// </summary>
+    private async Task<bool> ConsumeOtpAsync(string emailAddr, string? code)
+    {
+        code = (code ?? "").Trim();
+        var now = DateTime.UtcNow;
+        var otp = await db.EmailOtps.Where(o => o.Email == emailAddr && o.UsedAt == null && o.ExpiresAt > now)
+            .OrderByDescending(o => o.CreatedAt).FirstOrDefaultAsync();
+        if (otp is null || otp.Attempts >= OtpMaxAttempts) return false;
+        var match = System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.ASCII.GetBytes(OtpHash(emailAddr, code)),
+            System.Text.Encoding.ASCII.GetBytes(otp.CodeHash));
+        if (match) otp.UsedAt = now;
+        else if (++otp.Attempts >= OtpMaxAttempts) otp.UsedAt = now;
+        await db.SaveChangesAsync();
+        return match;
+    }
+
+    // --- Email verification from Profile: a 6-digit code (in-app) or a fresh link. ---
+
+    private static readonly TimeSpan VerifyLinkValid = TimeSpan.FromDays(7);
+
+    private static readonly OtpRequestResult AlreadyVerified =
+        new(false, "ALREADY_VERIFIED", "Email is already verified.");
+
+    /// <summary>Emails a 6-digit code to the signed-in user's own address (same limits as sign-in codes).</summary>
+    public async Task<OtpRequestResult> RequestVerifyCodeAsync(Guid userId)
+    {
+        var user = await db.Users.FindAsync(userId);
+        if (user is null) return new(false, "UNAUTH", "Not authenticated.");
+        if (user.EmailVerifiedAt is not null) return AlreadyVerified;
+        return await SendCodeAsync(user.Email, verify: true);
+    }
+
+    /// <summary>Marks the signed-in user's email verified when <paramref name="code"/> matches.</summary>
+    public async Task<AuthResult> ConfirmVerifyCodeAsync(Guid userId, string? code)
+    {
+        var user = await db.Users.FindAsync(userId);
+        if (user is null) return new(false, "UNAUTH", "Not authenticated.", null, null);
+        if (user.EmailVerifiedAt is not null) return new(true, null, null, user, null);
+        if (!await ConsumeOtpAsync(user.Email, code)) return new(false, "INVALID_CODE", InvalidCodeMsg, null, null);
+        user.EmailVerifiedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        return new(true, null, null, user, null);
+    }
+
+    /// <summary>
+    /// Emails a fresh verification link (/verify/{token}); older unused links stop working.
+    /// One per <see cref="OtpCooldownSeconds"/>: the table has no creation time, so it is
+    /// derived from the fixed 7-day expiry (no migration).
+    /// </summary>
+    public async Task<OtpRequestResult> SendVerifyLinkAsync(Guid userId)
+    {
+        var user = await db.Users.FindAsync(userId);
+        if (user is null) return new(false, "UNAUTH", "Not authenticated.");
+        if (user.EmailVerifiedAt is not null) return AlreadyVerified;
+        var now = DateTime.UtcNow;
+        var open = await db.EmailVerificationTokens.Where(t => t.UserId == userId && t.UsedAt == null).ToListAsync();
+        var lastCreated = open.Count == 0 ? (DateTime?)null : open.Max(t => t.ExpiresAt) - VerifyLinkValid;
+        if (lastCreated is { } c && (now - c).TotalSeconds < OtpCooldownSeconds)
+        {
+            var wait = Math.Max(1, OtpCooldownSeconds - (int)(now - c).TotalSeconds);
+            return new(false, "OTP_COOLDOWN", $"Wait {wait}s before requesting another link.", wait);
+        }
+        foreach (var t in open) t.UsedAt = now;
+        var raw = TokenService.NewOpaqueToken();
+        var row = new EmailVerificationToken
+        {
+            UserId = userId, TokenHash = TokenService.HashToken(raw), ExpiresAt = now + VerifyLinkValid
+        };
+        db.EmailVerificationTokens.Add(row);
+        await db.SaveChangesAsync();
+
+        var mail = EmailTemplates.VerifyEmail(user.Name, $"{BaseUrl}/verify/{raw}", user.Email);
+        var sent = await email.SendAsync(user.Email, mail.Subject, mail.Text, transactional: true, html: mail.Html);
+        if (sent.Status != EmailSendStatus.Failed) return new(true);
+        // Undelivered: restore the previous links so the user isn't left with none.
+        db.EmailVerificationTokens.Remove(row);
+        foreach (var t in open) t.UsedAt = null;
+        await db.SaveChangesAsync();
+        return new(false, "EMAIL_FAILED", "Could not send the link. Try again shortly.");
     }
 
     public async Task<AuthResult> LoginAsync(string? usernameOrEmail, string? password)

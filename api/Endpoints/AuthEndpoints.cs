@@ -118,6 +118,18 @@ public static class AuthEndpoints
                 : ApiResults.Error("UNAUTH", "Invalid or expired verification token.", 401));
     }
 
+    private static IResult VerifyError(OtpRequestResult r, HttpContext http)
+    {
+        if (r.RetryAfterSeconds is { } wait) http.Response.Headers.RetryAfter = wait.ToString();
+        return ApiResults.Error(r.ErrorCode!, r.Error!, r.ErrorCode switch
+        {
+            "ALREADY_VERIFIED" => StatusCodes.Status409Conflict,
+            "OTP_COOLDOWN" => StatusCodes.Status429TooManyRequests,
+            "UNAUTH" => StatusCodes.Status401Unauthorized,
+            _ => StatusCodes.Status502BadGateway
+        });
+    }
+
     public static void MapAccount(RouteGroupBuilder api)
     {
         api.MapGet("/me", async (ClaimsPrincipal p, AppDbContext db) =>
@@ -155,6 +167,35 @@ public static class AuthEndpoints
                     r.ErrorCode == "VALIDATION" ? 422 : StatusCodes.Status401Unauthorized);
         });
 
+        // Email verification from Profile: a 6-digit code (in-app) or a fresh /verify/{token} link.
+        api.MapPost("/me/verify-email/code", async (ClaimsPrincipal p, AuthService svc, HttpContext http) =>
+        {
+            var id = CurrentUserId(p);
+            if (id is null) return ApiResults.Error("UNAUTH", "Not authenticated.", 401);
+            var r = await svc.RequestVerifyCodeAsync(id.Value);
+            return r.Ok
+                ? Results.Ok(new { status = "ok", expires_in_minutes = AuthService.OtpMinutes,
+                    resend_after_seconds = AuthService.OtpCooldownSeconds })
+                : VerifyError(r, http);
+        }).RequireRateLimiting("auth-ip");
+
+        api.MapPost("/me/verify-email/confirm", async (VerifyCodeDto d, ClaimsPrincipal p, AuthService svc) =>
+        {
+            var id = CurrentUserId(p);
+            if (id is null) return ApiResults.Error("UNAUTH", "Not authenticated.", 401);
+            var r = await svc.ConfirmVerifyCodeAsync(id.Value, d.Code);
+            return r.Ok ? Results.Ok(UserDto(r.User!))
+                : ApiResults.Error(r.ErrorCode!, r.Error!, StatusCodes.Status401Unauthorized);
+        }).RequireRateLimiting("auth-ip");
+
+        api.MapPost("/me/verify-email/link", async (ClaimsPrincipal p, AuthService svc, HttpContext http) =>
+        {
+            var id = CurrentUserId(p);
+            if (id is null) return ApiResults.Error("UNAUTH", "Not authenticated.", 401);
+            var r = await svc.SendVerifyLinkAsync(id.Value);
+            return r.Ok ? Results.Ok(new { status = "ok" }) : VerifyError(r, http);
+        }).RequireRateLimiting("auth-ip");
+
         api.MapDelete("/me", async (ClaimsPrincipal p, AuthService svc) =>
         {
             var id = CurrentUserId(p);
@@ -179,6 +220,7 @@ public static class AuthEndpoints
     public sealed record RegisterDto(string? Username, string Email, string? DisplayName, string Password, string? Phone);
     public sealed record OtpRequestDto(string Email);
     public sealed record OtpVerifyDto(string Email, string Code);
+    public sealed record VerifyCodeDto(string Code);
     public sealed record LoginDto(string UsernameOrEmail, string Password);
     public sealed record GoogleDto(string IdToken);
     public sealed record RefreshDto(string RefreshToken);

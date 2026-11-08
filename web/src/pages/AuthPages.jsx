@@ -146,10 +146,14 @@ function EmailChip({ email, onChange }) {
 /**
  * 6-digit code entry for an email that was just sent a code. Verifies on the
  * 6th digit or on submit; Resend re-requests after the server cooldown.
+ * Defaults to sign-in; pass submit(code) / request() to reuse it (e.g. Profile → Verify email).
+ * onSignedIn receives submit's result.
  */
-export function OtpStep({ email, onBack, onSignedIn, resendAfter = 60 }) {
+export function OtpStep({ email, onBack, onSignedIn, resendAfter = 60, submit, request, submitLabel }) {
   const t = useT();
-  const { requestOtp, verifyOtp } = useAuth();
+  const auth = useAuth();
+  const verifyOtp = (_, value) => (submit ? submit(value) : auth.verifyOtp(email, value));
+  const requestOtp = () => (request ? request() : auth.requestOtp(email));
   const [code, setCode] = useState('');
   const [e, setE] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -195,7 +199,7 @@ export function OtpStep({ email, onBack, onSignedIn, resendAfter = 60 }) {
           aria-label={t('auth.code')}
           className="auth-pin"
         />
-        <AuthSubmit loading={busy} icon="lock" disabled={code.length !== 6}>{t('auth.verifyCode')}</AuthSubmit>
+        <AuthSubmit loading={busy} icon="lock" disabled={code.length !== 6}>{submitLabel || t('auth.verifyCode')}</AuthSubmit>
         <Text ta="center" size="sm">
           {left > 0
             ? <Text span c="dimmed" size="sm">{t('auth.resendIn', { seconds: left })}</Text>

@@ -55,29 +55,49 @@ public static partial class EmailTemplates
     }
 
     /// <param name="displayName">Account name when the address already has an account, else null.</param>
-    public static EmailContent LoginCode(string? displayName, string code, int validMinutes, string recipient)
+    public static EmailContent LoginCode(string? displayName, string code, int validMinutes, string recipient) =>
+        CodeEmail(displayName, code, validMinutes, recipient,
+            heading: "Your sign-in code",
+            textLead: "Your SplitShare sign-in code is",
+            htmlLead: "Enter this code to continue to SplitShare:",
+            ignore: "Didn't try to sign in? Ignore this email. Nobody can sign in without this code.",
+            why: "a sign-in code was requested",
+            subject: $"{code} is your SplitShare code");
+
+    /// <summary>Code sent from Profile → Verify email.</summary>
+    public static EmailContent VerifyCode(string? displayName, string code, int validMinutes, string recipient) =>
+        CodeEmail(displayName, code, validMinutes, recipient,
+            heading: "Confirm your email",
+            textLead: "Your SplitShare email confirmation code is",
+            htmlLead: "Enter this code in SplitShare to confirm your email address:",
+            ignore: "Didn't ask for this? Ignore this email. Your account stays the same.",
+            why: "an email confirmation code was requested",
+            subject: $"{code} is your SplitShare confirmation code");
+
+    private static EmailContent CodeEmail(string? displayName, string code, int validMinutes, string recipient,
+        string heading, string textLead, string htmlLead, string ignore, string why, string subject)
     {
         var greeting = string.IsNullOrWhiteSpace(displayName) ? "Hi," : $"Hi {Clip(displayName)},";
         var text =
             $"{greeting}\n\n" +
-            $"Your SplitShare sign-in code is: {code}\n\n" +
+            $"{textLead}: {code}\n\n" +
             $"It expires in {validMinutes} minutes and works only once.\n\n" +
-            "Didn't try to sign in? Ignore this email. Nobody can sign in without this code.\n\n" +
+            $"{ignore}\n\n" +
             "— SplitShare";
         var body =
             Paragraph(H(greeting)) +
-            Paragraph("Enter this code to continue to SplitShare:") +
+            Paragraph(H(htmlLead)) +
             "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"margin:8px 0 24px\"><tr>" +
             $"<td style=\"background:{Soft};border:1px solid {Line};border-radius:8px;padding:14px 24px;font-family:{Font};font-size:30px;font-weight:700;letter-spacing:8px;color:{Ink}\">{H(code)}</td>" +
             "</tr></table>" +
             Paragraph($"This code expires in <strong>{validMinutes} minutes</strong> and works only once.") +
-            Note("Didn't try to sign in? Ignore this email. Nobody can sign in without this code.");
+            Note(H(ignore));
         var html = Layout(
-            preheader: $"Your sign-in code is {code}. It expires in {validMinutes} minutes.",
-            heading: "Your sign-in code",
+            preheader: $"Your code is {code}. It expires in {validMinutes} minutes.",
+            heading: heading,
             body: body,
-            footer: $"You received this because a sign-in code was requested for {H(recipient)}.");
-        return new($"{code} is your SplitShare code", text, html);
+            footer: $"You received this because {why} for {H(recipient)}.");
+        return new(subject, text, html);
     }
 
     public static EmailContent VerifyEmail(string displayName, string link, string recipient)
