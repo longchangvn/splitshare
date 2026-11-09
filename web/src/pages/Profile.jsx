@@ -81,9 +81,9 @@ export function Profile() {
       labels: { confirm: t('common.delete'), cancel: t('common.cancel') },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
-        try { await api.del('/api/v1/me'); modals.closeModal(mid); await logout(); nav('/login'); }
-        catch (err) { modals.closeModal(mid); setE(err); }
+        modals.updateModal({ modalId: mid, confirmProps: { color: 'red', loading: true } });
+        try { await api.del('/api/v1/me'); modals.close(mid); await logout(); nav('/login'); }
+        catch (err) { modals.close(mid); setE(err); }
       },
     });
   };

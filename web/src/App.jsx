@@ -4,7 +4,6 @@ import { Login, Register, Forgot, Reset, Verify } from './pages/AuthPages.jsx';
 import { Dashboard } from './pages/Dashboard.jsx';
 import { GroupDetail } from './pages/GroupDetail.jsx';
 import { Profile } from './pages/Profile.jsx';
-import { Settings } from './pages/Settings.jsx';
 import { InvitePage } from './pages/InvitePage.jsx';
 import { Statement } from './pages/Statement.jsx';
 import { Report } from './pages/Report.jsx';
@@ -31,7 +30,8 @@ export default function App() {
           <Route path="/invite/:token" element={<InvitationPage />} />
           <Route path="/invite/:token/:step" element={<InvitationPage />} />
           <Route path="/profile" element={<Guard><Profile /></Guard>} />
-          <Route path="/settings" element={<Guard><Settings /></Guard>} />
+          {/* Settings page removed with group templates; keep old links working. */}
+          <Route path="/settings" element={<Navigate to="/profile" replace />} />
           <Route path="/groups/:id/invite" element={<Guard><InvitePage /></Guard>} />
           <Route path="/groups/:id/statement" element={<Guard><Statement /></Guard>} />
           <Route path="/groups/:id/report" element={<Guard><Report /></Guard>} />

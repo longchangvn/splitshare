@@ -13,6 +13,7 @@ import { Shell } from '../components/Shell.jsx';
 import { ActivityKindThumb, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
 import { RowMenu } from '../components/Mobile.jsx';
 import { ExpenseForm, PaymentForm } from '../components/Forms.jsx';
+import { loadLastSplit } from '../splitMemoryStore.js';
 import { ScanReceipts } from '../components/ScanReceipts.jsx';
 import { AddExpenseFab } from '../components/QuickAddExpense.jsx';
 import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
@@ -1606,6 +1607,7 @@ export function GroupDetail() {
           groupId={id}
           members={members}
           copyFrom={copyFrom}
+          initialSplit={loadLastSplit(user?.user_id, id)}
           currency={detail.currency}
           onDone={() => { setShowExp(false); setCopyFrom(null); load(); loadLedger(); loadSummary(); }}
           onSaveNew={() => { setCopyFrom(null); setExpFormKey((k) => k + 1); load(); loadLedger(); loadSummary(); }}

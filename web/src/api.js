@@ -95,6 +95,12 @@ export async function apiBlob(path, init = {}) {
   return fetch(BASE + path, { ...init, headers });
 }
 
+/** One per create attempt (form instance / scan card): a double click or retry replays. */
+export function newIdempotencyKey() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 export const api = {
   get: (p) => reqAuth('GET', p),
   // extra carries per-request options such as `headers: { 'Idempotency-Key': key }`.

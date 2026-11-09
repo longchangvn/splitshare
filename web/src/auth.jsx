@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Alert, Center, Loader } from '@mantine/core';
 import { api, setTokens, clearTokens, ApiError, onSessionExpired } from './api.js';
+import { clearSplitMemory } from './splitMemoryStore.js';
 import { useT } from './prefs.jsx';
 
 const Ctx = createContext(null);
@@ -37,6 +38,7 @@ export function AuthProvider({ children }) {
       if (rt) await api.post('/api/v1/auth/logout', { refresh_token: rt });
     } catch { /* already out */ }
     clearTokens();
+    clearSplitMemory();
     setUser(null);
   };
   return (

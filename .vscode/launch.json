@@ -43,7 +43,7 @@
       "envFile": "${workspaceFolder}/.env",
       "env": {
         "ASPNETCORE_ENVIRONMENT": "Development",
-        "ASPNETCORE_URLS": "http://localhost:8081"
+        "ASPNETCORE_URLS": "http://0.0.0.0:8081"
       },
       "serverReadyAction": {
         "action": "openExternally",

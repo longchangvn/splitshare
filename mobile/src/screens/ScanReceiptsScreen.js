@@ -1,4 +1,6 @@
 // Batch receipt scan — web parity: web/src/components/ScanReceipts.jsx (specs/004 Phase 2).
+// Each card uses the shared ExpenseFields + draft rules (specs/007), same as Add expense, and
+// starts from the remembered split for this user + group.
 // Pick up to MAX_BATCH photos (library multi-select or repeated camera shots), scan each
 // (3 in flight), review/edit one card per receipt, then create expenses one by one —
 // each card keeps its own Idempotency-Key so retries never double-create.
@@ -9,18 +11,20 @@ import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, radius, type } from '../theme';
 import {
-  Screen, Card, Row, Button, ChipRow, Input, Field, SelectField, Badge, Empty, ErrText,
-  SkeletonCard, toast,
+  Screen, Card, Row, Button, Badge, Empty, ErrText, SkeletonCard, toast,
 } from '../ui';
-import { categorySelectData } from '../shared/categories';
-import { normalizeDecimalInput as dec } from '../shared/decimalInput';
 import { scanErrorKey } from '../shared/receiptScan';
+import { newDraft, pickScanCategory } from '../shared/expenseDraft';
+import { restoreSplit } from '../shared/splitMemory';
+import { loadLastSplit, saveLastSplit } from '../splitMemoryStore';
+import { useSplitPreview } from '../useSplitPreview';
+import ExpenseFields from '../components/expense/ExpenseFields';
 import {
   MAX_BATCH, buildExpensePayload, cardAmount, cardsFromSuggestion, findDuplicates, newCard,
   runPool, validateCard,
 } from '../shared/receiptBatch';
 import {
-  chooseSource, pickImages, compressForScan, postScan, uploadImage, isTooBig, isImageFile,
+  chooseSource, pickImages, prepareScanFile, postScan, scanErrorDetail, uploadImage, isTooBig, isImageFile,
 } from '../receipt';
 
 // Status → Badge kind (web STATUS_COLOR: gray/teal/orange/red/blue/green/red).
@@ -55,6 +59,7 @@ export default function ScanReceiptsScreen({ route, navigation }) {
         api.get(`/api/v1/groups/${groupId}`),
         api.get(`/api/v1/groups/${groupId}/categories`).catch(() => []),
         api.get(`/api/v1/groups/${groupId}/ledger?limit=100`).catch(() => ({ items: [] })),
+        loadLastSplit(meId, groupId),
       ]);
       setGroup(g?.group ? { ...g, ...g.group } : g);
       setCategories(Array.isArray(cats) ? cats : []);
@@ -62,7 +67,7 @@ export default function ScanReceiptsScreen({ route, navigation }) {
     } catch (err) {
       setLoadErr(err);
     }
-  }, [groupId]);
+  }, [groupId, meId]);
   useEffect(() => { load(); }, [load]);
 
   // Block closing while expenses are being created (web: close() ignored while busy).
@@ -80,21 +85,28 @@ export default function ScanReceiptsScreen({ route, navigation }) {
   const duplicates = new Set(findDuplicates(cards, existingExpenses));
   const pending = cards.filter((c) => c.status !== 'created' && c.status !== 'scanning');
   const failed = cards.filter((c) => c.status === 'create_failed');
+  const failedScans = cards.filter((c) => c.status === 'scan_failed');
 
   const patch = (id, next) => setCards((prev) => prev.map((c) => (
     c.id === id ? { ...c, ...(typeof next === 'function' ? next(c) : next) } : c
   )));
 
-  const memberDefaults = () => ({
-    payerId: meId && members.some((m) => m.user_id === meId) ? meId : (members[0]?.user_id || ''),
-    participantIds: members.map((m) => m.user_id),
-  });
+  // Localized sentence plus the technical reason (server message / status) so a failure is actionable.
+  const scanToast = (reason) => {
+    const text = t(scanErrorKey(reason));
+    const detail = scanErrorDetail(reason);
+    return detail && detail !== text ? `${text} · ${detail}` : text;
+  };
+
+  // New card = remembered split (EXACT → EQUAL) + scan category rule: scanned → remembered → other.
+  const cardDefaults = async () => {
+    const remembered = restoreSplit(await loadLastSplit(meId, groupId), { members, meId, context: 'scan' });
+    return newDraft({ members, meId, remembered, category: pickScanCategory(categories, remembered?.category) });
+  };
 
   const scanCard = async (card) => {
-    let file = card.file;
-    try {
-      file = await compressForScan(card.file);
-    } catch { /* provider gets the original file */ }
+    // JPEG re-encode first: the scan API takes jpg/png/webp only (HEIC library photos otherwise 422).
+    const file = await prepareScanFile(card.file);
     const resp = await postScan(groupId, file);
     // One photo can hold several receipts → one card each (same photo on all).
     const next = cardsFromSuggestion({ ...card, file }, resp, { currency, categories });
@@ -129,13 +141,14 @@ export default function ScanReceiptsScreen({ route, navigation }) {
     if (picked.length === 0) return;
     if (picked.length > room) toast({ message: t('scan.limit', { max: MAX_BATCH }), color: 'orange' });
     const added = [];
+    const defaults = await cardDefaults();
     for (const file of picked.slice(0, room)) {
       if (isTooBig(file)) {
         toast({ message: t('scan.tooBig', { name: file.name }), color: 'red' });
       } else if (!isImageFile(file)) {
         toast({ message: t('scan.notImage', { name: file.name }), color: 'red' });
       } else {
-        added.push({ ...newCard(file), ...memberDefaults() });
+        added.push({ ...newCard(file), ...defaults });
       }
     }
     if (added.length === 0) return;
@@ -144,7 +157,22 @@ export default function ScanReceiptsScreen({ route, navigation }) {
     results.forEach((r, i) => {
       if (r.status === 'rejected') {
         patch(added[i].id, { status: 'scan_failed', error: r.reason, lowConfidence: false });
-        toast({ message: t(scanErrorKey(r.reason)), color: 'red' });
+        toast({ message: scanToast(r.reason), color: 'red' });
+      }
+    });
+  };
+
+  /** Re-scan the photos that failed (same file, new attempt) without re-picking them. */
+  const rescan = async () => {
+    const failedCards = cards.filter((c) => c.status === 'scan_failed');
+    if (busy || picking || failedCards.length === 0) return;
+    const retrying = failedCards.map((c) => ({ ...c, status: 'scanning', error: null }));
+    setCards((prev) => prev.map((c) => (c.status === 'scan_failed' ? { ...c, status: 'scanning', error: null } : c)));
+    const results = await runPool(retrying, 3, scanCard);
+    results.forEach((r, i) => {
+      if (r.status === 'rejected') {
+        patch(retrying[i].id, { status: 'scan_failed', error: r.reason, lowConfidence: false });
+        toast({ message: scanToast(r.reason), color: 'red' });
       }
     });
   };
@@ -153,9 +181,9 @@ export default function ScanReceiptsScreen({ route, navigation }) {
     if (busy || list.length === 0) return;
     const ready = [];
     for (const card of list) {
-      const check = validateCard(card, members);
-      patch(card.id, { fieldErrors: check.errors });
-      if (check.ok) ready.push(card);
+      // Same rule as the expense form: errors show live once a save was attempted.
+      patch(card.id, { tried: true });
+      if (validateCard(card, members).ok) ready.push(card);
     }
     if (ready.length === 0) return;
     setBusy(true);
@@ -171,11 +199,12 @@ export default function ScanReceiptsScreen({ route, navigation }) {
           { idempotencyKey: card.key },
         );
         const expenseId = resp?.expense?.expense_id ?? null;
+        saveLastSplit(meId, groupId, card);
         if (expenseId && card.file) {
           try { await uploadImage(expenseId, card.file); } catch { photoFailed = true; }
         }
         created += 1;
-        patch(card.id, { status: 'created', expenseId, fieldErrors: [] });
+        patch(card.id, { status: 'created', expenseId });
       } catch (err) {
         patch(card.id, { status: 'create_failed', error: err });
       }
@@ -204,8 +233,6 @@ export default function ScanReceiptsScreen({ route, navigation }) {
     );
   }
 
-  const catOptions = [{ value: '', label: t('common.none') }, ...categorySelectData(categories, t)];
-  const memberOptions = members.map((m) => ({ value: m.user_id, label: m.display_name }));
   const statusLabel = (card, amount) => {
     switch (card.status) {
       case 'scanning': return t('scan.scanning');
@@ -223,6 +250,9 @@ export default function ScanReceiptsScreen({ route, navigation }) {
     <View style={{ gap: 8 }}>
       {failed.length > 0 && (
         <Button variant="soft" disabled={busy} title={`${t('scan.retryFailed')} (${failed.length})`} onPress={() => createCards(failed)} />
+      )}
+      {failedScans.length > 0 && (
+        <Button variant="soft" disabled={busy || picking} title={`${t('m.retry')} (${failedScans.length})`} onPress={rescan} />
       )}
       <Row>
         <Button style={{ flex: 1 }} variant="ghost" title={t('common.close')} disabled={busy} onPress={() => navigation.goBack()} />
@@ -259,131 +289,89 @@ export default function ScanReceiptsScreen({ route, navigation }) {
 
       {cards.length === 0 && <Empty emoji="🧾" title={t('scan.empty')} />}
 
-      {cards.map((card, index) => {
-        const errors = card.fieldErrors || [];
-        const amount = cardAmount(card);
-        const done = card.status === 'created';
-        const off = busy || done;
-        return (
-          <Card key={card.id}>
-            <Row style={{ alignItems: 'flex-start' }}>
-              {card.file?.uri ? <Image source={{ uri: card.file.uri }} style={s.thumb} accessibilityIgnoresInvertColors /> : null}
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={type.h3}>{t('scan.receiptOf', { index: index + 1, total: cards.length })}</Text>
-                <Badge kind={STATUS_KIND[card.status] || 'comment'} label={statusLabel(card, amount)} />
-              </View>
-              <Pressable
-                disabled={off}
-                onPress={() => setCards((prev) => prev.filter((c) => c.id !== card.id))}
-                hitSlop={10}
-                accessibilityRole="button"
-                accessibilityLabel={t('scan.removeCard', { name: card.name })}
-                style={off ? { opacity: 0.4 } : null}
-              >
-                <Text style={s.remove}>{t('common.remove')}</Text>
-              </Pressable>
-            </Row>
-
-            {card.status === 'scanning' ? <ActivityIndicator style={{ marginTop: 8 }} color={colors.primary} /> : null}
-
-            <Field label={t('forms.expense.title')} error={errors.includes('title') ? t('scan.err.title') : null}>
-              <Input
-                value={card.title}
-                editable={!off}
-                maxLength={100}
-                error={errors.includes('title')}
-                onChangeText={(v) => patch(card.id, { title: v })}
-              />
-            </Field>
-            <Row style={{ alignItems: 'flex-start' }}>
-              <Field style={{ flex: 1 }} label={t('forms.expense.amount')} error={errors.includes('amount') ? t('scan.err.amount') : null}>
-                <Input
-                  value={card.amount}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                  editable={!off && !card.origCurrency}
-                  error={errors.includes('amount')}
-                  onChangeText={(v) => patch(card.id, { amount: dec(v) })}
-                />
-              </Field>
-              <Field style={{ flex: 1 }} label={t('forms.expense.spentOn')} error={errors.includes('date') ? t('scan.err.date') : null}>
-                <Input
-                  value={card.spentAt}
-                  placeholder="YYYY-MM-DD"
-                  keyboardType="numbers-and-punctuation"
-                  editable={!off}
-                  error={errors.includes('date')}
-                  onChangeText={(v) => patch(card.id, { spentAt: v.replace(/[^\d-]/g, '').slice(0, 10) })}
-                />
-              </Field>
-            </Row>
-
-            {card.origCurrency ? (
-              <View>
-                <Row style={{ alignItems: 'flex-start' }}>
-                  <Field style={{ flex: 1 }} label={`${t('forms.expense.fxAmount')} (${card.origCurrency})`}>
-                    <Input
-                      value={card.origAmount}
-                      keyboardType="decimal-pad"
-                      editable={!off}
-                      onChangeText={(v) => patch(card.id, { origAmount: dec(v) })}
-                    />
-                  </Field>
-                  <Field style={{ flex: 1 }} label={t('forms.expense.fxRate')} error={errors.includes('rate') ? t('scan.err.rate') : null}>
-                    <Input
-                      value={card.fxRate}
-                      placeholder="1.00"
-                      keyboardType="decimal-pad"
-                      editable={!off}
-                      error={errors.includes('rate')}
-                      onChangeText={(v) => patch(card.id, { fxRate: dec(v) })}
-                    />
-                  </Field>
-                </Row>
-                <Text style={[type.small, { marginTop: 6 }]}>
-                  {t('forms.expense.fxApprox', { amount: fmt(Math.round(Number(amount || 0) * 100), currency) })}
-                </Text>
-                <Text style={[type.small, { color: colors.warn }]}>{t('scan.currencyMismatch', { currency: card.origCurrency })}</Text>
-              </View>
-            ) : null}
-
-            <SelectField
-              label={t('forms.expense.category')}
-              value={card.category || ''}
-              options={catOptions}
-              disabled={off}
-              onChange={(v) => patch(card.id, { category: v || '' })}
-            />
-            <SelectField
-              label={t('forms.expense.payer')}
-              value={card.payerId || ''}
-              options={memberOptions}
-              disabled={off}
-              error={errors.includes('payer') ? t('scan.err.payer') : null}
-              onChange={(v) => patch(card.id, { payerId: v || '' })}
-            />
-            <Field label={t('forms.expense.participants')} error={errors.includes('participants') ? t('scan.err.participants') : null}>
-              <View pointerEvents={off ? 'none' : 'auto'} style={off ? { opacity: 0.5 } : null}>
-                <ChipRow
-                  multi
-                  options={memberOptions}
-                  value={card.participantIds}
-                  onChange={(v) => patch(card.id, { participantIds: v })}
-                />
-              </View>
-            </Field>
-
-            {card.lowConfidence && card.status !== 'created' ? (
-              <Text style={[s.warn, { marginTop: 8 }]}>{t('scan.lowConfidence')}</Text>
-            ) : null}
-            {duplicates.has(card.id) ? <Text style={[s.warn, { marginTop: 4 }]}>{t('scan.duplicate')}</Text> : null}
-            {card.status === 'create_failed' && card.error ? (
-              <Text style={s.err}>{card.error.message || t('scan.createFailed')}</Text>
-            ) : null}
-          </Card>
-        );
-      })}
+      {cards.map((card, index) => (
+        <ScanCard
+          key={card.id}
+          card={card}
+          index={index}
+          total={cards.length}
+          busy={busy}
+          duplicate={duplicates.has(card.id)}
+          statusLabel={statusLabel(card, cardAmount(card))}
+          groupId={groupId}
+          members={members}
+          categories={categories}
+          onCategoryCreated={(created) => setCategories((prev) => [...prev, created])}
+          currency={currency}
+          onPatch={(next) => patch(card.id, next)}
+          onRemove={() => setCards((prev) => prev.filter((c) => c.id !== card.id))}
+        />
+      ))}
     </Screen>
+  );
+}
+
+/** One review card: status header + the shared ExpenseFields (same as Add expense). */
+function ScanCard({
+  card, index, total, busy, duplicate, statusLabel, groupId, members, categories, onCategoryCreated,
+  currency, onPatch, onRemove,
+}) {
+  const t = useT();
+  const done = card.status === 'created';
+  const off = busy || done;
+  const locked = off || card.status === 'scanning' || card.status === 'creating';
+  const { preview, error: previewErr } = useSplitPreview(
+    card, `/api/v1/groups/${groupId}/expenses/preview-split`, !locked,
+  );
+  const errors = card.tried ? validateCard(card, members).errors : [];
+  return (
+    <Card>
+      <Row style={{ alignItems: 'flex-start' }}>
+        {card.file?.uri ? <Image source={{ uri: card.file.uri }} style={s.thumb} accessibilityIgnoresInvertColors /> : null}
+        <View style={{ flex: 1, gap: 4 }}>
+          <Text style={type.h3}>{t('scan.receiptOf', { index: index + 1, total })}</Text>
+          <Badge kind={STATUS_KIND[card.status] || 'comment'} label={statusLabel} />
+        </View>
+        <Pressable
+          disabled={off}
+          onPress={onRemove}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={t('scan.removeCard', { name: card.name })}
+          style={off ? { opacity: 0.4 } : null}
+        >
+          <Text style={s.remove}>{t('common.remove')}</Text>
+        </Pressable>
+      </Row>
+
+      {card.status === 'scanning' ? <ActivityIndicator style={{ marginTop: 8 }} color={colors.primary} /> : null}
+
+      <View style={{ marginTop: 12 }}>
+        <ExpenseFields
+          bare
+          draft={card}
+          onChange={onPatch}
+          groupId={groupId}
+          members={members}
+          categories={categories}
+          onCategoryCreated={onCategoryCreated}
+          currency={currency}
+          preview={preview}
+          errors={errors}
+          disabled={locked}
+          receiptCurrency={card.receiptCurrency}
+        />
+      </View>
+
+      {card.lowConfidence && card.status !== 'created' ? (
+        <Text style={[s.warn, { marginTop: 8 }]}>{t('scan.lowConfidence')}</Text>
+      ) : null}
+      {duplicate ? <Text style={[s.warn, { marginTop: 4 }]}>{t('scan.duplicate')}</Text> : null}
+      {previewErr && !done ? <Text style={s.err}>{previewErr.message}</Text> : null}
+      {card.status === 'create_failed' && card.error ? (
+        <Text style={s.err}>{card.error.message || t('scan.createFailed')}</Text>
+      ) : null}
+    </Card>
   );
 }
 

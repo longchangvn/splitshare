@@ -173,8 +173,8 @@ These came up while reviewing the repo for this release:
       currently `http://localhost:8081`) and set `extra.googleClientId`.
 - [ ] Register the production web origin in Google Cloud Console and in
       OneSignal (Site URL).
-- [ ] Configure `App:BaseUrl` / `SPLITSHARE_WEB_BASE_URL` so invite links
-      point to production.
+- [ ] Configure `App:BaseUrl` / the GitHub environment variable
+      `APP__BASEURL` so invite links point to production.
 - [ ] Connect real email delivery, or tell users that email invites and
       password reset aren't available yet.
 - [ ] Attach persistent storage for uploads.

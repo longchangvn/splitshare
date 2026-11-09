@@ -21,6 +21,8 @@ const checks = [
   // Register/login on the invite reuse the shared forms (normal register + join).
   ['Email invitation (shared register/login + join/Google)', 'src/screens/InvitationScreen.js', ['/api/v1/invitations/', 'RegisterForm', 'LoginForm', '/join', '/auth/google']],
   ['Add/Edit expense', 'src/components/expense/ExpenseForm.js', ['preview-split', 'preview-edit', 'expected_version', 'queueOrSend', '/categories', 'onSaveNew', 'postScan']],
+  // specs/007: one field set for Add expense, Quick Add, Copy, Edit and scan cards (web ExpenseFields).
+  ['Shared expense fields + remembered split', 'src/components/expense/ExpenseFields.js', ['changeType', 'toggleParticipant', 'effectiveAmount', '/categories']],
   ['Receipt helpers (compress + scan + upload)', 'src/receipt.js', ['ImageManipulator', '/expenses/scan', '/images']],
   ['Batch scan receipts', 'src/screens/ScanReceiptsScreen.js', ['cardsFromSuggestion', 'runPool', 'findDuplicates', 'idempotencyKey']],
   ['Expense detail (edit/delete/copy/receipts/comments)', 'src/screens/ExpenseDetailScreen.js', ['EXPENSE_LOCKED', 'AuthImage', '/comments']],
@@ -29,7 +31,7 @@ const checks = [
   ['Statement', 'src/screens/StatementScreen.js', ['/statement/']],
   ['Report', 'src/screens/ReportScreen.js', ['/summary', '/breakdown']],
   ['Offline & notifications', 'src/screens/SystemScreen.js', ['drainQueue', 'registerPush', 'setGroupOptOut']],
-  ['Settings (language + templates)', 'src/screens/SettingsScreen.js', ['setLocale', 'saveTemplate']],
+  ['Settings (account + language + logout)', 'src/screens/SettingsScreen.js', ['setLocale', 'logout']],
   ['Profile (account/password/handles/danger)', 'src/screens/ProfileScreen.js', ['/api/v1/me', '/me/password', '/me/handles', 'HAS_OPEN_BALANCE']],
   ['API client (SecureStore + single-flight refresh)', 'src/api/client.js', ['SecureStore', 'refreshOnce', 'Idempotency-Key', 'getCapabilities']],
   ['Offline queue (AsyncStorage + same key)', 'src/offline/queue.js', ['AsyncStorage', 'idempotencyKey', 'drainQueue']],

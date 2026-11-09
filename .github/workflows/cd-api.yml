@@ -103,9 +103,12 @@ jobs:
           GH_OCR__MODEL: ${{ vars.OCR__MODEL }}
           GH_OCR__APIKEY: ${{ secrets.OCR__APIKEY }}
           GH_CORS__ALLOWEDORIGINS__1: ${{ vars.Cors__AllowedOrigins__1 }}
-          # Kept out of the run script: any ${{ }} inside it makes the whole
-          # script one expression, which exceeds GitHub's 21000-char limit.
-          WEB_BASE_VAR: ${{ vars.SPLITSHARE_WEB_BASE_URL }}
+          # App__BaseUrl (invite/share links). Kept out of the run script: any
+          # ${{ }} inside it makes the whole script one expression, which
+          # exceeds GitHub's 21000-char limit. Source of truth is the
+          # environment's APP__BASEURL variable; the older
+          # SPLITSHARE_WEB_BASE_URL name is still accepted as a fallback.
+          WEB_BASE_VAR: ${{ vars.APP__BASEURL || vars.SPLITSHARE_WEB_BASE_URL }}
         run: |
           set -euo pipefail
 
@@ -345,7 +348,8 @@ jobs:
           fi
 
           # App__BaseUrl drives invite/share links (App:BaseUrl, web origin).
-          # Repo var wins (custom domains); else the SWA default hostname.
+          # The GitHub environment variable APP__BASEURL wins (custom domains);
+          # else the SWA default hostname.
           WEB_BASE="${WEB_BASE_VAR:-}"
           if [ -z "$WEB_BASE" ] && [ -n "${SWA_HOST:-}" ] && [ "$SWA_HOST" != "None" ]; then
             WEB_BASE="https://$SWA_HOST"
@@ -353,7 +357,7 @@ jobs:
           if [ -n "$WEB_BASE" ]; then
             echo "Invite/share links will use: $WEB_BASE"
           else
-            echo "::warning::Web base URL unknown (no SPLITSHARE_WEB_BASE_URL var; SWA '$SWA_NAME' not found) — App__BaseUrl skipped; links keep the localhost default until a later run."
+            echo "::warning::Web base URL unknown (no APP__BASEURL var; SWA '$SWA_NAME' not found) — App__BaseUrl skipped; links keep the localhost default until a later run."
           fi
 
           # Defaults apply only when GitHub has no value AND the base revision

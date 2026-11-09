@@ -117,3 +117,43 @@ Report:
 - Subagents actually used, if any.
 - Tests, builds, linting, and visual checks actually executed.
 - Remaining risks and unverified behavior.
+
+# React Component Reuse and Duplication Prevention
+
+## 1. Reuse Before Creating
+- Before creating a new React component, inspect existing components and identify reusable functionality.
+- Search for components that provide similar UI, interactions, state management, or business functionality.
+- Prefer extending existing components over creating duplicate implementations.
+
+## 2. Consolidation
+- If multiple components implement the same functionality with different fields, labels, or configurations, evaluate consolidating them into a shared reusable component.
+- Use configuration-driven components, props, composition, and custom renderers where appropriate.
+- Keep feature-specific components as thin wrappers around shared components.
+
+## 3. Separation of Concerns
+- Separate shared business logic from presentation.
+- Extract reusable logic into custom React hooks when appropriate.
+- Keep business-specific behavior outside generic UI components.
+- Avoid tightly coupling reusable components to specific API endpoints or business entities.
+
+## 4. Avoid Over-Abstraction
+- Do not create a universal component that handles unrelated workflows.
+- Do not introduce excessive props, boolean flags, nested conditions, or complicated configuration objects.
+- Preserve separate components when their business behavior or user experience is fundamentally different.
+
+## 5. Mandatory Before Creating a Component
+Before implementing a new component:
+1. Search the existing codebase for similar functionality.
+2. Identify existing reusable components and hooks.
+3. Explain why existing components cannot be reused or extended.
+4. Evaluate whether the new functionality belongs in an existing component, a shared component, or a separate component.
+5. Follow existing architectural and UI/UX conventions.
+
+## 6. Definition of Done
+- No unnecessary duplicated functionality.
+- Shared components have clear and well-defined responsibilities.
+- Existing functionality remains backward compatible unless explicitly requested otherwise.
+- Existing tests pass and new behavior has appropriate tests.
+- No unnecessary changes to unrelated components.
+
+**Important:** Do not create a new component simply because a new feature has different field names or business terminology.

@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { api, setTokens, clearTokens, getTokens, loadApiUrlOverride } from '../api/client';
+import { clearSplitMemory } from '../splitMemoryStore';
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
@@ -138,6 +139,7 @@ export function AuthProvider({ children }) {
       } finally {
         await clearTokens();
         await clearCredentials();
+        await clearSplitMemory();
         setUser(null);
       }
     },

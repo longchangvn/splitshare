@@ -49,7 +49,7 @@ test('submit: Save & new calls onSaveNew (form stays open), otherwise onDone; En
   const sub = expenseForm.slice(expenseForm.indexOf('const submit = async'), expenseForm.indexOf('const submitEdit'));
   // Mode is consumed and reset before validation so a failed attempt can't leak "new" into Enter.
   const consume = sub.indexOf("saveModeRef.current = 'close';");
-  assert.ok(consume > 0 && consume < sub.indexOf('moneyAmountError'), 'mode reset before validation');
+  assert.ok(consume > 0 && consume < sub.indexOf('validateDraft'), 'mode reset before validation');
   assert.match(sub, /if \(mode === 'new' && onSaveNew\) \{[\s\S]*?onSaveNew\(r\);[\s\S]*?\} else \{\s*onDone\(r\);/);
   assert.match(sub, /if \(!notified\) notifications\.show\(\{ title: t\('forms\.expense\.saved'\)/);
   assert.match(expenseForm, /const saveModeRef = useRef\('close'\);/);
@@ -70,9 +70,25 @@ test('group detail resets the new-expense form in place on Save & new', () => {
   assert.match(block, /onDone=\{\(\) => \{ setShowExp\(false\);/);
 });
 
+test('create remembers the split and sends one Idempotency-Key per form (specs/007)', () => {
+  const sub = expenseForm.slice(expenseForm.indexOf('const submit = async'), expenseForm.indexOf('const submitEdit'));
+  assert.match(expenseForm, /const idemKey = useRef\(newIdempotencyKey\(\)\)\.current;/);
+  assert.match(sub, /\{ headers: \{ 'Idempotency-Key': idemKey \} \}/);
+  // Saved after every successful create (Save & new, Save & close, copy), before the mode branch.
+  const save = sub.indexOf('saveLastSplit(meId, groupId, draft);');
+  assert.ok(save > 0 && save < sub.indexOf("if (mode === 'new' && onSaveNew)"), 'saved after create');
+  assert.ok(sub.indexOf('saveLastSplit') < sub.indexOf('api.patch'), 'edit does not overwrite the memory');
+  // Remembered split only for a new expense: edit and copy start from their source.
+  assert.match(expenseForm, /useState\(\(\) => \(source \? null : restoreSplit\(initialSplit, \{ members, meId \}\)\)\)/);
+  assert.match(expenseForm, /<ExpenseFields[\s\S]*?splitHint=\{splitHint\}/);
+  const at = groupDetail.indexOf('<ExpenseForm\n          key={expFormKey}');
+  assert.match(groupDetail.slice(at, at + 400), /initialSplit=\{loadLastSplit\(user\?\.user_id, id\)\}/);
+});
+
 test('edit modal does not get Save & new', () => {
   const at = groupDetail.indexOf('existing={editExisting}');
   const block = groupDetail.slice(at, at + 300);
   assert.doesNotMatch(block, /onSaveNew/);
+  assert.doesNotMatch(block, /initialSplit/);
   assert.match(styles, /\.expense-save-actions \{ flex-wrap: wrap; \}/);
 });

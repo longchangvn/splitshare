@@ -78,8 +78,7 @@ export function Dashboard() {
     try {
       const emailList = emails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
       const memberIds = picked.map((p) => p.user_id);
-      // Templates are out of group creation for now: always a plain group
-      // (POST /groups/from-template stays in the API, unused by the wizard).
+      // Group templates were removed (wizard, Settings catalog and API): always a plain group.
       const g = await api.post('/api/v1/groups', {
         name,
         currency: DEFAULT_CURRENCY,

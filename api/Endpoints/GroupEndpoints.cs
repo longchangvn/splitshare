@@ -95,9 +95,6 @@ public static class GroupEndpoints
         api.MapPatch("/groups/{id:guid}/status", async (Guid id, GroupStatusDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.UpdateStatusAsync(Me(p), id, d.Status)));
 
-        api.MapPost("/groups/from-template", async (TemplateDto d, ClaimsPrincipal p, GroupService svc) =>
-            ToResult(await svc.FromTemplateAsync(Me(p), d.Name, d.Currency, d.Template, d.Budget, d.FlatFee)));
-
         api.MapPatch("/groups/{id:guid}/members/{uid:guid}", async (Guid id, Guid uid, RoleDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.SetRoleAsync(Me(p), id, uid, d.Role)));
 
@@ -199,7 +196,6 @@ public static class GroupEndpoints
     public sealed record RenameGroupDto(string Name);
     public sealed record SettingsDto(decimal? Budget, int? BudgetAlertPct, string? Mode, decimal? FlatFee);
     public sealed record GroupStatusDto(string? Status);
-    public sealed record TemplateDto(string Name, string? Currency, string Template, decimal? Budget, decimal? FlatFee);
     public sealed record RoleDto(string Role);
     public sealed record DepositDto(bool Paid);
     public sealed record FlatFeeDto(Guid PayerId, string? Title);

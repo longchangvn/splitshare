@@ -63,8 +63,9 @@ test('cardFromSuggestion reads the additive scan contract', () => {
   assert.equal(card.amount, '24.50');
   assert.equal(card.spentAt, '2026-10-18');
   assert.equal(card.category, 'food');
-  assert.equal(card.tax, '2.10');
-  assert.equal(card.tip, '3.00');
+  // amount_spent is the grand total; the server adds tax/tip on top, so they stay empty.
+  assert.equal(card.tax, '');
+  assert.equal(card.tip, '');
   assert.equal(card.lowConfidence, false);
   assert.equal(card.origCurrency, '');
 });
@@ -198,6 +199,16 @@ test('ScanReceipts scans with the batch endpoint, uploads the photo and retries 
   assert.match(modal, /runPool\(added, 3, scanCard\)/);
   assert.match(modal, /createCards\(failed\)/);
   assert.doesNotMatch(modal, /split_type: 'EXACT'/);
+});
+
+test('scan cards use the same fields, split memory and preview as Add expense (specs/007)', () => {
+  assert.match(modal, /<ExpenseFields[\s\S]*?draft=\{card\}/);
+  assert.doesNotMatch(modal, /MultiSelect|clearable/, 'no separate participant picker or empty category');
+  assert.match(modal, /restoreSplit\(loadLastSplit\(meId, groupId\), \{ members, meId, context: 'scan' \}\)/);
+  assert.match(modal, /category: pickScanCategory\(cats, remembered\?\.category\)/);
+  assert.match(modal, /saveLastSplit\(meId, groupId, card\);/);
+  assert.match(modal, /useSplitPreview\(\s*card, `\/api\/v1\/groups\/\$\{groupId\}\/expenses\/preview-split`/);
+  assert.match(modal, /card\.tried \? validateCard\(card, members\)\.errors : \[\]/);
 });
 
 test('GroupDetail shows the scan action only when capabilities report OCR', () => {

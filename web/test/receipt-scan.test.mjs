@@ -111,12 +111,12 @@ test('ExpenseForm: scan input opens camera or library, compresses, calls the sca
   assert.match(forms, /setStaged\(\(prev\) => \(prev\.length < maxStaged \? \[\.\.\.prev, img\] : prev\)\)/);
 });
 
-test('ExpenseForm: scan fills only the amount', () => {
+test('ExpenseForm: scan fills the same fields as Scan Receipts, keeping what the user changed', () => {
   const handler = forms.match(/const onScanFile = async[\s\S]*?\n {2}\};/)?.[0] || '';
-  assert.match(handler, /onAmountChange\(scanned\)/);
-  for (const setter of ['setTitle', 'setSpentAt', 'setCategory', 'setTax', 'setTip']) {
-    assert.doesNotMatch(handler, new RegExp(`${setter}\\(`), `${setter} must not be called by scan`);
-  }
+  // Shared merge (specs/007): title/date/category/amount/FX; tax+tip never (server adds them).
+  assert.match(handler, /applyScan\(d, resp, group, \{ keep: \(f\) => d\[f\] !== initialRef\.current\[f\] \}\)/);
+  assert.match(handler, /const scan = scanReceipt\(resp, group\);/);
+  assert.doesNotMatch(handler, /tax|tip/);
 });
 
 test('scan i18n keys exist in en and vi', () => {

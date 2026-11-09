@@ -58,9 +58,9 @@ export function ExpenseDetail() {
       labels: { confirm: 'Delete', cancel: 'Cancel' },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
-        try { await api.del(`/api/v1/expenses/${eid}`); modals.closeModal(mid); nav(`/groups/${id}`); }
-        catch (err) { modals.closeModal(mid); setE(err); }
+        modals.updateModal({ modalId: mid, confirmProps: { color: 'red', loading: true } });
+        try { await api.del(`/api/v1/expenses/${eid}`); modals.close(mid); nav(`/groups/${id}`); }
+        catch (err) { modals.close(mid); setE(err); }
       },
     });
   };

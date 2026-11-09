@@ -2087,23 +2087,6 @@ a {
   .wizard-search-row .wizard-search {
     width: 100%;
   }
-  .template-modal-content {
-    width: calc(100vw - 32px) !important;
-    max-height: min(540px, calc(100dvh - 48px));
-    height: auto !important;
-    border-radius: 20px;
-  }
-  .template-modal-content .wizard-modal-header {
-    padding: 20px 20px 8px;
-  }
-  .template-modal-content .wizard-modal-body {
-    padding: 12px 20px 20px;
-  }
-  .template-modal-content .wizard-form { gap: 16px; }
-  .template-modal-content .wizard-primary {
-    min-height: 48px;
-    margin-top: 4px;
-  }
   .invite-modal-content {
     width: calc(100vw - 32px) !important;
     max-height: min(660px, calc(100dvh - 48px));
@@ -2302,15 +2285,6 @@ a {
   font-size: 0.92rem;
   line-height: 1.45;
   color: var(--mantine-color-dimmed);
-}
-.settings-tabs {
-  margin-top: 4px;
-  max-width: 720px;
-}
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 .settings-add-btn {
   flex: none !important;

@@ -1,26 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert, Button, Checkbox, Group, Modal, Select, Stack, Text, TextInput,
+  Alert, Button, Group, Select, Stack, Text, TextInput,
 } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
-import { api, fmt } from '../api.js';
+import { api, fmt, newIdempotencyKey } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
-import { categorySelectData } from '../categories.js';
 import {
-  SCAN_MOBILE_QUERY, compressReceiptImage, scanErrorKey, scanToAmount,
+  SCAN_MOBILE_QUERY, compressReceiptImage, scanErrorKey,
 } from '../receiptScan.js';
 import { displayNameOf } from './Net.jsx';
+import { ExpenseFields } from './ExpenseFields.jsx';
 import { useT } from '../prefs.jsx';
-import { normalizeDecimalInput as dec } from '../decimalInput.js';
-
-const splitVal = (s, type) => {
-  if (!s) return '';
-  if (type === 'EXACT' && s.exact_cents != null) return (s.exact_cents / 100).toString();
-  if (type === 'PERCENT' && s.percent != null) return s.percent.toString();
-  if (type === 'SHARES' && s.shares != null) return s.shares.toString();
-  return '';
-};
+import {
+  applyScan, draftFromSource, draftToBody, droppedMembers, isValidMoneyAmount, moneyAmountError,
+  newDraft, pickCategory, sanitizeMoneyInput, scanReceipt, validateDraft,
+} from '../expenseDraft.js';
+import { restoreSplit } from '../splitMemory.js';
+import { saveLastSplit } from '../splitMemoryStore.js';
+import { useSplitPreview } from '../useSplitPreview.js';
 
 // Shorten long filenames for the staged list (keep start + extension).
 const shortName = (name) => {
@@ -32,216 +30,58 @@ const shortName = (name) => {
   return `${base.slice(0, Math.min(18, keep))}…${base.slice(-Math.max(0, keep - 18))}${ext}`;
 };
 
-// Equal-percent distribution that sums to exactly 100.00 (mirrors server largest-remainder).
-const equalPercent = (n) => {
-  const base = Math.floor(10000 / n);
-  const out = Array(n).fill(base);
-  for (let i = 0; i < 10000 - base * n; i++) out[i] += 1;
-  return out.map((c) => (c / 100).toString());
-};
+const SPLIT_FIELDS = ['splitType', 'participantIds', 'values', 'stashed', 'payerId', 'category'];
 
-const MAX_MONEY_AMOUNT = 1_000_000;
-
-/** Keep only digits + one `.`, max 2 decimal places (currency input). */
-function sanitizeMoneyInput(raw) {
-  let s = dec(raw).replace(/[^\d.]/g, '');
-  const dot = s.indexOf('.');
-  if (dot !== -1) {
-    s = `${s.slice(0, dot + 1)}${s.slice(dot + 1).replace(/\./g, '')}`;
-    const [whole, frac = ''] = s.split('.');
-    s = `${whole.slice(0, 7)}.${frac.slice(0, 2)}`;
-  } else {
-    s = s.slice(0, 7);
-  }
-  if (s.startsWith('.')) s = `0${s}`;
-  return s;
-}
-
-function isValidMoneyAmount(raw) {
-  if (!raw || !/^\d+(\.\d{1,2})?$/.test(raw)) return false;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 && n <= MAX_MONEY_AMOUNT;
-}
-
-function moneyAmountError(raw, t) {
-  if (!raw) return null;
-  if (!/^\d+(\.\d{1,2})?$/.test(raw)) return t('forms.payment.invalidAmount');
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return t('forms.payment.invalidAmount');
-  if (n > MAX_MONEY_AMOUNT) return t('forms.payment.amountMax', { max: '1,000,000' });
-  return null;
-}
-
-// Expense create/edit with live split preview + un-settle confirm (tasks 8.2/8.3).
-// copyFrom: detail.expense payload to prefill a copy (task 4.1); images carried on save (4.2).
-export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSaveNew, onCancel, currency = '' }) {
+// Expense create/edit/copy with live split preview + un-settle confirm (tasks 8.2/8.3).
+// Fields come from the shared ExpenseFields + expenseDraft (specs/007), same as Scan Receipts.
+// copyFrom: detail.expense payload to prefill a copy (task 4.1).
+// initialSplit: remembered split for this user + group (create only; edit/copy ignore it).
+export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit = null, onDone, onSaveNew, onCancel, currency = '' }) {
   const t = useT();
   const meId = useAuth()?.user?.user_id;
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const activeIds = new Set(members.map((m) => m.user_id));
 
-  const initSel = () => {
-    if (existing) return existing.splits.map((s) => s.user_id);
-    if (copyFrom) {
-      const kept = copyFrom.splits.map((s) => s.user_id).filter((id) => activeIds.has(id));
-      return kept.length > 0 ? kept : members.map((m) => m.user_id);
-    }
-    return members.map((m) => m.user_id);
-  };
-  const initValues = (type, sel) => {
-    const out = {};
-    if (type === 'SHARES') {
-      for (const id of sel) out[id] = '1';
-    }
-    if (!source || !source.splits) return out;
-    for (const s of source.splits) {
-      if (!sel.includes(s.user_id)) continue;
-      const v = splitVal(s, type);
-      if (v !== '') out[s.user_id] = v;
-      else if (type === 'SHARES' && !(s.user_id in out)) out[s.user_id] = '1';
-    }
-    return out;
-  };
-
-  const [title, setTitle] = useState(
-    existing?.title ?? (copyFrom ? t('forms.expense.copyOf', { title: copyFrom.title }) : ''));
-  const [amount, setAmount] = useState(
-    source ? (source.amount_cents / 100).toFixed(2) : '');
-  const [amountErr, setAmountErr] = useState(null);
-  const [payer, setPayer] = useState(() => {
-    const p = source?.payer_id;
-    if (p && activeIds.has(p)) return p;
-    if (meId && activeIds.has(meId)) return meId;
-    return members[0]?.user_id || '';
-  });
-  const [type, setType] = useState(source?.split_type || 'EQUAL');
-  const [sel, setSel] = useState(initSel);
-  const [values, setValues] = useState(() => initValues(source?.split_type || 'EQUAL', initSel()));
-  const [stashed, setStashed] = useState({}); // values of unchecked participants
-  const [preview, setPreview] = useState(null);
+  const freshDraft = (remembered) => newDraft({ members, meId, remembered, category: 'food' });
+  const [remembered] = useState(() => (source ? null : restoreSplit(initialSplit, { members, meId })));
+  const [draft, setDraft] = useState(() => (source
+    ? draftFromSource({
+      existing, copyFrom, members, meId,
+      title: existing ? undefined : t('forms.expense.copyOf', { title: copyFrom.title }),
+    })
+    : freshDraft(remembered)));
+  // Untouched new-form values: the single scan only fills fields still equal to these.
+  const initialRef = useRef(draft);
+  const patchDraft = (p) => setDraft((d) => ({ ...d, ...p }));
+  const [usingLast, setUsingLast] = useState(!!remembered);
+  const [tried, setTried] = useState(false);
+  const [receiptCurrency, setReceiptCurrency] = useState('');
   const [confirm, setConfirm] = useState(null); // [names] un-settle list
   const [pending, setPending] = useState(null); // PATCH body awaiting confirm
   const [saving, setSaving] = useState(false);
   // Create-only: which footer button triggered submit ('close' | 'new'); Enter key = close.
   const saveModeRef = useRef('close');
   const [savingMode, setSavingMode] = useState('close');
+  // One key per form instance: a double click or retry replays instead of double-creating.
+  const idemKey = useRef(newIdempotencyKey()).current;
   const [imgErrs, setImgErrs] = useState([]);
   const [e, setE] = useState(null);
-  const todayStr = () => new Date().toISOString().slice(0, 10);
   const [categories, setCategories] = useState([]);
-  const [category, setCategory] = useState(source?.category || 'food');
-  const [newCatName, setNewCatName] = useState('');
-  const [addingCat, setAddingCat] = useState(false);
-  const [catModalOpen, setCatModalOpen] = useState(false);
-  const [catModalErr, setCatModalErr] = useState(null);
-  const [spentAt, setSpentAt] = useState(() =>
-    source?.spent_at ? String(source.spent_at).slice(0, 10) : todayStr());
-  const [tax, setTax] = useState(source?.tax_cents ? (source.tax_cents / 100).toFixed(2) : '');
-  const [tip, setTip] = useState(source?.tip_cents ? (source.tip_cents / 100).toFixed(2) : '');
-  const [fee, setFee] = useState(source?.fee_cents ? (source.fee_cents / 100).toFixed(2) : '');
-  const [origCur, setOrigCur] = useState(source?.orig_currency || '');
-  const [origAmt, setOrigAmt] = useState(source?.orig_amount_cents ? (source.orig_amount_cents / 100).toFixed(2) : '');
-  const [fxRate, setFxRate] = useState(source?.fx_rate != null ? String(source.fx_rate) : '');
-  const [guests, setGuests] = useState(() => (source?.guests || []).map((g) => ({
-    label: g.label, amount: (g.share_cents / 100).toFixed(2), covered_by: g.covered_by,
-  })));
-  const [onlyPresent, setOnlyPresent] = useState(false);
 
-  const dropped = copyFrom
-    ? copyFrom.splits.map((s) => s.user_id).filter((id) => !activeIds.has(id))
-    : [];
+  const dropped = droppedMembers(copyFrom, members);
   // Copy expense never carries receipts: the upload section starts empty.
 
-  const changeType = (nextType) => {
-    setType(nextType);
-    if (nextType === 'EQUAL') return;
-    // Prefill empty boxes with equal defaults (keeps typed values).
-    setValues((prev) => {
-      const checked = sel.filter((id) => !(id in prev) || prev[id] === '');
-      if (checked.length === 0) return prev;
-      const next = { ...prev };
-      if (nextType === 'PERCENT') {
-        const all = sel.filter((id) => !(id in next) || next[id] === '');
-        const dist = equalPercent(sel.length);
-        sel.forEach((id, i) => { if (all.includes(id)) next[id] = dist[i]; });
-      } else if (nextType === 'SHARES') {
-        checked.forEach((id) => { next[id] = '1'; });
-      }
-      return next;
-    });
-  };
+  // Edit may still list former members (server answers INVOLVES_REMOVED_MEMBER).
+  const validationMembers = existing
+    ? [...members, ...existing.splits.filter((s) => !activeIds.has(s.user_id)).map((s) => ({ user_id: s.user_id }))]
+    : members;
+  const errors = tried ? validateDraft(draft, validationMembers).errors : [];
 
-  const toggle = (id) => {
-    if (sel.includes(id)) {
-      setSel(sel.filter((x) => x !== id));
-      setStashed({ ...stashed, ...(id in values ? { [id]: values[id] } : {}) });
-      setValues((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    } else {
-      setSel([...sel, id]);
-      if (id in stashed) {
-        setValues((prev) => ({ ...prev, [id]: stashed[id] }));
-      } else if (type === 'SHARES') {
-        // New participant in SHARES mode defaults to 1 share (not empty/0).
-        setValues((prev) => ({ ...prev, [id]: prev[id] ?? '1' }));
-      }
-    }
-  };
-  const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: dec(v) }));
-
-  const build = () => {
-    const body = {
-      title, amount: Number(amount), payer_id: payer, split_type: type, participant_ids: sel,
-      category, spent_at: spentAt ? new Date(`${spentAt}T12:00:00Z`).toISOString() : null,
-      only_present: onlyPresent,
-    };
-    if (tax !== '') body.tax = Number(tax);
-    if (tip !== '') body.tip = Number(tip);
-    if (fee !== '') body.fee = Number(fee);
-    if (origCur.trim() !== '') {
-      body.orig_currency = origCur.trim().toUpperCase();
-      body.orig_amount = Number(origAmt);
-      body.fx_rate = Number(fxRate);
-    }
-    if (guests.length > 0) {
-      body.guests = guests.map((g) => ({
-        label: g.label, amount_cents: Math.round(Number(g.amount || 0) * 100), covered_by: g.covered_by,
-      }));
-    }
-    if (type === 'EXACT') {
-      body.exact = sel.map((id) => ({ user_id: id, amount_cents: Math.round(Number(values[id] || 0) * 100) }));
-    }
-    if (type === 'PERCENT') {
-      body.percent = sel.map((id) => ({ user_id: id, percent: Number(values[id] || 0) }));
-    }
-    if (type === 'SHARES') {
-      // Empty box means 1 share (avoids 0 -> 422 dead-end).
-      body.shares = sel.map((id) => ({
-        user_id: id,
-        shares: values[id] === '' || values[id] == null ? 1 : Math.max(1, Math.round(Number(values[id] || 1))),
-      }));
-    }
-    return body;
-  };
-
-  // Local running totals (server 422 stays authoritative).
-  const totals = (() => {
-    if (type === 'EQUAL' || sel.length === 0) return null;
-    const nums = sel.map((id) => Number(values[id] || 0));
-    if (nums.some((n) => Number.isNaN(n))) return null;
-    if (type === 'EXACT') {
-      const sum = nums.reduce((a, b) => a + b, 0);
-      return {
-        text: t('forms.expense.totalsExact', { sum: sum.toFixed(2), total: Number(amount || 0).toFixed(2) }),
-        ok: Math.abs(sum - Number(amount || 0)) < 0.005,
-      };
-    }
-    if (type === 'PERCENT') {
-      const sum = nums.reduce((a, b) => a + b, 0);
-      return { text: t('forms.expense.totalsPercent', { sum }), ok: Math.abs(sum - 100) < 1e-9 };
-    }
-    return { text: t('forms.expense.totalsShares', { sum: nums.reduce((a, b) => a + b, 0) }), ok: true };
-  })();
+  const previewUrl = existing
+    ? `/api/v1/expenses/${existing.expense_id}/preview-edit`
+    : `/api/v1/groups/${groupId}/expenses/preview-split`;
+  const { preview, error: previewErr } = useSplitPreview(draft, previewUrl);
 
   useEffect(() => {
     let cancelled = false;
@@ -251,13 +91,10 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
         if (cancelled) return;
         const list = Array.isArray(rows) ? rows : [];
         setCategories(list);
-        setCategory((prev) => {
-          if (list.some((c) => c.key === prev)) return prev;
-          if (source?.category && list.some((c) => c.key === source.category)) return source.category;
-          return list.find((c) => c.key === 'food')?.key
-            || list.find((c) => c.key === 'other')?.key
-            || list[0]?.key
-            || prev;
+        setDraft((d) => {
+          const category = pickCategory(list, d.category, source?.category);
+          if (initialRef.current.category === d.category) initialRef.current = { ...initialRef.current, category };
+          return { ...d, category };
         });
       } catch (err) {
         if (!cancelled) setE(err);
@@ -267,47 +104,12 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
-  const openAddCategory = () => {
-    setNewCatName('');
-    setCatModalErr(null);
-    setCatModalOpen(true);
+  const resetSplit = () => {
+    const base = freshDraft(null);
+    base.category = pickCategory(categories, '', null);
+    setDraft((d) => ({ ...d, ...Object.fromEntries(SPLIT_FIELDS.map((k) => [k, base[k]])) }));
+    setUsingLast(false);
   };
-
-  const addCategoryFromModal = async () => {
-    const name = newCatName.trim();
-    if (!name) return;
-    setAddingCat(true);
-    setCatModalErr(null);
-    try {
-      const created = await api.post(`/api/v1/groups/${groupId}/categories`, { name });
-      setCategories((prev) => [...prev, created]);
-      setCategory(created.key);
-      setNewCatName('');
-      setCatModalOpen(false);
-      notifications.show({ message: t('groupDetail.categoryAdded'), color: 'teal' });
-    } catch (err) {
-      setCatModalErr(err);
-    } finally {
-      setAddingCat(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!amount || sel.length === 0) { setPreview(null); return; }
-    const timer = setTimeout(async () => {
-      try {
-        const b = build();
-        const url = existing
-          ? `/api/v1/expenses/${existing.expense_id}/preview-edit`
-          : `/api/v1/groups/${groupId}/expenses/preview-split`;
-        setPreview(await api.post(url, b));
-        setE(null);
-      } catch (err) { setPreview(null); setE(err); }
-    }, 350);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, type, payer, category, spentAt, tax, tip, fee, origCur, origAmt, fxRate,
-    JSON.stringify(guests), onlyPresent, sel.join(','), Object.values(values).join('|')]);
 
   // Staged receipts for create: picked now, uploaded only on Save.
   const [staged, setStaged] = useState([]);
@@ -342,12 +144,6 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
     return failures;
   };
 
-  const onAmountChange = (raw) => {
-    const next = sanitizeMoneyInput(raw);
-    setAmount(next);
-    setAmountErr(moneyAmountError(next, t));
-  };
-
   // Receipt scan (mobile site only, create only, hidden unless the API has OCR enabled).
   const isMobile = useMediaQuery(SCAN_MOBILE_QUERY);
   const [ocrEnabled, setOcrEnabled] = useState(false);
@@ -363,6 +159,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
     return () => { cancelled = true; };
   }, [existing]);
 
+  // Same scan merge as Scan Receipts (shared applyScan); fields the user already changed stay.
   const onScanFile = async (ev) => {
     const file = ev.target.files?.[0];
     ev.target.value = '';
@@ -379,18 +176,24 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
       const form = new FormData();
       form.append('file', img, img.name);
       const resp = await api.postForm(`/api/v1/groups/${groupId}/expenses/scan`, form);
-      const { amount: scanned, lowConfidence, warnings } = scanToAmount(resp);
-      if (scanned) {
-        onAmountChange(scanned);
+      const group = { currency, categories };
+      const scan = scanReceipt(resp, group);
+      if (scan.hasTotal) {
+        setDraft((d) => ({
+          ...d,
+          ...applyScan(d, resp, group, { keep: (f) => d[f] !== initialRef.current[f] }).patch,
+        }));
+        setReceiptCurrency(scan.receiptCurrency);
         setStaged((prev) => (prev.length < maxStaged ? [...prev, img] : prev));
+        const shown = scan.fields.amount || scan.fields.origAmount;
         notifications.show({
-          title: t('forms.expense.scanDone', { amount: fmt(Math.round(Number(scanned) * 100), currency) }),
-          message: lowConfidence ? t('forms.expense.scanLowConfidence') : t('forms.expense.scanCheck'),
-          color: lowConfidence ? 'orange' : 'teal',
+          title: t('forms.expense.scanDone', { amount: fmt(Math.round(Number(shown) * 100), scan.receiptCurrency || currency) }),
+          message: scan.lowConfidence ? t('forms.expense.scanLowConfidence') : t('forms.expense.scanCheck'),
+          color: scan.lowConfidence ? 'orange' : 'teal',
         });
       } else {
         notifications.show({
-          message: warnings.includes('not_a_receipt') ? t('forms.expense.scanNotReceipt') : t('forms.expense.scanNoTotal'),
+          message: scan.warnings.includes('not_a_receipt') ? t('forms.expense.scanNotReceipt') : t('forms.expense.scanNoTotal'),
           color: 'orange',
         });
       }
@@ -409,18 +212,17 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
     if (saving) return; // double-submit guard
     const mode = saveModeRef.current;
     saveModeRef.current = 'close';
-    const amtErr = moneyAmountError(amount, t) || (!amount ? t('forms.payment.invalidAmount') : null);
-    if (amtErr || !isValidMoneyAmount(amount)) {
-      setAmountErr(amtErr || t('forms.payment.invalidAmount'));
-      return;
-    }
+    setTried(true);
+    if (!validateDraft(draft, validationMembers).ok) return;
     setE(null);
     setImgErrs([]);
     setSavingMode(mode);
     setSaving(true);
     try {
       if (!existing) {
-        const r = await api.post(`/api/v1/groups/${groupId}/expenses`, build());
+        const r = await api.post(`/api/v1/groups/${groupId}/expenses`, draftToBody(draft),
+          { headers: { 'Idempotency-Key': idemKey } });
+        saveLastSplit(meId, groupId, draft);
         const newId = r.expense?.expense_id;
         let notified = false;
         if (newId && staged.length > 0) {
@@ -441,7 +243,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
         }
       } else {
         const r = await api.patch(`/api/v1/expenses/${existing.expense_id}`,
-          { expected_version: existing.version, ...build() });
+          { expected_version: existing.version, ...draftToBody(draft) });
         onDone(r);
       }
     } catch (err) {
@@ -455,6 +257,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
   // flags members, ask for confirmation naming them.
   const submitEdit = async (ev) => {
     ev.preventDefault();
+    setTried(true);
+    if (!validateDraft(draft, validationMembers).ok) return;
     const names = preview?.unsettled_user_ids || [];
     if (names.length > 0 && !pending) {
       const resolved = names.map((id) => {
@@ -470,47 +274,23 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
     await submit(ev);
   };
 
-  const boxLabel = type === 'EXACT'
-    ? t('forms.expense.exactBox')
-    : type === 'PERCENT'
-      ? t('forms.expense.percentBox')
-      : t('forms.expense.sharesBox');
-
   // Receipt strip: staged (create) or existing images (edit).
   const receiptCount = existing
     ? (source?.images?.length || 0)
     : staged.length;
 
-  // EQUAL explainer: floor + remainder 1¢, who gets +1¢.
-  const equalNote = (() => {
-    if (type !== 'EQUAL' || !preview?.shares) return null;
-    const entries = Object.entries(preview.shares);
-    if (entries.length === 0) return null;
-    const vals = entries.map(([, v]) => v);
-    const lo = Math.min(...vals);
-    const hi = Math.max(...vals);
-    const base = fmt(lo, currency);
-    if (hi === lo) {
-      return t('forms.expense.equalNoteOk', { base, count: entries.length });
-    }
-    const lucky = entries.filter(([, v]) => v === hi).map(([id]) => displayNameOf(members, id)).join(', ');
-    return t('forms.expense.equalNoteLucky', { base, count: entries.length, lucky });
-  })();
-
-  const splitTypes = [
-    { value: 'EQUAL', label: t('forms.expense.equal') },
-    { value: 'EXACT', label: t('forms.expense.exact') },
-    { value: 'PERCENT', label: t('forms.expense.percent') },
-    { value: 'SHARES', label: t('forms.expense.shares') },
-  ];
-  const catData = categorySelectData(categories, t);
   const multiSave = !existing && !!onSaveNew;
   const saveActionLabel = multiSave
     ? t('common.save')
     : isCopy ? t('forms.expense.saveCopy') : t('forms.expense.addExpense');
+  const splitHint = usingLast ? (
+    <Group gap={6} mb={6} className="expense-last-split">
+      <Text size="xs" c="dimmed">{t('forms.expense.lastSplit')}</Text>
+      <button type="button" className="wizard-chip" onClick={resetSplit}>{t('forms.expense.lastSplitReset')}</button>
+    </Group>
+  ) : null;
 
   return (
-    <>
     <form className="wizard-form" onSubmit={existing ? submitEdit : submit}>
       {isCopy && dropped.length > 0 && (
         <Alert color="yellow" variant="light" title={t('forms.expense.formerExcluded')}>
@@ -597,195 +377,19 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
           </div>
         )}
 
-        <TextInput
-          label={t('forms.expense.title')}
-          required
-          placeholder={t('forms.expense.titlePh')}
-          value={title}
-          onChange={(x) => setTitle(x.target.value)}
+        <ExpenseFields
+          draft={draft}
+          onChange={patchDraft}
+          groupId={groupId}
+          members={members}
+          categories={categories}
+          onCategoryCreated={(created) => setCategories((prev) => [...prev, created])}
+          currency={currency}
+          preview={preview}
+          errors={errors}
+          splitHint={splitHint}
+          receiptCurrency={receiptCurrency}
         />
-        <TextInput
-          label={t('forms.expense.amount')}
-          required
-          inputMode="decimal"
-          placeholder="0.00"
-          value={amount}
-          error={amountErr}
-          onChange={(x) => onAmountChange(x.target.value)}
-          onBlur={() => {
-            if (amount) setAmountErr(moneyAmountError(amount, t));
-          }}
-        />
-        <div className="wizard-field">
-          <span className="wizard-label">{t('forms.expense.category')}</span>
-          <Group gap="xs" align="flex-end" wrap="nowrap">
-            <Select
-              style={{ flex: 1 }}
-              value={category || null}
-              onChange={(v) => setCategory(v || '')}
-              data={catData}
-              searchable
-              comboboxProps={{ withinPortal: true }}
-              aria-label={t('forms.expense.category')}
-            />
-            <Button
-              type="button"
-              variant="light"
-              color="teal"
-              className="wizard-cat-add"
-              onClick={openAddCategory}
-            >
-              {t('forms.expense.addCategoryBtn')}
-            </Button>
-          </Group>
-        </div>
-        <TextInput
-          label={t('forms.expense.spentOn')}
-          type="date"
-          value={spentAt}
-          onChange={(x) => setSpentAt(x.target.value)}
-        />
-        <Select
-          label={t('forms.expense.payer')}
-          value={payer || null}
-          onChange={(v) => setPayer(v || '')}
-          data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
-          comboboxProps={{ withinPortal: true }}
-        />
-
-        <details className="wizard-optional">
-          <summary>{t('forms.expense.billDetails')}</summary>
-          <div className="wizard-optional-body">
-            <Group gap="xs" grow>
-              <TextInput label={t('forms.expense.taxOpt')} inputMode="decimal" placeholder="0.00" value={tax} onChange={(x) => setTax(dec(x.target.value))} />
-              <TextInput label={t('forms.expense.tipOpt')} inputMode="decimal" placeholder="0.00" value={tip} onChange={(x) => setTip(dec(x.target.value))} />
-              <TextInput label={t('forms.expense.feeOpt')} inputMode="decimal" placeholder="0.00" value={fee} onChange={(x) => setFee(dec(x.target.value))} />
-            </Group>
-            <div className="wizard-field">
-              <span className="wizard-label">{t('forms.expense.foreign')}</span>
-              <Group gap="xs" grow>
-                <TextInput placeholder="JPY" value={origCur} onChange={(x) => setOrigCur(x.target.value)} />
-                <TextInput placeholder={t('forms.expense.fxAmount')} inputMode="decimal" value={origAmt} onChange={(x) => setOrigAmt(dec(x.target.value))} />
-                <TextInput placeholder={t('forms.expense.fxRate')} inputMode="decimal" value={fxRate} onChange={(x) => setFxRate(dec(x.target.value))} />
-              </Group>
-              {origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate)) && (
-                <Text size="xs" c="dimmed" mt={6}>
-                  {t('forms.expense.fxApprox', { amount: (Number(origAmt) * Number(fxRate)).toFixed(2) })}
-                </Text>
-              )}
-            </div>
-            <div className="wizard-field">
-              <Group justify="space-between" mb={6}>
-                <span className="wizard-label" style={{ marginBottom: 0 }}>{t('forms.expense.guestShares')}</span>
-                <button
-                  type="button"
-                  className="wizard-chip"
-                  onClick={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}
-                >
-                  {t('forms.expense.addGuest')}
-                </button>
-              </Group>
-              {guests.map((g, i) => (
-                <Group key={i} gap="xs" mb={6} wrap="nowrap">
-                  <TextInput
-                    placeholder={t('forms.expense.guestLabel')}
-                    value={g.label}
-                    style={{ flex: 2 }}
-                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: x.target.value } : gg)))}
-                  />
-                  <TextInput
-                    placeholder="$"
-                    inputMode="decimal"
-                    value={g.amount}
-                    style={{ flex: 1 }}
-                    onChange={(x) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: dec(x.target.value) } : gg)))}
-                  />
-                  <Select
-                    value={g.covered_by}
-                    style={{ flex: 2 }}
-                    onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
-                    data={members.map((m) => ({ value: m.user_id, label: m.display_name }))}
-                    comboboxProps={{ withinPortal: true }}
-                  />
-                  <Button size="xs" variant="subtle" color="red" onClick={() => setGuests(guests.filter((_, j) => j !== i))}>X</Button>
-                </Group>
-              ))}
-              {guests.length === 0 && (
-                <Text size="xs" c="dimmed">{t('forms.expense.guestHint')}</Text>
-              )}
-            </div>
-            <Checkbox
-              checked={onlyPresent}
-              onChange={(x) => setOnlyPresent(x.currentTarget.checked)}
-              label={t('forms.expense.onlyPresent')}
-            />
-          </div>
-        </details>
-
-        <div className="wizard-field">
-          <span className="wizard-label">{t('forms.expense.method')}</span>
-          <div className="wizard-chips" role="radiogroup" aria-label={t('forms.expense.method')}>
-            {splitTypes.map((st) => (
-              <button
-                key={st.value}
-                type="button"
-                role="radio"
-                className={type === st.value ? 'wizard-chip is-on' : 'wizard-chip'}
-                aria-checked={type === st.value}
-                onClick={() => changeType(st.value)}
-              >
-                {st.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {equalNote && (
-          <Text size="xs" c="dimmed">{equalNote}</Text>
-        )}
-        <div className="wizard-field">
-          <span className="wizard-label">{t('forms.expense.participants')}</span>
-          <Stack gap={8}>
-            {members.map((m) => (
-              <div key={m.user_id} className="wizard-person">
-                <Checkbox
-                  checked={sel.includes(m.user_id)}
-                  onChange={() => toggle(m.user_id)}
-                  label={m.display_name}
-                />
-                {type !== 'EQUAL' && sel.includes(m.user_id) && (
-                  <TextInput
-                    className="split-value"
-                    aria-label={`${boxLabel} for ${m.display_name}`}
-                    placeholder={type === 'SHARES' ? '1' : boxLabel}
-                    inputMode={type === 'SHARES' ? 'numeric' : 'decimal'}
-                    min={type === 'SHARES' ? 1 : undefined}
-                    value={values[m.user_id] ?? (type === 'SHARES' ? '1' : '')}
-                    onChange={(x) => setVal(m.user_id, x.target.value)}
-                    style={{ width: 110 }}
-                  />
-                )}
-              </div>
-            ))}
-          </Stack>
-        </div>
-        {type !== 'EQUAL' && totals && (
-          <Text size="sm" c={totals.ok ? 'teal' : 'orange'}>{totals.text}</Text>
-        )}
-        {preview && (
-          <div className="wizard-person wizard-pay-hint">
-            <Text size="sm" fw={600}>{t('forms.expense.livePreview')}</Text>
-            <Text size="sm">
-              {Object.entries(preview.shares || {}).map(([id, v]) => (
-                `${displayNameOf(members, id)} ${fmt(v, currency)}`
-              )).join(' · ')}
-            </Text>
-            {preview.unsettled_user_ids?.length > 0 && (
-              <Text size="sm" fw={600} c="orange">
-                {t('forms.expense.unsettle', { count: preview.unsettled_user_ids.length })}
-              </Text>
-            )}
-          </div>
-        )}
       </div>
 
       {confirm && (
@@ -841,55 +445,8 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, onDone, onSa
           <Text size="sm">{imgErrs.join('; ')}</Text>
         </Alert>
       )}
-      <Err e={e} />
+      <Err e={e || previewErr} />
     </form>
-
-    <Modal
-      opened={catModalOpen}
-      onClose={() => { if (!addingCat) setCatModalOpen(false); }}
-      title={t('forms.expense.addCategory')}
-      centered
-      size="sm"
-      radius="lg"
-      overlayProps={{ backgroundOpacity: 0.45, blur: 4 }}
-      zIndex={400}
-    >
-      <Stack gap="sm">
-        <TextInput
-          label={t('groupDetail.categoryName')}
-          placeholder={t('forms.expense.addCategoryPh')}
-          value={newCatName}
-          data-autofocus
-          autoFocus
-          onChange={(x) => setNewCatName(x.target.value)}
-          onKeyDown={(ev) => {
-            if (ev.key === 'Enter') {
-              ev.preventDefault();
-              addCategoryFromModal();
-            }
-          }}
-        />
-        <Err e={catModalErr} />
-        <Group justify="flex-end" gap="xs">
-          <Button
-            variant="default"
-            disabled={addingCat}
-            onClick={() => setCatModalOpen(false)}
-          >
-            {t('common.cancel')}
-          </Button>
-          <Button
-            color="teal"
-            loading={addingCat}
-            disabled={!newCatName.trim()}
-            onClick={addCategoryFromModal}
-          >
-            {t('forms.expense.addCategoryBtn')}
-          </Button>
-        </Group>
-      </Stack>
-    </Modal>
-    </>
   );
 }
 

@@ -55,7 +55,6 @@ export default {
 
     // Settings
     'm.account.viewProfile': 'View profile',
-    'm.account.templates': 'Group templates',
     'm.account.offlinePushSub': 'Offline drafts, sync and push alerts',
 
     // System (Offline & notifications)
@@ -136,7 +135,6 @@ export default {
     'm.account.deleted': 'Đã xóa tài khoản',
 
     'm.account.viewProfile': 'Xem hồ sơ',
-    'm.account.templates': 'Mẫu nhóm',
     'm.account.offlinePushSub': 'Bản nháp ngoại tuyến, đồng bộ và thông báo đẩy',
 
     'm.account.offlineTitle': 'Hàng đợi ngoại tuyến',
