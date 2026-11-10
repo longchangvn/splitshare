@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
-  Anchor, Button, Center, Loader, PasswordInput, Stack, Text, TextInput, Title,
+  Anchor, Button, Center, Loader, Stack, Text, Title,
 } from '@mantine/core';
-import { api, setTokens } from '../api.js';
+import { api } from '../api.js';
 import { Err, useAuth } from '../auth.jsx';
-import { AuthLayout, AuthSubmit, GoogleBtn } from './AuthPages.jsx';
+import { AuthLayout, GoogleBtn, LoginForm, RegisterForm } from './AuthPages.jsx';
 import { InvitationBanner } from '../components/InvitationBanner.jsx';
 import { useT } from '../prefs.jsx';
 
@@ -93,20 +93,16 @@ export function GroupLinkInvitation({ token }) {
 
 // Emailed per-address invitation.
 //   /invite/:token           → choice: Continue with Google | Register new account
-//   /invite/:token/register  → email fixed, choose a password → account + join
+//   /invite/:token/register  → shared RegisterForm, email fixed (code or password) → account, then join
 //   /invite/:token/login     → existing account (small link on the choice screen)
 // Signed in on any of them (after Google or login) → join through the link.
 export function InvitationPage() {
   const t = useT();
   const { token, step } = useParams();
   const nav = useNavigate();
-  const { user, loading, setUser, login } = useAuth();
+  const { user, loading } = useAuth();
   const [info, setInfo] = useState(null);
   const [e, setE] = useState(null);
-  const [id, setId] = useState('');
-  const [pw, setPw] = useState('');
-  const [busy, setBusy] = useState(false);
-  const accepted = useRef(false);
   const base = `/invite/${encodeURIComponent(token)}`;
   const path = `/api/v1/invitations/${encodeURIComponent(token)}`;
   const googleReady = Boolean(import.meta.env.VITE_GOOGLE_CLIENT_ID);
@@ -116,46 +112,23 @@ export function InvitationPage() {
     let live = true;
     setE(null);
     if (user) {
-      if (accepted.current) return undefined;
       api.post(`${path}/join`)
         .then((r) => { if (live) nav(`/groups/${r.group_id}`, { replace: true }); })
         .catch((err) => { if (live) setE(err); });
     } else if (!info) {
       api.get(path)
-        .then((r) => { if (live) { setInfo(r); setId(r.email); } })
+        .then((r) => { if (live) setInfo(r); })
         .catch((err) => { if (live) setE(err); });
     }
     return () => { live = false; };
   }, [loading, user, path, nav, info]);
 
-  useEffect(() => { setPw(''); setE(null); }, [step]);
+  useEffect(() => { setE(null); }, [step]);
 
-  const register = async (ev) => {
-    ev.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setE(null);
-    try {
-      const d = await api.post(`${path}/accept`, { password: pw });
-      accepted.current = true;
-      setTokens(d.access_token, d.refresh_token);
-      setUser(d.user);
-      nav(`/groups/${d.group_id}`, { replace: true });
-    } catch (err) {
-      if (err.code === 'ACCOUNT_EXISTS') {
-        setInfo((i) => ({ ...i, account_exists: true }));
-        nav(`${base}/login`, { replace: true });
-      } else setE(err);
-    } finally { setBusy(false); }
-  };
-
-  // Logging in sets the user; the effect above then joins through the link.
-  const signIn = async (ev) => {
-    ev.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setE(null);
-    try { await login(id.trim(), pw); } catch (err) { setE(err); } finally { setBusy(false); }
+  // The address already has an account: continue on the invite's login step.
+  const toLogin = () => {
+    setInfo((i) => ({ ...i, account_exists: true }));
+    nav(`${base}/login`, { replace: true });
   };
 
   const linkError = e && LINK_ERRORS[e.code];
@@ -188,22 +161,14 @@ export function InvitationPage() {
           <Title order={3} className="auth-title">{t('invitation.registerTitle')}</Title>
           <Text size="sm" c="dimmed" className="auth-desc">{t('invitation.createHint')}</Text>
         </div>
-        <form onSubmit={register}>
-          <Stack gap="sm">
-            <TextInput label={t('auth.email')} value={info.email} readOnly />
-            <PasswordInput
-              label={t('invitation.choosePassword')}
-              description={t('invitation.passwordHint')}
-              required
-              autoFocus
-              autoComplete="new-password"
-              value={pw}
-              onChange={(x) => setPw(x.target.value)}
-            />
-            <AuthSubmit loading={busy} icon="plus">{t('invitation.accept')}</AuthSubmit>
-          </Stack>
-        </form>
-        <Err e={e} />
+        {/* The shared registration form; signing in sets the user and the effect above joins. */}
+        <RegisterForm
+          initialEmail={info.email}
+          lockEmail
+          submitLabel={t('invitation.accept')}
+          onSignedIn={() => {}}
+          onEmailTaken={toLogin}
+        />
       </>
     );
   } else if (step === 'login' || step === 'register') {
@@ -216,27 +181,8 @@ export function InvitationPage() {
             {info.account_exists ? t('invitation.accountExists', { email: info.email }) : t('invitation.loginHint')}
           </Text>
         </div>
-        <form onSubmit={signIn}>
-          <Stack gap="sm">
-            <TextInput
-              label={t('auth.usernameOrEmail')}
-              required
-              autoComplete="username"
-              value={id}
-              onChange={(x) => setId(x.target.value)}
-            />
-            <PasswordInput
-              label={t('auth.password')}
-              required
-              autoFocus
-              autoComplete="current-password"
-              value={pw}
-              onChange={(x) => setPw(x.target.value)}
-            />
-            <AuthSubmit loading={busy}>{t('invitation.loginAction')}</AuthSubmit>
-          </Stack>
-        </form>
-        <Err e={e} />
+        {/* Signing in sets the user; the effect above then joins through the link. */}
+        <LoginForm initialEmail={info.email} submitLabel={t('invitation.loginAction')} onSignedIn={() => {}} />
         <Text ta="center" size="sm" className="auth-links">
           <Anchor component={Link} to="/forgot">{t('auth.forgotPassword')}</Anchor>
         </Text>

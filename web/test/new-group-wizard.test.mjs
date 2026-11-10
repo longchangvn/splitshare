@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import test from 'node:test';
-import { resolveTemplateKey } from '../src/wizardUtils.js';
 
 const dashboard = await readFile(new URL('../src/pages/Dashboard.jsx', import.meta.url), 'utf8');
 const messages = await readFile(new URL('../src/i18n/messages.js', import.meta.url), 'utf8');
+const app = await readFile(new URL('../src/App.jsx', import.meta.url), 'utf8');
+const bottomNav = await readFile(new URL('../src/components/BottomNav.jsx', import.meta.url), 'utf8');
 
 test('step 2 renders invite-by-email before the search-contacts row', () => {
   // Approved order: invite email first, search after.
@@ -33,41 +35,20 @@ test('search results and the contacts box share one pick/unpick row', () => {
   assert.equal((dashboard.match(/<WizardPersonRow /g) ?? []).length, 2);
 });
 
-test('template field is a free-input combobox offering a None option', () => {
-  assert.match(dashboard, /<Autocomplete\s+label=\{t\('wizard\.template'\)\}/);
-  // Suggestions: localized "None" first, then catalog labels (free text allowed).
-  assert.match(dashboard, /\[t\('common\.none'\), \.\.\.templates\.map\(/);
-  // The chosen value is resolved to a key before hitting the API.
-  assert.match(dashboard, /import \{ resolveTemplateKey \} from '\.\.\/wizardUtils\.js'/);
-  assert.match(dashboard, /resolveTemplateKey\(templates, tpl, t\('common\.none'\)\)/);
-  assert.match(dashboard, /template: tplKey/);
+test('group creation has no template field and always creates a plain group', () => {
+  // Templates are out of group creation for now (product decision).
+  assert.doesNotMatch(dashboard, /wizard\.template/);
+  assert.doesNotMatch(dashboard, /api\.post\('\/api\/v1\/groups\/from-template'/);
+  assert.match(dashboard, /api\.post\('\/api\/v1\/groups', \{/);
 });
 
-// --- Executable coverage for the template-value resolution. ---
-
-const TEMPLATES = [
-  { key: 'roommates', label: 'Roommates' },
-  { key: 'beach-trip', label: 'Beach trip' },
-];
-
-test('resolveTemplateKey maps catalog labels to their keys', () => {
-  assert.equal(resolveTemplateKey(TEMPLATES, 'Beach trip', 'None'), 'beach-trip');
-  assert.equal(resolveTemplateKey(TEMPLATES, '  Roommates ', 'None'), 'roommates');
-});
-
-test('resolveTemplateKey treats None and empty as no template', () => {
-  assert.equal(resolveTemplateKey(TEMPLATES, 'None', 'None'), '');
-  assert.equal(resolveTemplateKey(TEMPLATES, '', 'None'), '');
-  assert.equal(resolveTemplateKey(TEMPLATES, '   ', 'None'), '');
-  assert.equal(resolveTemplateKey(TEMPLATES, null, 'None'), '');
-  // Localized None (e.g. Vietnamese "Không") also resolves to no template.
-  assert.equal(resolveTemplateKey(TEMPLATES, 'Không', 'Không'), '');
-});
-
-test('resolveTemplateKey passes unknown free text through untouched', () => {
-  // The API no longer validates template keys; custom names create plain groups.
-  assert.equal(resolveTemplateKey(TEMPLATES, 'Ski trip', 'None'), 'Ski trip');
-  assert.equal(resolveTemplateKey([], 'Whatever', 'None'), 'Whatever');
+test('template catalog and Settings page are removed; /settings redirects to profile', () => {
+  for (const f of ['../src/pages/Settings.jsx', '../src/settingsStore.js', '../src/wizardUtils.js']) {
+    assert.equal(existsSync(new URL(f, import.meta.url)), false, `${f} should be deleted`);
+  }
+  assert.match(app, /path="\/settings" element=\{<Navigate to="\/profile" replace \/>\}/);
+  assert.doesNotMatch(bottomNav, /'\/settings'|id: 'settings'/);
+  assert.doesNotMatch(messages, /'wizard\.template'|'settings\.\w*[Tt]emplate\w*'/);
 });
 
 test('wizard strings exist in both the English and Vietnamese message maps', () => {

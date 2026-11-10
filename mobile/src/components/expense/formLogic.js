@@ -1,175 +1,34 @@
-// Pure ExpenseForm logic (web/src/components/Forms.jsx ExpenseForm), kept free of
-// React Native imports so it can be unit-tested with node --test.
+// Mobile-only ExpenseForm helpers. The draft model, split rules, body builder and
+// validator are shared with web (src/shared/expenseDraft.js, specs/007) and re-exported
+// here so existing imports keep working.
 // Explicit .js extensions so node --test can load this module directly (Metro accepts them too).
 import { normalizeDecimalInput as dec } from '../../shared/decimalInput.js';
-import { equalPercent } from '../../money.js';
+import { draftToBody, runningTotals as draftTotals } from '../../shared/expenseDraft.js';
 
-export const SPLIT_TYPES = ['EQUAL', 'EXACT', 'PERCENT', 'SHARES'];
+export {
+  SPLIT_TYPES, splitVal, initSel, initValues, initPayer, droppedMembers, valuesForType,
+  pickCategory, equalNote, isValidDay,
+} from '../../shared/expenseDraft.js';
+
 export const MAX_STAGED = 5;
 
 export const todayStr = (date = new Date()) => date.toISOString().slice(0, 10);
 
-/** Per-member split value of a source split row for a given split type. */
-export function splitVal(s, type) {
-  if (!s) return '';
-  if (type === 'EXACT' && s.exact_cents != null) return (s.exact_cents / 100).toString();
-  if (type === 'PERCENT' && s.percent != null) return s.percent.toString();
-  if (type === 'SHARES' && s.shares != null) return s.shares.toString();
-  return '';
-}
+/** Legacy field names (payer/type/sel/origCur/origAmt) → shared draft fields. */
+const toDraft = (f) => ({
+  ...f,
+  payerId: f.payer,
+  splitType: f.type,
+  participantIds: f.sel,
+  origCurrency: f.origCur ?? '',
+  origAmount: f.origAmt ?? '',
+});
 
-/** Initial participant ids: edit keeps splits, copy drops former members, create = everyone. */
-export function initSel({ existing, copyFrom, members }) {
-  const activeIds = new Set(members.map((m) => m.user_id));
-  if (existing) return (existing.splits || []).map((s) => s.user_id);
-  if (copyFrom) {
-    const kept = (copyFrom.splits || []).map((s) => s.user_id).filter((id) => activeIds.has(id));
-    return kept.length > 0 ? kept : members.map((m) => m.user_id);
-  }
-  return members.map((m) => m.user_id);
-}
-
-export function initValues(source, type, sel) {
-  const out = {};
-  if (type === 'SHARES') {
-    for (const id of sel) out[id] = '1';
-  }
-  if (!source || !source.splits) return out;
-  for (const s of source.splits) {
-    if (!sel.includes(s.user_id)) continue;
-    const v = splitVal(s, type);
-    if (v !== '') out[s.user_id] = v;
-    else if (type === 'SHARES' && !(s.user_id in out)) out[s.user_id] = '1';
-  }
-  return out;
-}
-
-/** Default payer: source payer if still active → me → first member. */
-export function initPayer(source, members, meId) {
-  const activeIds = new Set(members.map((m) => m.user_id));
-  const p = source?.payer_id;
-  if (p && activeIds.has(p)) return p;
-  if (meId && activeIds.has(meId)) return meId;
-  return members[0]?.user_id || '';
-}
-
-/** Ids in a copy source that are no longer group members. */
-export function droppedMembers(copyFrom, members) {
-  if (!copyFrom) return [];
-  const activeIds = new Set(members.map((m) => m.user_id));
-  return (copyFrom.splits || []).map((s) => s.user_id).filter((id) => !activeIds.has(id));
-}
-
-/** Values after switching split type: prefill empty boxes with equal defaults (keeps typed values). */
-export function valuesForType(prev, nextType, sel) {
-  if (nextType === 'EQUAL') return prev;
-  const checked = sel.filter((id) => !(id in prev) || prev[id] === '');
-  if (checked.length === 0) return prev;
-  const next = { ...prev };
-  if (nextType === 'PERCENT') {
-    const dist = equalPercent(sel.length);
-    sel.forEach((id, i) => { if (checked.includes(id)) next[id] = dist[i]; });
-  } else if (nextType === 'SHARES') {
-    checked.forEach((id) => { next[id] = '1'; });
-  }
-  return next;
-}
-
-/** Category to select once the group list loads (same fallback chain as web). */
-export function pickCategory(list, prev, sourceCategory) {
-  if (list.some((c) => c.key === prev)) return prev;
-  if (sourceCategory && list.some((c) => c.key === sourceCategory)) return sourceCategory;
-  return list.find((c) => c.key === 'food')?.key
-    || list.find((c) => c.key === 'other')?.key
-    || list[0]?.key
-    || prev;
-}
-
-/** Request body — identical to web ExpenseForm build(). */
-export function buildBody(f) {
-  const {
-    title, amount, payer, type, sel, values, category, spentAt, onlyPresent,
-    tax, tip, fee, origCur, origAmt, fxRate, guests,
-  } = f;
-  const body = {
-    title, amount: Number(amount), payer_id: payer, split_type: type, participant_ids: sel,
-    category, spent_at: spentAt ? new Date(`${spentAt}T12:00:00Z`).toISOString() : null,
-    only_present: onlyPresent,
-  };
-  if (tax !== '') body.tax = Number(tax);
-  if (tip !== '') body.tip = Number(tip);
-  if (fee !== '') body.fee = Number(fee);
-  if (origCur.trim() !== '') {
-    body.orig_currency = origCur.trim().toUpperCase();
-    body.orig_amount = Number(origAmt);
-    body.fx_rate = Number(fxRate);
-  }
-  if (guests.length > 0) {
-    body.guests = guests.map((g) => ({
-      label: g.label, amount_cents: Math.round(Number(g.amount || 0) * 100), covered_by: g.covered_by,
-    }));
-  }
-  if (type === 'EXACT') {
-    body.exact = sel.map((id) => ({ user_id: id, amount_cents: Math.round(Number(values[id] || 0) * 100) }));
-  }
-  if (type === 'PERCENT') {
-    body.percent = sel.map((id) => ({ user_id: id, percent: Number(values[id] || 0) }));
-  }
-  if (type === 'SHARES') {
-    // Empty box means 1 share (avoids 0 -> 422 dead-end).
-    body.shares = sel.map((id) => ({
-      user_id: id,
-      shares: values[id] === '' || values[id] == null ? 1 : Math.max(1, Math.round(Number(values[id] || 1))),
-    }));
-  }
-  return body;
-}
+/** Request body — the shared draftToBody (same as web and the scan cards). */
+export const buildBody = (f) => draftToBody(toDraft(f));
 
 /** Local running totals line (server 422 stays authoritative). */
-export function runningTotals({ type, sel, values, amount }, t) {
-  if (type === 'EQUAL' || sel.length === 0) return null;
-  const nums = sel.map((id) => Number(values[id] || 0));
-  if (nums.some((n) => Number.isNaN(n))) return null;
-  if (type === 'EXACT') {
-    const sum = nums.reduce((a, b) => a + b, 0);
-    return {
-      text: t('forms.expense.totalsExact', { sum: sum.toFixed(2), total: Number(amount || 0).toFixed(2) }),
-      ok: Math.abs(sum - Number(amount || 0)) < 0.005,
-    };
-  }
-  if (type === 'PERCENT') {
-    const sum = nums.reduce((a, b) => a + b, 0);
-    return { text: t('forms.expense.totalsPercent', { sum }), ok: Math.abs(sum - 100) < 1e-9 };
-  }
-  return { text: t('forms.expense.totalsShares', { sum: nums.reduce((a, b) => a + b, 0) }), ok: true };
-}
-
-/** EQUAL explainer: floor + remainder 1¢, who gets +1¢. nameOf(id) → display name. */
-export function equalNote(type, preview, { fmtCents, nameOf }, t) {
-  if (type !== 'EQUAL' || !preview?.shares) return null;
-  const entries = Object.entries(preview.shares);
-  if (entries.length === 0) return null;
-  const vals = entries.map(([, v]) => v);
-  const lo = Math.min(...vals);
-  const hi = Math.max(...vals);
-  const base = fmtCents(lo);
-  if (hi === lo) return t('forms.expense.equalNoteOk', { base, count: entries.length });
-  const lucky = entries.filter(([, v]) => v === hi).map(([id]) => nameOf(id)).join(', ');
-  return t('forms.expense.equalNoteLucky', { base, count: entries.length, lucky });
-}
-
-/**
- * Spent-on date check for the text input: YYYY-MM-DD, a real calendar day, not later than
- * tomorrow (UTC slack, same as the batch validateCard rule). Empty is allowed (server default).
- */
-export function isValidDay(raw, now = new Date()) {
-  const v = String(raw ?? '').trim();
-  if (v === '') return true;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
-  const d = new Date(`${v}T12:00:00Z`);
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) return false;
-  return v <= todayStr(new Date(now.getTime() + 24 * 60 * 60 * 1000));
-}
+export const runningTotals = (f, t) => draftTotals(toDraft({ tax: '', tip: '', fee: '', ...f }), t);
 
 /** Decimal-only typing for secondary money fields (tax/tip/fee/fx/guest/split boxes). */
 export const decimal = (raw) => dec(raw);

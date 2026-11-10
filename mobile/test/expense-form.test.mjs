@@ -112,6 +112,7 @@ test('every m.expense key used by the expense screens exists in en and vi', () =
   const files = [
     '../src/screens/AddExpenseScreen.js', '../src/screens/ExpenseDetailScreen.js', '../src/screens/ScanReceiptsScreen.js',
     '../src/components/expense/ExpenseForm.js', '../src/components/expense/formLogic.js',
+    '../src/components/expense/ExpenseFields.js',
   ];
   const used = new Set();
   for (const f of files) {

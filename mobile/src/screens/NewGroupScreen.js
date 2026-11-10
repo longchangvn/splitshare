@@ -1,18 +1,15 @@
 // New group — native port of the web New-group wizard (GroupWizard / GroupCreated
 // in web/src/pages/Dashboard.jsx).
-// Step 1: name (3–50) + template (catalog labels, free text or None).
+// Step 1: name (3–50). Templates are out of group creation for now.
 // Step 2: invite by email, search contacts, "Your contacts" (top 20 by name).
-// Create: template → POST /groups/from-template, then /members, /invites, /share-link;
-//         no template → POST /groups {name, currency, member_ids, invite_emails}.
+// Create: POST /groups {name, currency, member_ids, invite_emails}.
 // Params: prefillMembers (quick-add Flow 1) preselects people; forExpense → AddExpense.
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Share } from 'react-native';
 import { api, groupIdOf } from '../api/client';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
-import { Button, Card, ChipRow, ErrText, Field, Input, Row, Screen } from '../ui';
-import { getTemplates, subscribeCatalogs } from '../settingsStore';
-import { resolveTemplateKey } from '../shared/wizardUtils';
+import { Button, Card, ErrText, Field, Input, Row, Screen } from '../ui';
 import { inviteRows } from '../shared/inviteResults';
 import { InviteResultList, toastInviteResults } from '../components/group/InviteResultList';
 import { PersonRow } from '../components/home/parts';
@@ -29,8 +26,6 @@ export default function NewGroupScreen({ navigation, route }) {
 
   const [step, setStep] = useState(1);
   const [name, setName] = useState('');
-  const [tpl, setTpl] = useState('');
-  const [templates, setTemplates] = useState([]);
   const [emails, setEmails] = useState('');
   const [cq, setCq] = useState('');
   const [contacts, setContacts] = useState([]);
@@ -40,15 +35,6 @@ export default function NewGroupScreen({ navigation, route }) {
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState(null);
   const [e, setE] = useState(null);
-
-  // Template catalog (device-local, async) + live updates from Settings.
-  useEffect(() => {
-    let live = true;
-    const refresh = () => getTemplates().then((list) => { if (live) setTemplates(list || []); }).catch(() => {});
-    refresh();
-    const off = subscribeCatalogs(refresh);
-    return () => { live = false; off(); };
-  }, []);
 
   // "Your contacts" box — top 20, sorted by display name. Non-fatal on failure.
   useEffect(() => {
@@ -64,9 +50,6 @@ export default function NewGroupScreen({ navigation, route }) {
   }, [created, navigation, t]);
 
   const nameValid = isNameOk(name);
-  const noneLabel = t('common.none');
-  const templateOptions = [noneLabel, ...templates.map((x) => x.label)];
-  const chipValue = tpl.trim() === '' ? noneLabel : tpl;
 
   const toggle = (c) => setPicked((cur) => (cur.some((p) => p.user_id === c.user_id)
     ? cur.filter((p) => p.user_id !== c.user_id)
@@ -88,32 +71,15 @@ export default function NewGroupScreen({ navigation, route }) {
     try {
       const emailList = parseEmails(emails);
       const memberIds = picked.map((p) => p.user_id);
-      const tplKey = resolveTemplateKey(templates, tpl, noneLabel);
-      const tplLabel = tplKey ? (templates.find((x) => x.key === tplKey)?.label || tplKey) : '';
       const trimmed = name.trim();
-      let g;
-      let link = null;
-      let invites = null;
-      if (tplKey) {
-        g = await api.post('/api/v1/groups/from-template', { name: trimmed, currency: DEFAULT_CURRENCY, template: tplKey });
-        const gid0 = groupIdOf(g);
-        if (!gid0) { setE({ message: t('errors.noGroupId') }); return; }
-        if (memberIds.length > 0) await api.post(`/api/v1/groups/${gid0}/members`, { user_ids: memberIds });
-        if (emailList.length > 0) invites = await api.post(`/api/v1/groups/${gid0}/invites`, { emails: emailList });
-        try {
-          const sl = await api.post(`/api/v1/groups/${gid0}/share-link`, {});
-          link = sl?.invite_link || sl?.link || null;
-        } catch { link = null; }
-      } else {
-        g = await api.post('/api/v1/groups', {
-          name: trimmed,
-          currency: DEFAULT_CURRENCY,
-          member_ids: memberIds,
-          invite_emails: emailList,
-        });
-        link = g?.invite_link || null;
-        invites = g?.invites || null;
-      }
+      const g = await api.post('/api/v1/groups', {
+        name: trimmed,
+        currency: DEFAULT_CURRENCY,
+        member_ids: memberIds,
+        invite_emails: emailList,
+      });
+      const link = g?.invite_link || null;
+      const invites = g?.invites || null;
       const gid = groupIdOf(g);
       if (!gid) { setE({ message: t('errors.noGroupId') }); return; }
       const inviteResult = invites ? inviteRows(invites) : [];
@@ -127,7 +93,6 @@ export default function NewGroupScreen({ navigation, route }) {
         link,
         name: g?.group?.name || trimmed,
         currency: DEFAULT_CURRENCY,
-        template: tplLabel,
         people: [...picked.map((p) => p.display_name), ...emailList],
         inviteResult,
       });
@@ -154,7 +119,6 @@ export default function NewGroupScreen({ navigation, route }) {
           <Text style={s.doneName} accessibilityRole="header">{created.name}</Text>
           <View style={s.pills}>
             <Text style={s.pill}>{created.currency}</Text>
-            {created.template ? <Text style={s.pill}>{created.template}</Text> : null}
           </View>
           {created.people.length > 0 ? <Text style={s.people}>{created.people.join(', ')}</Text> : null}
         </View>
@@ -215,21 +179,6 @@ export default function NewGroupScreen({ navigation, route }) {
               returnKeyType="next"
               onSubmitEditing={() => nameValid && setStep(2)}
               accessibilityLabel={t('wizard.groupName')}
-            />
-          </Field>
-          <Field label={t('wizard.template')}>
-            <ChipRow
-              options={templateOptions.map((label) => ({ value: label, label }))}
-              value={chipValue}
-              onChange={(v) => setTpl(v === noneLabel ? '' : v)}
-            />
-            <Input
-              style={{ marginTop: 10 }}
-              value={tpl}
-              onChangeText={setTpl}
-              placeholder={t('m.home.templateFree')}
-              autoCapitalize="none"
-              accessibilityLabel={t('wizard.template')}
             />
           </Field>
         </Card>

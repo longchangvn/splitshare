@@ -3,9 +3,16 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { api, setTokens, clearTokens, getTokens, loadApiUrlOverride } from '../api/client';
+import { clearSplitMemory } from '../splitMemoryStore';
 
 const AuthCtx = createContext(null);
 export const useAuth = () => useContext(AuthCtx);
+
+// Email sign-ups use the email as username: never show that as a public @handle.
+export const publicHandle = (username) => (username && !username.includes('@') ? username : null);
+
+/** Name to show for a user: display name, else email, else public handle. */
+export const userLabel = (u) => u?.display_name?.trim() || u?.email || publicHandle(u?.username) || '';
 
 const CRED_USER_KEY = 'ss_cred_user';
 const CRED_PW_KEY = 'ss_cred_pw';
@@ -94,10 +101,18 @@ export function AuthProvider({ children }) {
       await saveSession(d);
       return d;
     },
+    // Email-only sign-up: payload { email, password }; the email is the username.
     register: async (payload) => {
       const d = await api.post('/api/v1/auth/register', payload);
       await saveSession(d);
       return d; // includes auto_joined_groups
+    },
+    // Email one-time code: request → { resend_after_seconds }, verify → token pair.
+    requestOtp: async (email) => api.post('/api/v1/auth/otp/request', { email }),
+    verifyOtp: async (email, code) => {
+      const d = await api.post('/api/v1/auth/otp/verify', { email, code });
+      await saveSession(d);
+      return d;
     },
     google: async (id_token) => {
       const d = await api.post('/api/v1/auth/google', { id_token });
@@ -111,6 +126,14 @@ export function AuthProvider({ children }) {
       return d;
     },
     verifyEmail: async (token) => api.post('/api/v1/auth/verify-email', { token }),
+    // Profile → Verify email: in-app 6-digit code, or a fresh /verify/{token} link.
+    requestVerifyCode: async () => api.post('/api/v1/me/verify-email/code'),
+    confirmVerifyCode: async (code) => {
+      const u = await api.post('/api/v1/me/verify-email/confirm', { code });
+      if (u) setUser(u);
+      return u;
+    },
+    sendVerifyLink: async () => api.post('/api/v1/me/verify-email/link'),
     forgot: async (email) => api.post('/api/v1/auth/forgot', { email }),
     logout: async () => {
       const t = await getTokens();
@@ -119,6 +142,7 @@ export function AuthProvider({ children }) {
       } finally {
         await clearTokens();
         await clearCredentials();
+        await clearSplitMemory();
         setUser(null);
       }
     },

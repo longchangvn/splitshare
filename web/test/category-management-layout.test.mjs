@@ -308,18 +308,6 @@ test('mobile bottom navigation does not show a press-state flash', async () => {
   assert.match(styles, /\.bottom-nav-tab\s*\{[\s\S]*?-webkit-tap-highlight-color:\s*transparent;/);
 });
 
-test('template editor uses a compact centered card on mobile', async () => {
-  const [settings, styles] = await Promise.all([
-    readFile(new URL('../src/pages/Settings.jsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
-  ]);
-
-  assert.match(settings, /content: 'wizard-modal-content template-modal-content'/);
-  assert.match(settings, /\n\s*centered\n\s*size=\{440\}/);
-  assert.doesNotMatch(settings, /marginTop:\s*'auto'/);
-  assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.template-modal-content\s*\{[\s\S]*?width:\s*calc\(100vw - 32px\) !important;[\s\S]*?border-radius:\s*20px;/);
-});
-
 test('mobile form dialogs use the shared compact centered card instead of fullscreen sheets', async () => {
   const [groupDetail, expenseDetail, styles] = await Promise.all([
     readFile(new URL('../src/pages/GroupDetail.jsx', import.meta.url), 'utf8'),

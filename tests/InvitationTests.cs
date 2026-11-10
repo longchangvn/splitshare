@@ -169,8 +169,10 @@ public sealed class InvitationTests
         var a = (InviteAccepted)r.Data!;
         Assert.Equal(gid, a.GroupId);
         var u = await db.Users.SingleAsync(x => x.Email == "jane.doe@x.io");
-        Assert.Equal("jane.doe", u.Username);
-        Assert.Equal("jane.doe", u.DisplayName);
+        // Email is the username; no display name, so the email is shown.
+        Assert.Equal("jane.doe@x.io", u.Username);
+        Assert.Equal("", u.DisplayName);
+        Assert.Equal("jane.doe@x.io", u.Name);
         Assert.NotNull(u.EmailVerifiedAt);
         Assert.Equal("member", await groups.RoleAsync(gid, u.Id));
         // The other group's invite waits for its own link.
@@ -183,7 +185,7 @@ public sealed class InvitationTests
     }
 
     [Fact]
-    public async Task Accept_Picks_A_Free_Username()
+    public async Task Accept_Uses_The_Email_As_Username_Even_When_Local_Part_Is_Taken()
     {
         var (db, auth, groups, mail) = Setup();
         var owner = await Reg(auth, "owner7");
@@ -192,7 +194,7 @@ public sealed class InvitationTests
         await groups.InviteEmailsAsync(owner.Id, gid, ["sam@other.io"]);
 
         Assert.True((await groups.AcceptInvitationAsync(TokenFor(mail, "sam@other.io"), "secret123", auth)).Ok);
-        Assert.Equal("sam-1", (await db.Users.SingleAsync(x => x.Email == "sam@other.io")).Username);
+        Assert.Equal("sam@other.io", (await db.Users.SingleAsync(x => x.Email == "sam@other.io")).Username);
     }
 
     [Fact]

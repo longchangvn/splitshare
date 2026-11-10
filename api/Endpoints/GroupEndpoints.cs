@@ -33,7 +33,7 @@ public static class GroupEndpoints
         var members = await db.GroupMembers.Where(m => m.GroupId == groupId).ToListAsync();
         var ids = members.Select(m => m.UserId).ToList();
         var users = await db.Users.Where(u => ids.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => new { u.DisplayName, u.Username });
+            .ToDictionaryAsync(u => u.Id, u => new { DisplayName = u.Name, u.Username });
         var myRole = members.FirstOrDefault(m => m.UserId == me)?.Role;
         var baseUrl = (config["App:BaseUrl"] ?? "http://localhost:3000").TrimEnd('/');
         // Stable join link for owners/treasurers — same token as email invites.
@@ -94,9 +94,6 @@ public static class GroupEndpoints
 
         api.MapPatch("/groups/{id:guid}/status", async (Guid id, GroupStatusDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.UpdateStatusAsync(Me(p), id, d.Status)));
-
-        api.MapPost("/groups/from-template", async (TemplateDto d, ClaimsPrincipal p, GroupService svc) =>
-            ToResult(await svc.FromTemplateAsync(Me(p), d.Name, d.Currency, d.Template, d.Budget, d.FlatFee)));
 
         api.MapPatch("/groups/{id:guid}/members/{uid:guid}", async (Guid id, Guid uid, RoleDto d, ClaimsPrincipal p, GroupService svc) =>
             ToResult(await svc.SetRoleAsync(Me(p), id, uid, d.Role)));
@@ -199,7 +196,6 @@ public static class GroupEndpoints
     public sealed record RenameGroupDto(string Name);
     public sealed record SettingsDto(decimal? Budget, int? BudgetAlertPct, string? Mode, decimal? FlatFee);
     public sealed record GroupStatusDto(string? Status);
-    public sealed record TemplateDto(string Name, string? Currency, string Template, decimal? Budget, decimal? FlatFee);
     public sealed record RoleDto(string Role);
     public sealed record DepositDto(bool Paid);
     public sealed record FlatFeeDto(Guid PayerId, string? Title);

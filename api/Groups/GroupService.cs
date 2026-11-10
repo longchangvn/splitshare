@@ -164,7 +164,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         var added = new List<string>();
         var pending = new List<string>();
         var outbox = new List<(string To, string Status, EmailContent Mail)>();
-        var inviter = await db.Users.Where(u => u.Id == actorId).Select(u => u.DisplayName).FirstOrDefaultAsync()
+        var inviter = await db.Users.Where(u => u.Id == actorId).Select(u => u.DisplayName == "" ? u.Email : u.DisplayName).FirstOrDefaultAsync()
             ?? "A friend";
         foreach (var em in normalized)
         {
@@ -187,7 +187,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
                 : IsGmail(em)
                     ? "Open the link and continue with your Google account to join the group."
                     : "Open the link and choose a password to join the group.";
-            outbox.Add((em, "invited", EmailTemplates.GroupInvite(inviter, g.Name, user?.DisplayName, how,
+            outbox.Add((em, "invited", EmailTemplates.GroupInvite(inviter, g.Name, user?.Name, how,
                 InvitationLink(BaseUrl, raw), InviteDays)));
         }
         await db.SaveChangesAsync();
@@ -251,7 +251,7 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         if (err is not null) return err;
         if (inv!.ConsumedAt is not null) return InviteUsed();
         var memberCount = await db.GroupMembers.CountAsync(m => m.GroupId == g!.Id);
-        var inviter = await db.Users.Where(u => u.Id == inv.InvitedBy).Select(u => u.DisplayName).FirstOrDefaultAsync()
+        var inviter = await db.Users.Where(u => u.Id == inv.InvitedBy).Select(u => u.DisplayName == "" ? u.Email : u.DisplayName).FirstOrDefaultAsync()
             ?? "A friend";
         var exists = await db.Users.AnyAsync(u => u.Email == inv.Email);
         return new(true, null, null, new InvitePreview(inv.Email, g!.Name, g.Currency, memberCount, inviter,
@@ -573,53 +573,6 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
         g.ShareToken = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
         await db.SaveChangesAsync();
         return new(true, null, null, new NewInviteLink($"{BaseUrl}/s/{g.ShareToken}"));
-    }
-
-    public static readonly IReadOnlyDictionary<string, (string Mode, decimal? Budget, decimal? FlatFee, string[] Recurring)> Templates
-        = new Dictionary<string, (string, decimal?, decimal?, string[])>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["roommates"] = ("shared", null, null, ["Rent|1500|monthly", "Wifi|30|monthly"]),
-            ["beach-trip"] = ("trip", 2000m, null, []),
-            ["wedding"] = ("event", 10000m, 200m, []),
-        };
-
-    /// <summary>One-click configured group: mode + budget + flat fee + inactive recurring drafts.
-    /// No template validation: an unknown (or empty) template simply creates a plain
-    /// group — only known template keys contribute presets. Explicit budget/flat fee
-    /// always apply.</summary>
-    public async Task<GroupOp> FromTemplateAsync(Guid creatorId, string name, string? currency,
-        string template, decimal? budget, decimal? flatFee)
-    {
-        var created = await CreateAsync(creatorId, name, currency, [], []);
-        if (!created.Ok) return created;
-        var g = ((GroupCreated)created.Data!).Group;
-        var key = template?.Trim();
-        if (!string.IsNullOrWhiteSpace(key) && Templates.TryGetValue(key, out var t))
-        {
-            g.Mode = t.Mode;
-            var effBudget = budget ?? t.Budget;
-            if (effBudget is { } eb) g.BudgetCents = (long)(eb * 100m);
-            var effFee = flatFee ?? t.FlatFee;
-            if (effFee is { } ef) g.FlatFeeCents = (long)(ef * 100m);
-            foreach (var spec in t.Recurring)
-            {
-                var parts = spec.Split('|');
-                db.RecurringRules.Add(new Models.RecurringRule
-                {
-                    GroupId = g.Id, Title = parts[0], AmountCents = (long)(decimal.Parse(parts[1]) * 100m),
-                    Frequency = parts[2], PayerId = creatorId,
-                    ParticipantIdsJson = System.Text.Json.JsonSerializer.Serialize(new[] { creatorId }),
-                    NextRunAt = DateTime.UtcNow.AddDays(30), Active = false, CreatedBy = creatorId
-                });
-            }
-        }
-        else
-        {
-            if (budget is { } b) g.BudgetCents = (long)(b * 100m);
-            if (flatFee is { } f) g.FlatFeeCents = (long)(f * 100m);
-        }
-        await db.SaveChangesAsync();
-        return new(true, null, null, new GroupCreated(g, InviteLink(BaseUrl, g.InviteToken), 0, 0));
     }
 
     public async Task<object?> BudgetViewAsync(Guid groupId)

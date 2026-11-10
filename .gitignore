@@ -26,3 +26,7 @@ pgdata/
 # os / temp
 .DS_Store
 /tmp/
+
+# playwright (web E2E artifacts)
+web/test-results/
+web/playwright-report/

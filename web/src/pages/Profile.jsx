@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Button, Group, Modal, Stack, Tabs, Text, TextInput, Title, PasswordInput } from '@mantine/core';
+import { Anchor, Button, Group, Modal, Stack, Tabs, Text, TextInput, Title, PasswordInput } from '@mantine/core';
 import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { Err, useAuth } from '../auth.jsx';
+import { Err, publicHandle, useAuth, userLabel } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
+import { OtpStep } from './AuthPages.jsx';
 import { useT } from '../prefs.jsx';
 
 export function Profile() {
@@ -13,7 +14,7 @@ export function Profile() {
   const { user, setUser, logout } = useAuth();
   const nav = useNavigate();
   const [me, setMe] = useState(user || null);
-  const [name, setName] = useState(user?.display_name || '');
+  const [name, setName] = useState(user?.display_name === user?.email ? '' : user?.display_name || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
@@ -26,9 +27,12 @@ export function Profile() {
   const [tab, setTab] = useState('account');
   const [logoutOpen, setLogoutOpen] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const hasPw = me?.has_password !== false;
+  // The API shows the email when no display name is set: edit an empty field then.
+  const ownName = (d) => (d?.display_name === d?.email ? '' : d?.display_name || '');
 
   useEffect(() => {
-    api.get('/api/v1/me').then((d) => { setMe(d); setUser(d); setName(d.display_name); setPhone(d.phone || ''); }).catch(setE);
+    api.get('/api/v1/me').then((d) => { setMe(d); setUser(d); setName(ownName(d)); setPhone(d.phone || ''); }).catch(setE);
     api.get('/api/v1/me/handles').then(setHandles).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -63,6 +67,7 @@ export function Profile() {
     try {
       await api.patch('/api/v1/me/password', { current_password: cur || null, new_password: next });
       setCur(''); setNext('');
+      if (!hasPw) { const d = { ...me, has_password: true }; setMe(d); setUser(d); }
       notifications.show({ title: t('profile.passwordChanged'), color: 'teal' });
       setE(null);
     } catch (err) { setE(err); } finally { setPwBusy(false); }
@@ -76,9 +81,9 @@ export function Profile() {
       labels: { confirm: t('common.delete'), cancel: t('common.cancel') },
       confirmProps: { color: 'red' },
       onConfirm: async () => {
-        modals.updateModal(mid, { confirmProps: { color: 'red', loading: true } });
-        try { await api.del('/api/v1/me'); modals.closeModal(mid); await logout(); nav('/login'); }
-        catch (err) { modals.closeModal(mid); setE(err); }
+        modals.updateModal({ modalId: mid, confirmProps: { color: 'red', loading: true } });
+        try { await api.del('/api/v1/me'); modals.close(mid); await logout(); nav('/login'); }
+        catch (err) { modals.close(mid); setE(err); }
       },
     });
   };
@@ -119,10 +124,23 @@ export function Profile() {
           </div>
 
           <Tabs.Panel value="account" className="profile-panel">
+            {me && !me.email_verified && (
+              <VerifyEmailPanel email={me.email} onVerified={(d) => { setMe(d); setUser(d); }} />
+            )}
             <form onSubmit={save}>
               <Stack gap="sm">
-                <Text size="sm" c="dimmed">@{me?.username} · {me?.email} {me && !me.email_verified && t('profile.unverified')}</Text>
-                <TextInput label={t('profile.displayName')} required value={name} onChange={(x) => setName(x.target.value)} />
+                <Title order={3}>{userLabel(me)}</Title>
+                <Text size="sm" c="dimmed">
+                  {publicHandle(me?.username) && `@${me.username} · `}{me?.email} {me && !me.email_verified && t('profile.unverified')}
+                </Text>
+                <TextInput
+                  label={t('profile.displayName')}
+                  description={t('profile.displayNameHint')}
+                  placeholder={me?.email}
+                  maxLength={50}
+                  value={name}
+                  onChange={(x) => setName(x.target.value)}
+                />
                 <TextInput label={t('profile.phone')} value={phone} onChange={(x) => setPhone(x.target.value)} />
                 <button type="submit" className="gd-action-btn profile-primary-btn" disabled={saving}>
                   <ProfileIcon name="save" />
@@ -135,12 +153,14 @@ export function Profile() {
           <Tabs.Panel value="password" className="profile-panel">
             <form onSubmit={changePw}>
               <Stack gap="sm">
-                <Text size="sm" c="dimmed">{t('profile.passwordHint')}</Text>
-                <PasswordInput label={t('profile.currentPassword')} autoComplete="current-password" value={cur} onChange={(x) => setCur(x.target.value)} />
+                <Text size="sm" c="dimmed">{t(hasPw ? 'profile.passwordHint' : 'profile.setPasswordHint')}</Text>
+                {hasPw && (
+                  <PasswordInput label={t('profile.currentPassword')} autoComplete="current-password" value={cur} onChange={(x) => setCur(x.target.value)} />
+                )}
                 <PasswordInput label={t('profile.newPassword')} description={t('profile.passwordRule')} autoComplete="new-password" value={next} onChange={(x) => setNext(x.target.value)} />
                 <button type="submit" className="gd-action-btn profile-primary-btn" disabled={pwBusy}>
                   <ProfileIcon name="lock" />
-                  <span>{pwBusy ? t('profile.saving') : t('profile.changePassword')}</span>
+                  <span>{pwBusy ? t('profile.saving') : t(hasPw ? 'profile.changePassword' : 'auth.setPassword')}</span>
                 </button>
               </Stack>
             </form>
@@ -217,6 +237,76 @@ export function Profile() {
         </div>
       </Modal>
     </Shell>
+  );
+}
+
+/**
+ * Unverified email: verify in-app with a 6-digit code (shared OtpStep), or email a
+ * fresh /verify/{token} link instead. onVerified gets the updated /me user.
+ */
+function VerifyEmailPanel({ email, onVerified }) {
+  const t = useT();
+  const [mode, setMode] = useState(null); // null | 'code'
+  const [wait, setWait] = useState(60);
+  const [busy, setBusy] = useState(null); // 'code' | 'link'
+  const [linkSent, setLinkSent] = useState(false);
+  const [e, setE] = useState(null);
+
+  const refresh = () => api.get('/api/v1/me').then(onVerified).catch(setE);
+  const run = async (kind, path, ok) => {
+    if (busy) return;
+    setBusy(kind);
+    setE(null);
+    try { ok(await api.post(path)); } catch (err) {
+      if (err?.code === 'ALREADY_VERIFIED') refresh();
+      else if (kind === 'code' && err?.code === 'OTP_COOLDOWN') setMode('code'); // a code is already out
+      else setE(err);
+    } finally { setBusy(null); }
+  };
+  const sendCode = () => run('code', '/api/v1/me/verify-email/code', (r) => {
+    setWait(r?.resend_after_seconds ?? 60);
+    setMode('code');
+  });
+  const sendLink = () => run('link', '/api/v1/me/verify-email/link', () => setLinkSent(true));
+
+  return (
+    <div className="profile-verify" role="region" aria-label={t('profile.verifyTitle')}>
+      <Stack gap="sm">
+        <Text size="sm" fw={700}>{t('profile.verifyTitle')}</Text>
+        {mode === 'code' ? (
+          <OtpStep
+            email={email}
+            resendAfter={wait}
+            submitLabel={t('profile.verifyEmail')}
+            submit={(code) => api.post('/api/v1/me/verify-email/confirm', { code })}
+            request={() => api.post('/api/v1/me/verify-email/code')}
+            onSignedIn={(d) => {
+              onVerified(d);
+              notifications.show({ title: t('profile.emailVerifiedToast'), color: 'teal' });
+            }}
+          />
+        ) : (
+          <>
+            <Text size="sm" c="dimmed">{t('profile.verifyHint', { email })}</Text>
+            <Group gap="sm">
+              <Button className="wizard-primary" loading={busy === 'code'} disabled={busy === 'link'} onClick={sendCode}>
+                {t('profile.verifyEmail')}
+              </Button>
+              <Button variant="subtle" loading={busy === 'link'} disabled={busy === 'code'} onClick={sendLink}>
+                {t('profile.sendLinkInstead')}
+              </Button>
+            </Group>
+          </>
+        )}
+        {linkSent && <Text size="sm" aria-live="polite">{t('profile.verifyLinkSent', { email })}</Text>}
+        {mode === 'code' && !linkSent && (
+          <Anchor component="button" type="button" size="sm" onClick={sendLink} disabled={busy === 'link'}>
+            {t('profile.sendLinkInstead')}
+          </Anchor>
+        )}
+        <Err e={e} />
+      </Stack>
+    </div>
   );
 }
 

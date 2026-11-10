@@ -19,6 +19,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
+    public DbSet<EmailOtp> EmailOtps => Set<EmailOtp>();
     public DbSet<PendingInvite> PendingInvites => Set<PendingInvite>();
     public DbSet<MembershipArchive> MembershipArchives => Set<MembershipArchive>();
     public DbSet<ExpenseGuest> ExpenseGuests => Set<ExpenseGuest>();
@@ -39,7 +40,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.Username).IsUnique();
             e.HasIndex(x => x.Email).IsUnique();
-            e.Property(x => x.Username).HasMaxLength(30);
+            e.Property(x => x.Username).HasMaxLength(320);
             e.Property(x => x.Email).HasMaxLength(320);
             e.Property(x => x.DisplayName).HasMaxLength(50);
         });
@@ -128,6 +129,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             e.HasKey(x => x.Id);
             e.HasIndex(x => x.TokenHash).IsUnique();
+        });
+        b.Entity<EmailOtp>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.Email, x.CreatedAt });
+            e.Property(x => x.Email).HasMaxLength(320);
+            e.Property(x => x.CodeHash).HasMaxLength(128);
         });
         b.Entity<PendingInvite>(e =>
         {

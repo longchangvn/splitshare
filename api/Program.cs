@@ -78,7 +78,7 @@ else
 builder.Services.AddScoped<ReceiptScanService>();
 builder.Services.AddSingleton<IFileStore, LocalFileStore>();
 builder.Services.AddHttpClient<GoogleVerifier>();
-// Email: Email:Provider "sendgrid"/"twilio" (Twilio SendGrid, primary) | "onesignal" | unset = logging stub.
+// Email: Email:Provider "smtp"/"gmail" (Gmail SMTP, primary) | "sendgrid"/"twilio" | "onesignal" | unset = logging stub.
 builder.Services.AddHttpClient(OneSignalEmailSender.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddHttpClient(TwilioSendGridEmailSender.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
 builder.Services.AddSingleton<IEmailSender>(sp => EmailSenderFactory.Create(
@@ -86,7 +86,8 @@ builder.Services.AddSingleton<IEmailSender>(sp => EmailSenderFactory.Create(
     sp.GetRequiredService<IHttpClientFactory>(),
     sp.GetRequiredService<ILogger<OneSignalEmailSender>>(),
     sp.GetRequiredService<ILogger<StubEmailSender>>(),
-    sp.GetRequiredService<ILogger<TwilioSendGridEmailSender>>()));
+    sp.GetRequiredService<ILogger<TwilioSendGridEmailSender>>(),
+    sp.GetRequiredService<ILogger<SmtpEmailSender>>()));
 // Push notifications (add-onesignal-group-notifications): provider is config-driven
 // (Notification:Provider — unset = null provider, "onesignal" = OneSignal REST).
 builder.Services.AddHttpClient(OneSignalProvider.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
@@ -137,7 +138,11 @@ builder.Services.AddRateLimiter(o =>
         ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 5, Window = TimeSpan.FromMinutes(1), QueueLimit = 0
+            // Config-driven (default 5/min, unchanged) so the E2E suite — every test
+            // shares one partition on localhost — can raise it instead of 429ing.
+            // Same pattern as Ocr:RateLimit:* below. Set via RateLimit__AuthIp__PermitLimit.
+            PermitLimit = builder.Configuration.GetValue("RateLimit:AuthIp:PermitLimit", 5),
+            Window = TimeSpan.FromMinutes(1), QueueLimit = 0
         }));
     // Push token registration is cheap but write-heavy: cap per user (IP fallback).
     o.AddPolicy(DeviceEndpoints.RateLimitPolicy, ctx =>
@@ -252,3 +257,7 @@ app.Run();
 
 static string Mask(string c) =>
     System.Text.RegularExpressions.Regex.Replace(c, @"Password=[^;]+", "Password=***", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+// Exposes the entry point to WebApplicationFactory<Program> (tests.e2e) so the E2E
+// suite boots this exact pipeline in-process. No behavior change.
+public partial class Program { }

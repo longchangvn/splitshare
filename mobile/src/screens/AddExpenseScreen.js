@@ -13,6 +13,7 @@ import {
   Screen, SkeletonCard, Empty, ErrText, Button,
 } from '../ui';
 import ExpenseForm from '../components/expense/ExpenseForm';
+import { loadLastSplit, peekLastSplit } from '../splitMemoryStore';
 
 export default function AddExpenseScreen({ route, navigation }) {
   const t = useT();
@@ -34,6 +35,8 @@ export default function AddExpenseScreen({ route, navigation }) {
         api.get(`/api/v1/groups/${groupId}`),
         expenseId ? api.get(`/api/v1/expenses/${expenseId}`) : Promise.resolve(null),
         copyParam && typeof copyParam !== 'object' ? api.get(`/api/v1/expenses/${copyParam}`) : Promise.resolve(null),
+        // Remembered split (specs/007): fills the cache that peekLastSplit reads below.
+        loadLastSplit(meId, groupId),
       ]);
       setGroup(g?.group ? { ...g, ...g.group } : g);
       if (det) setExisting(det.expense || det);
@@ -44,7 +47,7 @@ export default function AddExpenseScreen({ route, navigation }) {
     } finally {
       setLoading(false);
     }
-  }, [groupId, expenseId, copyParam]);
+  }, [groupId, expenseId, copyParam, meId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -100,6 +103,7 @@ export default function AddExpenseScreen({ route, navigation }) {
         copyFrom={expenseId ? null : copyFrom}
         currency={currency}
         meId={meId}
+        initialSplit={expenseId ? null : peekLastSplit(meId, groupId)}
         onDone={() => navigation.goBack()}
         onSaveNew={expenseId ? undefined : () => { setCopyFrom(null); setFormKey((k) => k + 1); }}
         onCancel={() => navigation.goBack()}

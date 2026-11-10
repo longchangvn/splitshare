@@ -25,13 +25,21 @@ export function fileSizeOf(uri) {
   }
 }
 
+const MIME_BY_EXT = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+  heic: 'image/heic', heif: 'image/heif',
+};
+
 /** Image-picker asset → mobile file object. */
 export function fileFromAsset(asset, index = 0) {
-  const type = asset?.mimeType || 'image/jpeg';
-  const ext = type.split('/')[1] || 'jpg';
+  const name = String(asset?.fileName || '');
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  // Camera/Android assets always carry mimeType; some iOS library assets only have a name.
+  const type = String(asset?.mimeType || MIME_BY_EXT[ext] || 'image/jpeg').toLowerCase();
+  const suffix = type.split('/')[1] || 'jpg';
   return {
     uri: asset?.uri,
-    name: asset?.fileName || `receipt-${Date.now()}-${index}.${ext === 'jpeg' ? 'jpg' : ext}`,
+    name: name || `receipt-${Date.now()}-${index}.${suffix === 'jpeg' ? 'jpg' : suffix}`,
     type,
     size: Number(asset?.fileSize) || fileSizeOf(asset?.uri) || 0,
     width: Number(asset?.width) || 0,
@@ -39,8 +47,23 @@ export function fileFromAsset(asset, index = 0) {
   };
 }
 
+/** Formats the scan API accepts (api/Expenses/ReceiptScanService.cs ScanMimes). */
+export const SCAN_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+export const mimeOf = (file) => String(file?.type || '').toLowerCase();
+export const isScannable = (file) => SCAN_MIMES.includes(mimeOf(file));
+
 export const isImageFile = (file) => !file?.type || String(file.type).startsWith('image/');
 export const isTooBig = (file) => Number(file?.size || 0) > MAX_FILE_BYTES;
+
+/** First bytes of a local file; null when the platform can't read them. */
+async function headBytes(uri, count = 3) {
+  try {
+    const bytes = await new FsFile(uri).bytes();
+    return bytes && bytes.length >= count ? Array.from(bytes.slice(0, count)) : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Ask camera vs library (native action sheet via Alert). Resolves 'camera' | 'library' | null.
@@ -76,6 +99,9 @@ export async function pickImages(source, { multiple = false, limit = 1 } = {}) {
     exif: false,
     allowsMultipleSelection: multiple && limit > 1,
     selectionLimit: multiple ? Math.max(1, limit) : 1,
+    // iOS hands over HEIC for library photos by default; ask for the compatible (JPEG)
+    // representation so a scan upload is never a format the API rejects.
+    preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode?.Compatible,
   });
   if (r.canceled) return { files: [], denied: false };
   return { files: (r.assets || []).slice(0, Math.max(1, limit)).map(fileFromAsset), denied: false };
@@ -91,6 +117,10 @@ async function reencode(file, maxEdge, quality, name) {
     compress: quality,
     format: ImageManipulator.SaveFormat.JPEG,
   });
+  const head = await headBytes(out.uri);
+  // The manipulator writes JPEG; when it hands back something else (e.g. an untouched HEIC)
+  // the scan API would only answer with a bare 422, so fail here instead.
+  if (head && !(head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff)) throw new Error('IMAGE_UNREADABLE');
   return {
     uri: out.uri,
     name,
@@ -117,7 +147,43 @@ export function compressForScan(file) {
   return reencode(file, SCAN_MAX_EDGE, SCAN_QUALITY, `receipt-scan-${Date.now()}.jpg`);
 }
 
-const part = (file) => ({ uri: file.uri, name: file.name || 'receipt.jpg', type: file.type || 'image/jpeg' });
+/**
+ * The file to upload for a scan: the JPEG re-encode when it works, else the original photo only
+ * when the API already accepts it. Throws (code SCAN_UNSUPPORTED_IMAGE) when a HEIC/HEIF photo
+ * could not be converted — sending it would come back as a generic 422 instead.
+ */
+export async function prepareScanFile(file) {
+  try {
+    return await compressForScan(file);
+  } catch {
+    if (isScannable(file)) return file;
+    const err = new Error(
+      `${file?.name || 'This photo'} (${mimeOf(file) || 'unknown type'}) is not jpg/png/webp and could not be converted.`
+    );
+    err.code = 'SCAN_UNSUPPORTED_IMAGE';
+    throw err;
+  }
+}
+
+/** One-line technical reason for a failed scan (the toast stays localized). */
+export function scanErrorDetail(err) {
+  if (err?.status) return `HTTP ${err.status}${err.code ? ` ${err.code}` : ''}: ${err.message || ''}`.trim();
+  return String(err?.message || err || '');
+}
+
+/**
+ * Multipart part for a local file.
+ * Expo installs its own fetch (`expo/fetch`) as the global one: it serializes FormData itself and
+ * accepts only strings, Blobs, or objects with a `bytes()` method — a bare React Native
+ * `{ uri, name, type }` part throws "Unsupported FormDataPart implementation" before anything is
+ * sent. `uri` stays on the object so React Native's legacy FormData still understands the part.
+ */
+const part = (file) => ({
+  uri: file.uri,
+  name: file.name || 'receipt.jpg',
+  type: file.type || 'image/jpeg',
+  bytes: () => new FsFile(file.uri).bytes(),
+});
 
 /** POST /groups/:id/expenses/scan (multipart field `file`). */
 export function postScan(groupId, file) {

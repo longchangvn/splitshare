@@ -64,7 +64,7 @@ public sealed class LedgerService(AppDbContext db)
         var memberIds = await db.GroupMembers.Where(m => m.GroupId == groupId)
             .Select(m => m.UserId).ToListAsync();
         var users = await db.Users.Where(u => memberIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+            .ToDictionaryAsync(u => u.Id, u => u.Name);
 
         var nets = memberIds.ToDictionary(id => id, _ => 0L);
         var expenses = await db.Expenses
@@ -338,7 +338,7 @@ public sealed class LedgerService(AppDbContext db)
             foreach (var s in e.Splits) ids.Add(s.UserId);
         }
         var names = await db.Users.Where(u => ids.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+            .ToDictionaryAsync(u => u.Id, u => u.Name);
 
         return ids
             .Select(id => new MemberSummary(
@@ -371,7 +371,7 @@ public sealed class LedgerService(AppDbContext db)
             .Select(a => a.UserId).ToListAsync();
         var names = await db.Users
             .Where(u => userIds.Contains(u.Id) || archivedIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => u.DisplayName);
+            .ToDictionaryAsync(u => u.Id, u => u.Name);
 
         var rows = new List<(DateTime At, LedgerItem Row)>();
         if (f.Type is "all" or "expense")

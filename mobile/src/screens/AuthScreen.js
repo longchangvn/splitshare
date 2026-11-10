@@ -1,22 +1,242 @@
 // Auth — web parity: web/src/pages/AuthPages.jsx (AuthLayout, Login, Register, Forgot, Reset)
 // adapted to native: dark hero with brand mark + language switch, bright form card,
 // biometric unlock, Google with a paste-token fallback, dev-only API URL switcher.
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Alert, Pressable } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useAuth, savedCredentials } from '../auth/AuthContext';
 import { colors, type } from '../theme';
 import { api, setTokens } from '../api/client';
-import { Button, Field, Input, DevApiUrlCard } from '../ui';
+import { Button, Field, Input, Segmented, DevApiUrlCard } from '../ui';
 import { useT } from '../i18n';
 import { AuthLayout, AccountErr, PasswordInput, a } from '../components/account/AccountKit';
 import { nativeGoogleAvailable, useGoogleIdToken } from '../auth/google';
 import { InvitationBanner } from '../components/account/InvitationBanner';
 
-// Same client-side rules as before / server (username 3–30 a-z0-9_.-, pw 8+ letter+digit, name 1–50).
-const USER_RE = /^[a-z0-9_.-]{3,30}$/;
+// Same client-side rules as the server (pw 8+ letter+digit). Sign-up is email-only:
+// the email is the username and the display name is set later in Profile.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const isEmail = (v) => EMAIL_RE.test((v || '').trim());
 export const validPassword = (pw) => pw.length >= 8 && /[a-zA-Z]/.test(pw) && /\d/.test(pw);
 const localErr = (message) => ({ friendly: true, message });
+
+/** Email field + primary button; calls onContinue(normalizedEmail) when valid. */
+function EmailStep({ initial = '', title, onContinue, busy, icon = '✉' }) {
+  const t = useT();
+  const [email, setEmail] = useState(initial);
+  const [err, setErr] = useState(null);
+  const go = () => {
+    const v = email.trim().toLowerCase();
+    if (!isEmail(v)) return setErr(t('auth.emailInvalid'));
+    setErr(null);
+    return onContinue(v);
+  };
+  return (
+    <>
+      <Field label={t('auth.email')} error={err}>
+        <Input
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          autoComplete="email"
+          textContentType="emailAddress"
+          placeholder={t('auth.emailPlaceholder')}
+          returnKeyType="go"
+          onSubmitEditing={go}
+          error={!!err}
+          accessibilityLabel={t('auth.email')}
+        />
+      </Field>
+      <Button style={{ marginTop: 16 }} icon={icon} title={title || t('auth.continue')} busy={busy} disabled={!email.trim()} onPress={go} />
+    </>
+  );
+}
+
+/** The chosen email, with a "Change" link when onChange is given. */
+function EmailChip({ email, onChange }) {
+  const t = useT();
+  return (
+    <View style={[a.links, { justifyContent: 'flex-start', marginTop: 12 }]}>
+      <Text style={[type.h3, { flexShrink: 1 }]} numberOfLines={1}>{email}</Text>
+      {onChange ? <Text style={a.linkT} onPress={onChange} accessibilityRole="link">{t('auth.changeEmail')}</Text> : null}
+    </View>
+  );
+}
+
+/** Sends a code; onSent(email, resendAfterSeconds). A cooldown means a fresh code is already out. */
+function useSendCode(onSent) {
+  const { requestOtp } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const [e, setE] = useState(null);
+  const send = async (email) => {
+    if (busy) return;
+    setBusy(true); setE(null);
+    try {
+      const r = await requestOtp(email);
+      onSent(email, r?.resend_after_seconds ?? 60);
+    } catch (err) {
+      if (err?.code === 'OTP_COOLDOWN') onSent(email, 60); else setE(err);
+    } finally { setBusy(false); }
+  };
+  return [send, busy, e];
+}
+
+/**
+ * 6-digit code entry with resend countdown. Verifies on the 6th digit.
+ * Defaults to sign-in; pass submit(code) / request() to reuse it (Profile → Verify email),
+ * with onDone(result) after a successful submit.
+ */
+export function OtpStep({ email, onBack, resendAfter = 60, submit, request, submitLabel, onDone }) {
+  const t = useT();
+  const auth = useAuth();
+  const verifyOtp = (_, value) => (submit ? submit(value) : auth.verifyOtp(email, value));
+  const requestOtp = () => (request ? request() : auth.requestOtp(email));
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [e, setE] = useState(null);
+  const [left, setLeft] = useState(resendAfter);
+  const [resent, setResent] = useState(false);
+
+  useEffect(() => {
+    if (left <= 0) return undefined;
+    const id = setTimeout(() => setLeft((s) => s - 1), 1000);
+    return () => clearTimeout(id);
+  }, [left]);
+
+  // Sign-in success swaps the auth stack for the app stack (this unmounts); reuse calls onDone.
+  const verify = async (value = code) => {
+    if (busy || value.length !== 6) return;
+    setBusy(true); setE(null);
+    try {
+      const r = await verifyOtp(email, value);
+      if (onDone) { setBusy(false); onDone(r); }
+    } catch (err) { setE(err); setCode(''); setBusy(false); }
+  };
+  const onChange = (v) => {
+    const digits = v.replace(/\D/g, '').slice(0, 6);
+    setCode(digits);
+    if (digits.length === 6) verify(digits);
+  };
+  const resend = async () => {
+    setE(null);
+    try {
+      const r = await requestOtp(email);
+      setLeft(r?.resend_after_seconds ?? resendAfter);
+      setResent(true);
+    } catch (err) { setE(err); }
+  };
+
+  return (
+    <>
+      <Text style={[type.body, { marginTop: 14 }]} accessibilityLiveRegion="polite">{t('auth.codeSentTo', { email })}</Text>
+      {onBack ? <EmailChip email={email} onChange={onBack} /> : null}
+      <Field label={t('auth.code')}>
+        <Input
+          value={code}
+          onChangeText={onChange}
+          keyboardType="number-pad"
+          textContentType="oneTimeCode"
+          autoComplete="one-time-code"
+          maxLength={6}
+          autoFocus
+          editable={!busy}
+          style={{ fontSize: 24, letterSpacing: 10, textAlign: 'center', fontWeight: '700' }}
+          accessibilityLabel={t('auth.code')}
+        />
+      </Field>
+      <AccountErr e={e} />
+      <Button style={{ marginTop: 16 }} icon="🔒" title={submitLabel || t('auth.verifyCode')} busy={busy} disabled={code.length !== 6} onPress={() => verify()} />
+      <View style={a.links}>
+        {left > 0
+          ? <Text style={type.small}>{t('auth.resendIn', { seconds: left })}</Text>
+          : <Text style={a.linkT} onPress={resend} accessibilityRole="link">{t('auth.resendCode')}</Text>}
+      </View>
+      {resent && left > 0 ? <Text style={[type.small, { textAlign: 'center' }]}>{t('auth.codeResent')}</Text> : null}
+    </>
+  );
+}
+
+/**
+ * The one login form (web LoginForm parity): Password or Email code. Used by the
+ * login screen and the invitation login step. beforeSignIn runs right before the
+ * request (e.g. set the post-auth route); onFail undoes it.
+ */
+export function LoginForm({ initialEmail = '', submitLabel, beforeSignIn, onFail }) {
+  const t = useT();
+  const { login } = useAuth();
+  const [method, setMethod] = useState('password');
+  const [id, setId] = useState(initialEmail);
+  const [pw, setPw] = useState('');
+  const [codeFor, setCodeFor] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [e, setE] = useState(null);
+  const pwRef = useRef(null);
+  const [send, sending, sendErr] = useSendCode((email, wait) => setCodeFor({ email, wait }));
+
+  const doLogin = async () => {
+    if (busy || !id.trim() || !pw) return;
+    setE(null);
+    setBusy(true);
+    beforeSignIn?.();
+    try {
+      await login(id.trim(), pw);
+    } catch (err) {
+      onFail?.();
+      setE(err);
+      setBusy(false);
+      if (err.code === 'LOCKED_OUT') Alert.alert(t('m.account.lockedTitle'), t('m.account.err.LOCKED_OUT'));
+    }
+  };
+  const sendCode = (email) => { setId(email); beforeSignIn?.(); send(email); };
+
+  return (
+    <>
+      <View style={{ marginTop: 14 }}>
+        <Segmented
+          options={[
+            { value: 'password', label: t('auth.methodPassword') },
+            { value: 'code', label: t('auth.methodCode') },
+          ]}
+          value={method}
+          onChange={(m) => { setMethod(m); setE(null); setCodeFor(null); }}
+        />
+      </View>
+      {method === 'password' ? (
+        <>
+          <Field label={t('auth.email')}>
+            <Input
+              value={id}
+              onChangeText={setId}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              autoComplete="username"
+              textContentType="username"
+              placeholder={t('auth.emailPlaceholder')}
+              returnKeyType="next"
+              onSubmitEditing={() => pwRef.current?.focus?.()}
+              accessibilityLabel={t('auth.email')}
+            />
+          </Field>
+          <Field label={t('auth.password')}>
+            <PasswordInput value={pw} onChangeText={setPw} autoComplete="current-password" returnKeyType="go" onSubmitEditing={doLogin} />
+          </Field>
+          <AccountErr e={e} />
+          <Button style={{ marginTop: 16 }} title={submitLabel || t('auth.logIn')} busy={busy} disabled={!id.trim() || !pw} onPress={doLogin} />
+        </>
+      ) : codeFor ? (
+        <OtpStep key={codeFor.email} email={codeFor.email} resendAfter={codeFor.wait} onBack={() => setCodeFor(null)} />
+      ) : (
+        <>
+          <EmailStep initial={isEmail(id) ? id.trim() : initialEmail} title={t('auth.sendCode')} busy={sending} onContinue={sendCode} />
+          <AccountErr e={sendErr} />
+        </>
+      )}
+    </>
+  );
+}
 
 function OrDivider() {
   const t = useT();
@@ -82,27 +302,9 @@ function GoogleButton({ navigation, intent = 'signin' }) {
 export default function AuthScreen({ navigation, route }) {
   const invitation = route?.params?.invitation;
   const t = useT();
-  const { login, loginWithStored } = useAuth();
-  const [id, setId] = useState('');
-  const [pw, setPw] = useState('');
+  const { loginWithStored } = useAuth();
   const [busy, setBusy] = useState(false);
   const [e, setE] = useState(null);
-  const pwRef = useRef(null);
-
-  const doLogin = async () => {
-    if (busy) return;
-    setE(null);
-    if (!id.trim() || !pw) return;
-    setBusy(true);
-    try {
-      await login(id.trim(), pw);
-    } catch (err) {
-      setE(err);
-      if (err.code === 'LOCKED_OUT') Alert.alert(t('m.account.lockedTitle'), t('m.account.err.LOCKED_OUT'));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const doBiometric = async () => {
     if (busy) return;
@@ -134,24 +336,8 @@ export default function AuthScreen({ navigation, route }) {
       footer={<DevApiUrlCard />}
       banner={invitation ? <InvitationBanner {...invitation} /> : null}
     >
-      <Field label={t('auth.usernameOrEmail')}>
-        <Input
-          value={id}
-          onChangeText={setId}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="username"
-          textContentType="username"
-          returnKeyType="next"
-          onSubmitEditing={() => pwRef.current?.focus?.()}
-          accessibilityLabel={t('auth.usernameOrEmail')}
-        />
-      </Field>
-      <Field label={t('auth.password')}>
-        <PasswordInput value={pw} onChangeText={setPw} autoComplete="current-password" returnKeyType="go" onSubmitEditing={doLogin} />
-      </Field>
+      <LoginForm />
       <AccountErr e={e} />
-      <Button style={{ marginTop: 16 }} title={t('auth.logIn')} busy={busy} disabled={!id.trim() || !pw} onPress={doLogin} />
       <Button style={{ marginTop: 10 }} variant="soft" title={t('m.account.biometric')} onPress={doBiometric} disabled={busy} />
       <GoogleButton navigation={navigation} intent="signin" />
       <View style={a.links}>
@@ -163,43 +349,82 @@ export default function AuthScreen({ navigation, route }) {
   );
 }
 
+/**
+ * The one registration form (web RegisterForm parity), used by RegisterScreen and
+ * the invitation register step: email → "Email me a code" | "Use a password".
+ * lockEmail skips the email step (invited address). Signing in swaps the auth stack
+ * for the app stack; beforeSignIn runs first (e.g. set the post-auth route) and
+ * onFail undoes it. onEmailTaken, when given, handles an existing account.
+ */
+export function RegisterForm({ initialEmail = '', lockEmail = false, submitLabel, beforeSignIn, onFail, onEmailTaken }) {
+  const t = useT();
+  const { register } = useAuth();
+  const [step, setStep] = useState(lockEmail ? 'method' : 'email'); // email | method | code | password
+  const [email, setEmail] = useState(initialEmail.trim().toLowerCase());
+  const [wait, setWait] = useState(60);
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [e, setE] = useState(null);
+  const [send, sending, sendErr] = useSendCode((_, w) => { setWait(w); setStep('code'); });
+  const toEmail = lockEmail ? null : () => { setStep('email'); setE(null); setPw(''); };
+  const toMethod = () => { setStep('method'); setE(null); setPw(''); };
+  const sendCode = () => { beforeSignIn?.(); send(email); };
+
+  const create = async () => {
+    if (busy) return;
+    setE(null);
+    if (!validPassword(pw)) return setE(localErr(`${t('auth.password')}: ${t('m.account.passwordRule')}`));
+    setBusy(true);
+    beforeSignIn?.();
+    try {
+      // Session is saved by register(); the stack swaps to the app.
+      await register({ email, password: pw });
+    } catch (err) {
+      onFail?.();
+      setBusy(false);
+      if (err?.code === 'EMAIL_TAKEN' && onEmailTaken) onEmailTaken(); else setE(err);
+    }
+    return undefined;
+  };
+
+  let body;
+  if (step === 'email') {
+    body = (
+      <>
+        <EmailStep initial={email} onContinue={(v) => { setEmail(v); setStep('method'); }} />
+        <Text style={[type.small, { marginTop: 12 }]}>{t('auth.displayNameLater')}</Text>
+      </>
+    );
+  } else if (step === 'method') {
+    body = (
+      <>
+        <EmailChip email={email} onChange={toEmail} />
+        <Text style={[type.small, { marginTop: 4 }]}>{t('auth.chooseMethod')}</Text>
+        <Button style={{ marginTop: 12 }} icon="✉" title={t('auth.useCode')} busy={sending} onPress={sendCode} />
+        <Button style={{ marginTop: 10 }} variant="soft" icon="🔒" title={t('auth.usePassword')} disabled={sending} onPress={() => setStep('password')} />
+        <AccountErr e={sendErr} />
+      </>
+    );
+  } else if (step === 'code') {
+    body = <OtpStep email={email} resendAfter={wait} onBack={toEmail || toMethod} />;
+  } else {
+    body = (
+      <>
+        <EmailChip email={email} onChange={toEmail || toMethod} />
+        <Field label={t('auth.password')} hint={t('m.account.passwordRule')}>
+          <PasswordInput value={pw} onChangeText={setPw} autoComplete="new-password" returnKeyType="go" onSubmitEditing={create} />
+        </Field>
+        <AccountErr e={e} />
+        <Button style={{ marginTop: 16 }} icon="＋" title={submitLabel || t('auth.createAccount')} busy={busy} disabled={!pw} onPress={create} />
+      </>
+    );
+  }
+  return body;
+}
+
 export function RegisterScreen({ navigation, route }) {
   const invitation = route?.params?.invitation;
   const t = useT();
-  const { register } = useAuth();
-  const [f, setF] = useState({ username: '', email: '', display_name: '', password: '', phone: '' });
-  const [busy, setBusy] = useState(false);
-  const [e, setE] = useState(null);
-  const set = (k) => (v) => setF((p) => ({ ...p, [k]: v }));
-
-  const go = async () => {
-    if (busy) return;
-    setE(null);
-    const username = f.username.trim().toLowerCase();
-    const name = f.display_name.trim();
-    if (!USER_RE.test(username)) return setE(localErr(`${t('auth.username')}: ${t('m.account.usernameRule')}`));
-    if (!f.email.trim()) return setE(localErr(`${t('auth.email')}: ${t('m.account.required')}`));
-    if (!name || name.length > 50) return setE(localErr(`${t('auth.displayName')}: ${t('m.account.displayNameRule')}`));
-    if (!validPassword(f.password)) return setE(localErr(`${t('auth.password')}: ${t('m.account.passwordRule')}`));
-    setBusy(true);
-    try {
-      const d = await register({
-        username,
-        email: f.email.trim(),
-        display_name: name,
-        password: f.password,
-        ...(f.phone.trim() ? { phone: f.phone.trim() } : {}),
-      });
-      const n = d?.auto_joined_groups?.length || 0;
-      // Session is saved by register(); the stack swaps to the app. Announce auto-joins.
-      if (n > 0) Alert.alert(t('m.account.welcome'), t('auth.autoJoined', { count: n }));
-    } catch (err) {
-      setE(err);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <AuthLayout
       compact
@@ -207,23 +432,7 @@ export function RegisterScreen({ navigation, route }) {
       desc={t('auth.startSplitting')}
       banner={invitation ? <InvitationBanner {...invitation} /> : null}
     >
-      <Field label={t('auth.username')} hint={t('m.account.usernameRule')}>
-        <Input value={f.username} onChangeText={set('username')} autoCapitalize="none" autoCorrect={false} autoComplete="username-new" maxLength={30} accessibilityLabel={t('auth.username')} />
-      </Field>
-      <Field label={t('auth.email')}>
-        <Input value={f.email} onChangeText={set('email')} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" autoComplete="email" accessibilityLabel={t('auth.email')} />
-      </Field>
-      <Field label={t('auth.displayName')} hint={t('m.account.displayNameRule')}>
-        <Input value={f.display_name} onChangeText={set('display_name')} maxLength={50} autoComplete="name" accessibilityLabel={t('auth.displayName')} />
-      </Field>
-      <Field label={t('auth.password')} hint={t('m.account.passwordRule')}>
-        <PasswordInput value={f.password} onChangeText={set('password')} autoComplete="new-password" />
-      </Field>
-      <Field label={t('profile.phone')}>
-        <Input value={f.phone} onChangeText={set('phone')} keyboardType="phone-pad" autoComplete="tel" accessibilityLabel={t('profile.phone')} />
-      </Field>
-      <AccountErr e={e} />
-      <Button style={{ marginTop: 16 }} icon="＋" title={t('auth.register')} busy={busy} onPress={go} />
+      <RegisterForm />
       <GoogleButton navigation={navigation} intent="signup" />
       <View style={a.links}>
         <Text style={a.linkT} onPress={() => navigation.goBack()} accessibilityRole="link">{t('auth.backToLogin')}</Text>

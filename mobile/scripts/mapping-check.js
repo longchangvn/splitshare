@@ -6,19 +6,23 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const checks = [
   // Auth: login/register/google live in AuthContext; screens cover forgot/reset/biometric.
-  ['Auth context (login/register/google)', 'src/auth/AuthContext.js', ['/auth/login', '/auth/register', '/auth/google']],
+  ['Auth context (login/register/google/email code)', 'src/auth/AuthContext.js', ['/auth/login', '/auth/register', '/auth/google', '/auth/otp/request', '/auth/otp/verify', '/me/verify-email/code', '/me/verify-email/confirm', '/me/verify-email/link']],
   ['Auth screens (biometric/forgot/reset/google fallback)', 'src/screens/AuthScreen.js', ['/auth/forgot', '/auth/reset', 'LocalAuthentication', 'savedCredentials', 'GoogleToken']],
   ['Home dashboard (my balance, skeleton, recent activity)', 'src/screens/HomeScreen.js', ['SkeletonCard', 'setOwedBadge']],
   ['Balances loader', 'src/components/home/data.js', ['/me/balances', '/activity']],
   ['Groups board', 'src/screens/GroupsScreen.js', ['GroupTile', 'groupStatus.']],
   ['Activity feed', 'src/screens/ActivityScreen.js', ['fetchActivity', 'activityPageTokens']],
   ['Quick add (web QuickAddExpense)', 'src/screens/QuickAddScreen.js', ['resolveQuickAddFlow', 'defaultGroupName', 'mergeMembers']],
-  ['New group wizard', 'src/screens/NewGroupScreen.js', ['/groups', '/invites', '/contacts', 'from-template', 'share-link']],
+  // No template step for now: plain POST /groups carries invites and returns the invite link.
+  ['New group wizard', 'src/screens/NewGroupScreen.js', ['/groups', 'invite_emails', '/contacts', 'invite_link']],
   ['Group detail (tabs + settings + scan entry)', 'src/screens/GroupScreen.js', ['/groups/${id}/me', 'LedgerTab', 'BalancesTab', 'PeopleTab', 'RecurringTab', 'GroupSettingsSheet', 'ScanReceipts']],
   ['Ledger filters + archive scope', 'src/components/group/LedgerTab.js', ["status: 'LOCKED'", 'viewArchive']],
   ['Invite (email/contacts/link)', 'src/screens/InviteScreen.js', ['/invites', '/contacts', '/rotate-invite', 'inviteRows']],
-  ['Email invitation (accept/join/Google)', 'src/screens/InvitationScreen.js', ['/api/v1/invitations/', '/accept', '/join', '/auth/google']],
+  // Register/login on the invite reuse the shared forms (normal register + join).
+  ['Email invitation (shared register/login + join/Google)', 'src/screens/InvitationScreen.js', ['/api/v1/invitations/', 'RegisterForm', 'LoginForm', '/join', '/auth/google']],
   ['Add/Edit expense', 'src/components/expense/ExpenseForm.js', ['preview-split', 'preview-edit', 'expected_version', 'queueOrSend', '/categories', 'onSaveNew', 'postScan']],
+  // specs/007: one field set for Add expense, Quick Add, Copy, Edit and scan cards (web ExpenseFields).
+  ['Shared expense fields + remembered split', 'src/components/expense/ExpenseFields.js', ['changeType', 'toggleParticipant', 'effectiveAmount', '/categories']],
   ['Receipt helpers (compress + scan + upload)', 'src/receipt.js', ['ImageManipulator', '/expenses/scan', '/images']],
   ['Batch scan receipts', 'src/screens/ScanReceiptsScreen.js', ['cardsFromSuggestion', 'runPool', 'findDuplicates', 'idempotencyKey']],
   ['Expense detail (edit/delete/copy/receipts/comments)', 'src/screens/ExpenseDetailScreen.js', ['EXPENSE_LOCKED', 'AuthImage', '/comments']],
@@ -27,7 +31,7 @@ const checks = [
   ['Statement', 'src/screens/StatementScreen.js', ['/statement/']],
   ['Report', 'src/screens/ReportScreen.js', ['/summary', '/breakdown']],
   ['Offline & notifications', 'src/screens/SystemScreen.js', ['drainQueue', 'registerPush', 'setGroupOptOut']],
-  ['Settings (language + templates)', 'src/screens/SettingsScreen.js', ['setLocale', 'saveTemplate']],
+  ['Settings (account + language + logout)', 'src/screens/SettingsScreen.js', ['setLocale', 'logout']],
   ['Profile (account/password/handles/danger)', 'src/screens/ProfileScreen.js', ['/api/v1/me', '/me/password', '/me/handles', 'HAS_OPEN_BALANCE']],
   ['API client (SecureStore + single-flight refresh)', 'src/api/client.js', ['SecureStore', 'refreshOnce', 'Idempotency-Key', 'getCapabilities']],
   ['Offline queue (AsyncStorage + same key)', 'src/offline/queue.js', ['AsyncStorage', 'idempotencyKey', 'drainQueue']],

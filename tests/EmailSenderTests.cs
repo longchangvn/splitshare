@@ -156,11 +156,13 @@ public sealed class EmailSenderTests
         Assert.IsType<TwilioSendGridEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "sendgrid" }), http));
         Assert.Throws<InvalidOperationException>(() => EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "onesignal" })));
         Assert.Throws<InvalidOperationException>(() => EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "twilio" })));
-        Assert.Throws<InvalidOperationException>(() => EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "smtp" }), http));
+        Assert.IsType<SmtpEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "smtp" })));
+        Assert.IsType<SmtpEmailSender>(EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "Gmail" })));
+        Assert.Throws<InvalidOperationException>(() => EmailSenderFactory.Create(Cfg(new() { ["Email:Provider"] = "mailgun" }), http));
     }
 
     [Fact]
-    public void SendGrid_Is_The_Primary_Provider_In_Appsettings()
+    public void Gmail_Smtp_Is_The_Primary_Provider_In_Appsettings()
     {
         foreach (var file in new[] { "appsettings.json", "appsettings.Development.json" })
         {
@@ -168,10 +170,66 @@ public sealed class EmailSenderTests
                 .AddJsonFile(Path.Combine(RepoRoot(), "api", "appsettings.json"))
                 .AddJsonFile(Path.Combine(RepoRoot(), "api", file))
                 .Build();
-            Assert.Equal("sendgrid", cfg["Email:Provider"]);
-            Assert.Null(cfg["Email:OneSignal:ApiKey"]); // secrets: env/user-secrets only
+            Assert.Equal("smtp", cfg["Email:Provider"]);
+            Assert.Equal("smtp.gmail.com", cfg["Email:Smtp:Host"]);
+            Assert.Equal("noreply.splitshares@gmail.com", cfg["Email:FromAddress"]);
+            Assert.Null(cfg["Email:Smtp:Password"]); // secrets: env/user-secrets only
+            Assert.Null(cfg["Email:OneSignal:ApiKey"]);
             Assert.Null(cfg["Email:Twilio:ApiKey"]);
         }
+    }
+
+    // --- SMTP (Gmail) ---
+
+    private static readonly Dictionary<string, string?> Smtp = new()
+    {
+        ["Email:Provider"] = "smtp",
+        ["Email:Smtp:Username"] = "noreply.splitshares@gmail.com",
+        ["Email:Smtp:Password"] = "app-password",
+        ["Email:FromAddress"] = "noreply.splitshares@gmail.com",
+        ["Email:FromName"] = "SplitShare"
+    };
+
+    [Fact]
+    public async Task Smtp_Sends_Multipart_From_Configured_Sender()
+    {
+        System.Net.Mail.MailMessage? captured = null;
+        string? html = null;
+        var sender = new SmtpEmailSender(Cfg(Smtp), NullLogger<SmtpEmailSender>.Instance)
+        {
+            Deliver = m =>
+            {
+                captured = m;
+                using var reader = new StreamReader(m.AlternateViews[0].ContentStream);
+                html = reader.ReadToEnd();
+                return Task.CompletedTask;
+            }
+        };
+        var r = await sender.SendAsync("ann@x.io", "123456 is your SplitShare code", "Code: 123456", transactional: true, html: "<b>123456</b>");
+
+        Assert.True(r.Sent);
+        Assert.NotNull(r.MessageId);
+        Assert.Equal("noreply.splitshares@gmail.com", captured!.From!.Address);
+        Assert.Equal("SplitShare", captured.From.DisplayName);
+        Assert.Equal("ann@x.io", captured.To.Single().Address);
+        Assert.Equal("Code: 123456", captured.Body);
+        Assert.Equal("<b>123456</b>", html);
+    }
+
+    [Fact]
+    public async Task Smtp_Unconfigured_And_Failures_Never_Throw()
+    {
+        var noPw = new Dictionary<string, string?>(Smtp) { ["Email:Smtp:Password"] = null };
+        var r1 = await new SmtpEmailSender(Cfg(noPw), NullLogger<SmtpEmailSender>.Instance).SendAsync("a@x.io", "s", "b");
+        Assert.Equal(EmailSendStatus.NotConfigured, r1.Status);
+
+        var failing = new SmtpEmailSender(Cfg(Smtp), NullLogger<SmtpEmailSender>.Instance)
+        {
+            Deliver = _ => throw new System.Net.Mail.SmtpException(System.Net.Mail.SmtpStatusCode.MailboxUnavailable, "nope")
+        };
+        var r2 = await failing.SendAsync("a@x.io", "s", "b");
+        Assert.Equal(EmailSendStatus.Failed, r2.Status);
+        Assert.DoesNotContain("a@x.io", r2.Error);
     }
 
     private static string RepoRoot()

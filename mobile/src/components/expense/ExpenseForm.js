@@ -1,6 +1,8 @@
 // Native ExpenseForm — 1:1 with web/src/components/Forms.jsx ExpenseForm (create, copy, edit).
+// Fields come from the shared ExpenseFields + shared/expenseDraft (specs/007), same as Scan Receipts.
 // Create: POST /groups/:id/expenses (offline queue + Idempotency-Key), staged receipts uploaded after save,
-// receipt scan (OCR). Edit: PATCH /expenses/:id with expected_version, live preview-edit, un-settle confirm.
+// receipt scan (OCR, shared applyScan). Edit: PATCH /expenses/:id with expected_version, live
+// preview-edit, un-settle confirm. initialSplit = remembered split (create only).
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Image, StyleSheet } from 'react-native';
 import {
@@ -9,100 +11,72 @@ import {
 import { queueOrSend } from '../../offline/queue';
 import { colors, radius, type } from '../../theme';
 import {
-  Screen, Card, Row, Button, ChipRow, Chip, CheckRow, Input, Field, SelectField, Sheet,
-  ConfirmSheet, toast, Badge, ErrText,
+  Screen, Card, Row, Button, ConfirmSheet, toast, ErrText,
 } from '../../ui';
 import { useT } from '../../i18n';
-import { sanitizeMoneyInput, isValidMoneyAmount, moneyAmountError } from '../../money';
-import { categorySelectData, categoryLabelForKey } from '../../shared/categories';
-import { scanErrorKey, scanToAmount } from '../../shared/receiptScan';
+import { scanErrorKey } from '../../shared/receiptScan';
+import {
+  applyScan, draftFromSource, draftToBody, droppedMembers, newDraft, pickCategory, scanReceipt,
+  validateDraft,
+} from '../../shared/expenseDraft';
+import { restoreSplit } from '../../shared/splitMemory';
+import { saveLastSplit } from '../../splitMemoryStore';
+import { useSplitPreview } from '../../useSplitPreview';
 import {
   chooseSource, pickImages, compressForUpload, compressForScan, postScan, uploadImage,
   isTooBig, shortName,
 } from '../../receipt';
-import {
-  MAX_STAGED, initSel, initValues, initPayer, droppedMembers, valuesForType, pickCategory,
-  buildBody, runningTotals, equalNote as equalNoteOf, isValidDay, todayStr, decimal, saveErrorKey,
-} from './formLogic';
+import { MAX_STAGED, saveErrorKey } from './formLogic';
+import ExpenseFields from './ExpenseFields';
+
+const SPLIT_FIELDS = ['splitType', 'participantIds', 'values', 'stashed', 'payerId', 'category'];
 
 export default function ExpenseForm({
-  groupId, members, existing, copyFrom, currency = '', meId,
+  groupId, members, existing, copyFrom, currency = '', meId, initialSplit = null,
   onDone, onSaveNew, onCancel, onReload,
 }) {
   const t = useT();
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const nameOf = (id) => displayNameOf(members, id);
-  const money = (cents) => fmt(cents, currency);
+  const activeIds = new Set(members.map((m) => m.user_id));
 
-  const [title, setTitle] = useState(
-    existing?.title ?? (copyFrom ? t('forms.expense.copyOf', { title: copyFrom.title }) : ''));
-  const [amount, setAmount] = useState(source ? (source.amount_cents / 100).toFixed(2) : '');
-  const [amountErr, setAmountErr] = useState(null);
-  const [payer, setPayer] = useState(() => initPayer(source, members, meId));
-  const [type, setType] = useState(source?.split_type || 'EQUAL');
-  const [sel, setSel] = useState(() => initSel({ existing, copyFrom, members }));
-  const [values, setValues] = useState(() => initValues(source, source?.split_type || 'EQUAL', initSel({ existing, copyFrom, members })));
-  const [stashed, setStashed] = useState({});
-  const [preview, setPreview] = useState(null);
+  const freshDraft = (remembered) => newDraft({ members, meId, remembered, category: 'food' });
+  const [remembered] = useState(() => (source ? null : restoreSplit(initialSplit, { members, meId })));
+  const [draft, setDraft] = useState(() => (source
+    ? draftFromSource({
+      existing, copyFrom, members, meId,
+      title: existing ? undefined : t('forms.expense.copyOf', { title: copyFrom.title }),
+    })
+    : freshDraft(remembered)));
+  // Untouched new-form values: the single scan only fills fields still equal to these.
+  const initialRef = useRef(draft);
+  const patchDraft = (p) => setDraft((d) => ({ ...d, ...p }));
+  const [usingLast, setUsingLast] = useState(!!remembered);
+  const [tried, setTried] = useState(false);
+  const [receiptCurrency, setReceiptCurrency] = useState('');
   const [confirm, setConfirm] = useState(null); // [names] un-settle list
   const [saving, setSaving] = useState(false);
   const [savingMode, setSavingMode] = useState('close');
   const [imgErrs, setImgErrs] = useState([]);
   const [e, setE] = useState(null);
   const [categories, setCategories] = useState([]);
-  const [category, setCategory] = useState(source?.category || 'food');
-  const [newCatName, setNewCatName] = useState('');
-  const [addingCat, setAddingCat] = useState(false);
-  const [catModalOpen, setCatModalOpen] = useState(false);
-  const [catModalErr, setCatModalErr] = useState(null);
-  const [spentAt, setSpentAt] = useState(() => (source?.spent_at ? String(source.spent_at).slice(0, 10) : todayStr()));
-  const [dateErr, setDateErr] = useState(null);
-  const [tax, setTax] = useState(source?.tax_cents ? (source.tax_cents / 100).toFixed(2) : '');
-  const [tip, setTip] = useState(source?.tip_cents ? (source.tip_cents / 100).toFixed(2) : '');
-  const [fee, setFee] = useState(source?.fee_cents ? (source.fee_cents / 100).toFixed(2) : '');
-  const [origCur, setOrigCur] = useState(source?.orig_currency || '');
-  const [origAmt, setOrigAmt] = useState(source?.orig_amount_cents ? (source.orig_amount_cents / 100).toFixed(2) : '');
-  const [fxRate, setFxRate] = useState(source?.fx_rate != null ? String(source.fx_rate) : '');
-  const [guests, setGuests] = useState(() => (source?.guests || []).map((g) => ({
-    label: g.label, amount: (g.share_cents / 100).toFixed(2), covered_by: g.covered_by,
-  })));
-  const [onlyPresent, setOnlyPresent] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(() => !!(source && (
-    source.tax_cents || source.tip_cents || source.fee_cents || source.orig_currency || (source.guests || []).length)));
   // One key per form instance: a double tap or offline retry replays instead of double-counting.
   const idemKey = useRef(newIdempotencyKey()).current;
 
   const dropped = droppedMembers(copyFrom, members);
   // Copy expense never carries receipts: the upload section starts empty.
 
-  const changeType = (nextType) => {
-    setType(nextType);
-    setValues((prev) => valuesForType(prev, nextType, sel));
-  };
+  // Edit may still list former members (server answers INVOLVES_REMOVED_MEMBER).
+  const validationMembers = existing
+    ? [...members, ...(existing.splits || []).filter((x) => !activeIds.has(x.user_id)).map((x) => ({ user_id: x.user_id }))]
+    : members;
+  const errors = tried ? validateDraft(draft, validationMembers).errors : [];
 
-  const toggle = (id) => {
-    if (sel.includes(id)) {
-      setSel(sel.filter((x) => x !== id));
-      setStashed({ ...stashed, ...(id in values ? { [id]: values[id] } : {}) });
-      setValues((prev) => { const n = { ...prev }; delete n[id]; return n; });
-    } else {
-      setSel([...sel, id]);
-      if (id in stashed) {
-        setValues((prev) => ({ ...prev, [id]: stashed[id] }));
-      } else if (type === 'SHARES') {
-        setValues((prev) => ({ ...prev, [id]: prev[id] ?? '1' }));
-      }
-    }
-  };
-  const setVal = (id, v) => setValues((prev) => ({ ...prev, [id]: decimal(v) }));
-
-  const build = () => buildBody({
-    title, amount, payer, type, sel, values, category, spentAt: isValidDay(spentAt) ? spentAt.trim() : '',
-    onlyPresent, tax, tip, fee, origCur, origAmt, fxRate, guests,
-  });
-
-  const totals = runningTotals({ type, sel, values, amount }, t);
+  const previewUrl = existing
+    ? `/api/v1/expenses/${existing.expense_id}/preview-edit`
+    : `/api/v1/groups/${groupId}/expenses/preview-split`;
+  const { preview, error: previewErr } = useSplitPreview(draft, previewUrl);
 
   // Group categories (default 'food' fallback chain, same as web).
   useEffect(() => {
@@ -113,7 +87,11 @@ export default function ExpenseForm({
         if (cancelled) return;
         const list = Array.isArray(rows) ? rows : [];
         setCategories(list);
-        setCategory((prev) => pickCategory(list, prev, source?.category));
+        setDraft((d) => {
+          const category = pickCategory(list, d.category, source?.category);
+          if (initialRef.current.category === d.category) initialRef.current = { ...initialRef.current, category };
+          return { ...d, category };
+        });
       } catch (err) {
         if (!cancelled) setE(err);
       }
@@ -122,46 +100,12 @@ export default function ExpenseForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
-  const addCategory = async () => {
-    const name = newCatName.trim();
-    if (!name || addingCat) return;
-    setAddingCat(true);
-    setCatModalErr(null);
-    try {
-      const created = await api.post(`/api/v1/groups/${groupId}/categories`, { name });
-      setCategories((prev) => [...prev, created]);
-      setCategory(created.key);
-      setNewCatName('');
-      setCatModalOpen(false);
-      toast({ message: t('groupDetail.categoryAdded'), color: 'teal' });
-    } catch (err) {
-      setCatModalErr(err);
-    } finally {
-      setAddingCat(false);
-    }
+  const resetSplit = () => {
+    const base = freshDraft(null);
+    base.category = pickCategory(categories, '', null);
+    setDraft((d) => ({ ...d, ...Object.fromEntries(SPLIT_FIELDS.map((k) => [k, base[k]])) }));
+    setUsingLast(false);
   };
-
-  // Live preview (350ms debounce): create → preview-split, edit → preview-edit.
-  useEffect(() => {
-    if (!amount || sel.length === 0) { setPreview(null); return undefined; }
-    let live = true;
-    const timer = setTimeout(async () => {
-      try {
-        const url = existing
-          ? `/api/v1/expenses/${existing.expense_id}/preview-edit`
-          : `/api/v1/groups/${groupId}/expenses/preview-split`;
-        const p = await api.post(url, build());
-        if (!live) return;
-        setPreview(p);
-        setE(null);
-      } catch (err) {
-        if (live) { setPreview(null); setE(err); }
-      }
-    }, 350);
-    return () => { live = false; clearTimeout(timer); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [amount, type, payer, category, spentAt, tax, tip, fee, origCur, origAmt, fxRate,
-    JSON.stringify(guests), onlyPresent, sel.join(','), Object.values(values).join('|')]);
 
   // ---------- Receipts (create only): staged now, uploaded after Save ----------
   const [staged, setStaged] = useState([]);
@@ -210,12 +154,6 @@ export default function ExpenseForm({
     return failures;
   };
 
-  const onAmountChange = (raw) => {
-    const next = sanitizeMoneyInput(raw);
-    setAmount(next);
-    setAmountErr(moneyAmountError(next, t));
-  };
-
   // ---------- Receipt scan (create only, hidden unless the API has OCR enabled) ----------
   const [ocrEnabled, setOcrEnabled] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -229,6 +167,7 @@ export default function ExpenseForm({
     return () => { cancelled = true; };
   }, [existing]);
 
+  // Same scan merge as Scan Receipts (shared applyScan); fields the user already changed stay.
   const onScan = async () => {
     if (scanning) return;
     const src = await chooseSource(sourceLabels);
@@ -252,18 +191,24 @@ export default function ExpenseForm({
         return;
       }
       const resp = await postScan(groupId, img);
-      const { amount: scanned, lowConfidence, warnings } = scanToAmount(resp);
-      if (scanned) {
-        onAmountChange(scanned);
+      const group = { currency, categories };
+      const scan = scanReceipt(resp, group);
+      if (scan.hasTotal) {
+        setDraft((d) => ({
+          ...d,
+          ...applyScan(d, resp, group, { keep: (f) => d[f] !== initialRef.current[f] }).patch,
+        }));
+        setReceiptCurrency(scan.receiptCurrency);
         setStaged((prev) => (prev.length < MAX_STAGED ? [...prev, img] : prev));
+        const shown = scan.fields.amount || scan.fields.origAmount;
         toast({
-          title: t('forms.expense.scanDone', { amount: fmt(Math.round(Number(scanned) * 100), currency) }),
-          message: lowConfidence ? t('forms.expense.scanLowConfidence') : t('forms.expense.scanCheck'),
-          color: lowConfidence ? 'orange' : 'teal',
+          title: t('forms.expense.scanDone', { amount: fmt(Math.round(Number(shown) * 100), scan.receiptCurrency || currency) }),
+          message: scan.lowConfidence ? t('forms.expense.scanLowConfidence') : t('forms.expense.scanCheck'),
+          color: scan.lowConfidence ? 'orange' : 'teal',
         });
       } else {
         toast({
-          message: warnings.includes('not_a_receipt') ? t('forms.expense.scanNotReceipt') : t('forms.expense.scanNoTotal'),
+          message: scan.warnings.includes('not_a_receipt') ? t('forms.expense.scanNotReceipt') : t('forms.expense.scanNoTotal'),
           color: 'orange',
         });
       }
@@ -279,17 +224,8 @@ export default function ExpenseForm({
 
   // ---------- Submit ----------
   const validate = () => {
-    const amtErr = moneyAmountError(amount, t) || (!amount ? t('forms.payment.invalidAmount') : null);
-    let ok = true;
-    if (amtErr || !isValidMoneyAmount(amount)) {
-      setAmountErr(amtErr || t('forms.payment.invalidAmount'));
-      ok = false;
-    }
-    if (!isValidDay(spentAt)) {
-      setDateErr(t('scan.err.date'));
-      ok = false;
-    }
-    return ok;
+    setTried(true);
+    return validateDraft(draft, validationMembers).ok;
   };
 
   const submit = async (mode) => {
@@ -301,10 +237,11 @@ export default function ExpenseForm({
     setSaving(true);
     try {
       if (!existing) {
-        const body = build();
+        const body = draftToBody(draft);
         const send = () => api.post(`/api/v1/groups/${groupId}/expenses`, body, { idempotencyKey: idemKey });
         // Offline: queue the draft with the SAME key; it syncs later without duplicates.
         const r = await queueOrSend('expense', groupId, send, body, idemKey);
+        saveLastSplit(meId, groupId, draft);
         if (r?.queued) {
           toast({
             title: t('m.expense.queued'),
@@ -330,7 +267,7 @@ export default function ExpenseForm({
         else onDone(r);
       } else {
         const r = await api.patch(`/api/v1/expenses/${existing.expense_id}`,
-          { expected_version: existing.version, ...build() });
+          { expected_version: existing.version, ...draftToBody(draft) });
         const unsettled = r?.unsettled_user_ids || [];
         toast({
           title: t('forms.expense.saved'),
@@ -361,28 +298,19 @@ export default function ExpenseForm({
     submit('close');
   };
 
-  const boxLabel = type === 'EXACT'
-    ? t('forms.expense.exactBox')
-    : type === 'PERCENT' ? t('forms.expense.percentBox') : t('forms.expense.sharesBox');
   const receiptCount = existing ? (source?.images?.length || 0) : staged.length;
-  const equalNote = equalNoteOf(type, preview, { fmtCents: money, nameOf }, t);
-  const splitTypes = [
-    { value: 'EQUAL', label: t('forms.expense.equal') },
-    { value: 'EXACT', label: t('forms.expense.exact') },
-    { value: 'PERCENT', label: t('forms.expense.percent') },
-    { value: 'SHARES', label: t('forms.expense.shares') },
-  ];
-  const catData = categorySelectData(categories, t);
-  if (category && !catData.some((c) => c.value === category)) catData.push({ value: category, label: categoryLabelForKey(category, categories, t) });
-  const memberOptions = members.map((m) => ({ value: m.user_id, label: m.display_name }));
   const multiSave = !existing && !!onSaveNew;
   const saveActionLabel = multiSave
     ? t('forms.expense.saveClose')
     : isCopy ? t('forms.expense.saveCopy') : t('forms.expense.addExpense');
-  const fxApprox = origCur.trim() !== '' && origAmt !== '' && fxRate !== '' && !Number.isNaN(Number(origAmt) * Number(fxRate))
-    ? t('forms.expense.fxApprox', { amount: (Number(origAmt) * Number(fxRate)).toFixed(2) })
-    : null;
-  const errKey = saveErrorKey(e);
+  const shownErr = e || previewErr;
+  const errKey = saveErrorKey(shownErr);
+  const splitHint = usingLast ? (
+    <Row style={{ marginBottom: 8 }}>
+      <Text style={[type.small, { flex: 1 }]}>{t('forms.expense.lastSplit')}</Text>
+      <Button small variant="ghost" title={t('forms.expense.lastSplitReset')} onPress={resetSplit} />
+    </Row>
+  ) : null;
 
   const footer = multiSave ? (
     <Row>
@@ -479,222 +407,19 @@ export default function ExpenseForm({
         </View>
       )}
 
-      <Card>
-        <Field label={t('forms.expense.title')} style={{ marginTop: 0 }}>
-          <Input
-            value={title}
-            onChangeText={setTitle}
-            placeholder={t('forms.expense.titlePh')}
-            maxLength={100}
-            accessibilityLabel={t('forms.expense.title')}
-          />
-        </Field>
-        <Field label={t('forms.expense.amount')} error={amountErr}>
-          <Input
-            value={amount}
-            error={!!amountErr}
-            onChangeText={onAmountChange}
-            onBlur={() => { if (amount) setAmountErr(moneyAmountError(amount, t)); }}
-            placeholder="0.00"
-            keyboardType="decimal-pad"
-            accessibilityLabel={t('forms.expense.amount')}
-          />
-        </Field>
-        <Row style={{ alignItems: 'flex-end' }}>
-          <View style={{ flex: 1 }}>
-            <SelectField
-              label={t('forms.expense.category')}
-              value={category}
-              options={catData}
-              onChange={(v) => setCategory(v || '')}
-            />
-          </View>
-          <Button
-            small
-            variant="soft"
-            style={{ minHeight: 46 }}
-            title={t('forms.expense.addCategoryBtn')}
-            accessibilityLabel={t('forms.expense.addCategory')}
-            onPress={() => { setNewCatName(''); setCatModalErr(null); setCatModalOpen(true); }}
-          />
-        </Row>
-        <Field label={t('forms.expense.spentOn')} error={dateErr} hint={t('m.expense.dateHint')}>
-          <Input
-            value={spentAt}
-            error={!!dateErr}
-            onChangeText={(v) => { setSpentAt(v.replace(/[^\d-]/g, '').slice(0, 10)); setDateErr(null); }}
-            onBlur={() => setDateErr(isValidDay(spentAt) ? null : t('scan.err.date'))}
-            placeholder="YYYY-MM-DD"
-            keyboardType="numbers-and-punctuation"
-            autoCorrect={false}
-            accessibilityLabel={t('forms.expense.spentOn')}
-          />
-          <Row style={{ marginTop: 8 }}>
-            <Chip label={t('m.expense.today')} on={spentAt === todayStr()} onPress={() => { setSpentAt(todayStr()); setDateErr(null); }} />
-            <Chip
-              label={t('m.expense.yesterday')}
-              on={spentAt === todayStr(new Date(Date.now() - 864e5))}
-              onPress={() => { setSpentAt(todayStr(new Date(Date.now() - 864e5))); setDateErr(null); }}
-            />
-          </Row>
-        </Field>
-        <SelectField
-          label={t('forms.expense.payer')}
-          value={payer}
-          options={memberOptions}
-          onChange={(v) => setPayer(v || '')}
-        />
-      </Card>
-
-      {/* Bill details (collapsible, like web <details>) */}
-      <Card>
-        <Pressable
-          onPress={() => setDetailsOpen((o) => !o)}
-          style={s.summary}
-          accessibilityRole="button"
-          accessibilityState={{ expanded: detailsOpen }}
-        >
-          <Text style={[type.h3, { flex: 1 }]}>{t('forms.expense.billDetails')}</Text>
-          <Text style={{ color: colors.secondary }}>{detailsOpen ? '▴' : '▾'}</Text>
-        </Pressable>
-        {detailsOpen && (
-          <View>
-            <Row style={{ alignItems: 'flex-start' }}>
-              <Field label={t('forms.expense.taxOpt')} style={{ flex: 1 }}>
-                <Input value={tax} onChangeText={(v) => setTax(decimal(v))} placeholder="0.00" keyboardType="decimal-pad" />
-              </Field>
-              <Field label={t('forms.expense.tipOpt')} style={{ flex: 1 }}>
-                <Input value={tip} onChangeText={(v) => setTip(decimal(v))} placeholder="0.00" keyboardType="decimal-pad" />
-              </Field>
-              <Field label={t('forms.expense.feeOpt')} style={{ flex: 1 }}>
-                <Input value={fee} onChangeText={(v) => setFee(decimal(v))} placeholder="0.00" keyboardType="decimal-pad" />
-              </Field>
-            </Row>
-            <Field label={t('forms.expense.foreign')} hint={fxApprox}>
-              <Row>
-                <Input
-                  style={{ flex: 1 }}
-                  value={origCur}
-                  onChangeText={setOrigCur}
-                  placeholder="JPY"
-                  autoCapitalize="characters"
-                  maxLength={3}
-                  accessibilityLabel={t('forms.expense.foreign')}
-                />
-                <Input
-                  style={{ flex: 1 }}
-                  value={origAmt}
-                  onChangeText={(v) => setOrigAmt(decimal(v))}
-                  placeholder={t('forms.expense.fxAmount')}
-                  keyboardType="decimal-pad"
-                  accessibilityLabel={t('forms.expense.fxAmount')}
-                />
-                <Input
-                  style={{ flex: 1 }}
-                  value={fxRate}
-                  onChangeText={(v) => setFxRate(decimal(v))}
-                  placeholder={t('forms.expense.fxRate')}
-                  keyboardType="decimal-pad"
-                  accessibilityLabel={t('forms.expense.fxRate')}
-                />
-              </Row>
-            </Field>
-            <View style={{ marginTop: 12 }}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Text style={s.label}>{t('forms.expense.guestShares')}</Text>
-                <Chip
-                  label={t('forms.expense.addGuest')}
-                  onPress={() => setGuests([...guests, { label: '', amount: '', covered_by: sel[0] || payer }])}
-                />
-              </Row>
-              {guests.map((g, i) => (
-                <View key={i} style={s.guest}>
-                  <Row>
-                    <Input
-                      style={{ flex: 2 }}
-                      placeholder={t('forms.expense.guestLabel')}
-                      value={g.label}
-                      onChangeText={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, label: v } : gg)))}
-                    />
-                    <Input
-                      style={{ flex: 1 }}
-                      placeholder="0.00"
-                      keyboardType="decimal-pad"
-                      value={g.amount}
-                      onChangeText={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, amount: decimal(v) } : gg)))}
-                    />
-                    <Pressable
-                      onPress={() => setGuests(guests.filter((_, j) => j !== i))}
-                      hitSlop={10}
-                      accessibilityRole="button"
-                      accessibilityLabel={t('common.remove')}
-                    >
-                      <Text style={s.remove}>✕</Text>
-                    </Pressable>
-                  </Row>
-                  <SelectField
-                    label={t('m.expense.coveredBy')}
-                    value={g.covered_by}
-                    options={memberOptions}
-                    onChange={(v) => setGuests(guests.map((gg, j) => (j === i ? { ...gg, covered_by: v } : gg)))}
-                  />
-                </View>
-              ))}
-              {guests.length === 0 && <Text style={[type.small, { marginTop: 6 }]}>{t('forms.expense.guestHint')}</Text>}
-            </View>
-            <CheckRow
-              label={t('forms.expense.onlyPresent')}
-              checked={onlyPresent}
-              onPress={() => setOnlyPresent((v) => !v)}
-            />
-          </View>
-        )}
-      </Card>
-
-      <Card>
-        <Text style={s.label}>{t('forms.expense.method')}</Text>
-        <ChipRow options={splitTypes} value={type} onChange={changeType} />
-        {equalNote ? <Text style={[type.small, { marginTop: 8 }]}>{equalNote}</Text> : null}
-        <Text style={[s.label, { marginTop: 14 }]}>{t('forms.expense.participants')}</Text>
-        {members.map((m) => {
-          const on = sel.includes(m.user_id);
-          return (
-            <CheckRow
-              key={m.user_id}
-              label={m.display_name}
-              checked={on}
-              onPress={() => toggle(m.user_id)}
-              right={type !== 'EQUAL' && on ? (
-                <Input
-                  style={s.splitBox}
-                  value={values[m.user_id] ?? (type === 'SHARES' ? '1' : '')}
-                  onChangeText={(v) => setVal(m.user_id, v)}
-                  placeholder={type === 'SHARES' ? '1' : boxLabel}
-                  keyboardType={type === 'SHARES' ? 'number-pad' : 'decimal-pad'}
-                  accessibilityLabel={`${boxLabel} · ${m.display_name}`}
-                />
-              ) : null}
-            />
-          );
-        })}
-        {type !== 'EQUAL' && totals && (
-          <Text style={[type.h3, { marginTop: 6, color: totals.ok ? colors.primaryText : colors.warn }]}>{totals.text}</Text>
-        )}
-      </Card>
-
-      {preview && (
-        <Card tone="settled">
-          <Text style={type.h3}>{t('forms.expense.livePreview')}</Text>
-          <Text style={[type.body, { marginTop: 4 }]}>
-            {Object.entries(preview.shares || {}).map(([id, v]) => `${nameOf(id)} ${money(v)}`).join(' · ')}
-          </Text>
-          {preview.unsettled_user_ids?.length > 0 && (
-            <View style={{ marginTop: 6 }}>
-              <Badge kind="nudge" label={t('forms.expense.unsettle', { count: preview.unsettled_user_ids.length })} />
-            </View>
-          )}
-        </Card>
-      )}
+      <ExpenseFields
+        draft={draft}
+        onChange={patchDraft}
+        groupId={groupId}
+        members={members}
+        categories={categories}
+        onCategoryCreated={(created) => setCategories((prev) => [...prev, created])}
+        currency={currency}
+        preview={preview}
+        errors={errors}
+        splitHint={splitHint}
+        receiptCurrency={receiptCurrency}
+      />
 
       {imgErrs.length > 0 && (
         <Card tone="open">
@@ -705,11 +430,11 @@ export default function ExpenseForm({
       {errKey ? (
         <Card style={s.errCard}>
           <Text style={[type.h3, { color: colors.dangerDeep }]}>{t(errKey)}</Text>
-          {e?.code === 'STALE_VERSION' && onReload ? (
+          {shownErr?.code === 'STALE_VERSION' && onReload ? (
             <Button small variant="ghost" style={{ marginTop: 8, alignSelf: 'flex-start' }} title={t('common.refresh')} onPress={onReload} />
           ) : null}
         </Card>
-      ) : <ErrText e={e} />}
+      ) : <ErrText e={shownErr} />}
 
       <ConfirmSheet
         visible={!!confirm}
@@ -720,37 +445,6 @@ export default function ExpenseForm({
         onClose={() => setConfirm(null)}
         onConfirm={async () => { setConfirm(null); await submit('close'); }}
       />
-
-      <Sheet
-        visible={catModalOpen}
-        onClose={() => { if (!addingCat) setCatModalOpen(false); }}
-        title={t('forms.expense.addCategory')}
-        footer={(
-          <Row>
-            <Button style={{ flex: 1 }} variant="ghost" title={t('common.cancel')} disabled={addingCat} onPress={() => setCatModalOpen(false)} />
-            <Button
-              style={{ flex: 1 }}
-              variant="brand"
-              busy={addingCat}
-              disabled={!newCatName.trim()}
-              title={t('forms.expense.addCategoryBtn')}
-              onPress={addCategory}
-            />
-          </Row>
-        )}
-      >
-        <Field label={t('groupDetail.categoryName')} style={{ marginTop: 0 }}>
-          <Input
-            value={newCatName}
-            onChangeText={setNewCatName}
-            placeholder={t('forms.expense.addCategoryPh')}
-            autoFocus
-            returnKeyType="done"
-            onSubmitEditing={addCategory}
-          />
-        </Field>
-        <ErrText e={catModalErr} />
-      </Sheet>
     </Screen>
   );
 }
@@ -762,9 +456,5 @@ const s = StyleSheet.create({
     textAlign: 'center', lineHeight: 34, color: colors.secondary, fontSize: 16, overflow: 'hidden',
   },
   remove: { color: colors.danger, fontWeight: '700', fontSize: 13 },
-  summary: { flexDirection: 'row', alignItems: 'center', minHeight: 32 },
-  label: { fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 },
-  guest: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.line },
-  splitBox: { width: 104, minHeight: 40, paddingVertical: 8 },
   errCard: { backgroundColor: colors.dangerCardBg, borderColor: colors.dangerCardBorder },
 });

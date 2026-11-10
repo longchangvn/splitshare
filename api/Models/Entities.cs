@@ -6,8 +6,8 @@ namespace SplitShare.Api.Models;
 public sealed class User
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public string DisplayName { get; set; } = "";
-    public string Username { get; set; } = ""; // unique, lowercase
+    public string DisplayName { get; set; } = ""; // empty = not chosen yet; read Name for display
+    public string Username { get; set; } = ""; // unique, lowercase (email for email sign-ups)
     public string Email { get; set; } = ""; // unique
     public string? Phone { get; set; }
     public string? PasswordHash { get; set; } // null if google-only
@@ -16,6 +16,10 @@ public sealed class User
     public DateTime? EmailVerifiedAt { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedUntilUtc { get; set; }
+
+    /// <summary>Name to show: the chosen display name, or the email when none was set.</summary>
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public string Name => string.IsNullOrWhiteSpace(DisplayName) ? Email : DisplayName;
 }
 
 public sealed class Group

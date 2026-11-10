@@ -1228,6 +1228,12 @@ a {
   color: #0c7a4b;
   font-weight: 600;
 }
+.auth-pin {
+  justify-content: center;
+}
+.auth-email-chip {
+  overflow-wrap: anywhere;
+}
 @keyframes auth-drift-a {
   from { transform: translate(0, 0) scale(1); }
   to { transform: translate(24px, 18px) scale(1.06); }
@@ -2081,23 +2087,6 @@ a {
   .wizard-search-row .wizard-search {
     width: 100%;
   }
-  .template-modal-content {
-    width: calc(100vw - 32px) !important;
-    max-height: min(540px, calc(100dvh - 48px));
-    height: auto !important;
-    border-radius: 20px;
-  }
-  .template-modal-content .wizard-modal-header {
-    padding: 20px 20px 8px;
-  }
-  .template-modal-content .wizard-modal-body {
-    padding: 12px 20px 20px;
-  }
-  .template-modal-content .wizard-form { gap: 16px; }
-  .template-modal-content .wizard-primary {
-    min-height: 48px;
-    margin-top: 4px;
-  }
   .invite-modal-content {
     width: calc(100vw - 32px) !important;
     max-height: min(660px, calc(100dvh - 48px));
@@ -2297,15 +2286,6 @@ a {
   line-height: 1.45;
   color: var(--mantine-color-dimmed);
 }
-.settings-tabs {
-  margin-top: 4px;
-  max-width: 720px;
-}
-.settings-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
 .settings-add-btn {
   flex: none !important;
 }
@@ -2456,6 +2436,13 @@ a {
   padding: 18px;
   box-shadow: 0 8px 22px rgba(16, 42, 36, 0.04);
   min-width: 0;
+}
+.profile-verify {
+  background: #fff8eb;
+  border: 1px solid #f3dfb5;
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
 }
 .profile-panel .gd-action-btn {
   flex: none !important;

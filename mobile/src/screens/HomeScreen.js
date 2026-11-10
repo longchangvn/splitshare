@@ -4,7 +4,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, RefreshControl } from 'react-native';
 import { fmt } from '../api/client';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth, userLabel } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, radius, shadow, type } from '../theme';
 import { Avatar, Button, Card, ErrText, Screen, Skeleton, SkeletonCard } from '../ui';
@@ -39,7 +39,7 @@ export default function HomeScreen({ navigation }) {
   const stats = settleStats(groups);
   const active = settleStats(groups.filter((g) => statusOf(g) === 'opening'));
   const newGroup = () => navigation.navigate('NewGroup');
-  const name = user?.display_name || user?.username;
+  const name = userLabel(user);
 
   const onRefresh = () => { reload({ pull: true }); setNonce((n) => n + 1); };
 

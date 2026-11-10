@@ -6,12 +6,13 @@ import { View, Text, Pressable } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../api/client';
 import { colors, type } from '../theme';
-import { useAuth } from '../auth/AuthContext';
+import { publicHandle, useAuth, userLabel } from '../auth/AuthContext';
 import {
   Screen, Card, Row, Avatar, Badge, Button, Segmented, Field, Input, ConfirmSheet, Skeleton, toast, DevApiUrlCard,
 } from '../ui';
 import { useT } from '../i18n';
 import { AccountErr, PasswordInput, a } from '../components/account/AccountKit';
+import { OtpStep } from './AuthScreen';
 
 export default function ProfileScreen() {
   const t = useT();
@@ -39,10 +40,12 @@ export default function ProfileScreen() {
     <Screen>
       <Card>
         <Row gap={12}>
-          <Avatar name={user?.display_name || user?.username} size={52} />
+          <Avatar name={userLabel(user)} size={52} />
           <View style={{ flex: 1 }}>
-            <Text style={type.h1} numberOfLines={1}>{user?.display_name || user?.username || '…'}</Text>
-            <Text style={type.small} numberOfLines={1}>@{user?.username || '…'}{user?.email ? ` · ${user.email}` : ''}</Text>
+            <Text style={type.h1} numberOfLines={1}>{userLabel(user) || '…'}</Text>
+            <Text style={type.small} numberOfLines={1}>
+              {publicHandle(user?.username) ? `@${user.username} · ` : ''}{user?.email || '…'}
+            </Text>
             {user ? (
               <View style={{ marginTop: 6 }}>
                 <Badge
@@ -55,11 +58,13 @@ export default function ProfileScreen() {
         </Row>
       </Card>
 
+      {user && !user.email_verified ? <VerifyEmailPanel email={user.email} /> : null}
+
       <Segmented options={tabs} value={tab} onChange={(v) => { setTab(v); setE(null); }} />
       <AccountErr e={e} style={{ marginTop: 0 }} />
 
       {tab === 'account' ? <AccountTab user={user} setUser={setUser} onError={setE} /> : null}
-      {tab === 'password' ? <PasswordTab onError={setE} /> : null}
+      {tab === 'password' ? <PasswordTab hasPw={user?.has_password !== false} onDone={refreshMe} onError={setE} /> : null}
       {tab === 'payments' ? <PaymentsTab onError={setE} /> : null}
       {tab === 'danger' ? <DangerTab onError={setE} logout={logout} /> : null}
 
@@ -80,22 +85,79 @@ export default function ProfileScreen() {
   );
 }
 
+/**
+ * Unverified email (web VerifyEmailPanel parity): verify in-app with a 6-digit code
+ * (shared OtpStep) or email a fresh link that opens in the browser. Profile refreshes
+ * the user on focus, so a link confirmed in the browser shows up on return.
+ */
+function VerifyEmailPanel({ email }) {
+  const t = useT();
+  const { requestVerifyCode, confirmVerifyCode, sendVerifyLink, refreshMe } = useAuth();
+  const [mode, setMode] = useState(null); // null | 'code'
+  const [wait, setWait] = useState(60);
+  const [busy, setBusy] = useState(null); // 'code' | 'link'
+  const [linkSent, setLinkSent] = useState(false);
+  const [e, setE] = useState(null);
+
+  const run = async (kind, call, ok) => {
+    if (busy) return;
+    setBusy(kind); setE(null);
+    try { ok(await call()); } catch (err) {
+      if (err?.code === 'ALREADY_VERIFIED') refreshMe();
+      else if (kind === 'code' && err?.code === 'OTP_COOLDOWN') setMode('code'); // a code is already out
+      else setE(err);
+    } finally { setBusy(null); }
+  };
+  const sendCode = () => run('code', requestVerifyCode, (r) => { setWait(r?.resend_after_seconds ?? 60); setMode('code'); });
+  const sendLink = () => run('link', sendVerifyLink, () => setLinkSent(true));
+
+  return (
+    <Card tone="open" accessibilityLabel={t('profile.verifyTitle')}>
+      <Text style={type.h3}>{t('profile.verifyTitle')}</Text>
+      {mode === 'code' ? (
+        <OtpStep
+          email={email}
+          resendAfter={wait}
+          submitLabel={t('profile.verifyEmail')}
+          submit={confirmVerifyCode}
+          request={requestVerifyCode}
+          onDone={() => toast({ title: t('profile.emailVerifiedToast'), color: 'teal' })}
+        />
+      ) : (
+        <>
+          <Text style={[type.small, { marginTop: 4 }]}>{t('profile.verifyHint', { email })}</Text>
+          <Button style={{ marginTop: 12 }} icon="✉" title={t('profile.verifyEmail')} busy={busy === 'code'} disabled={busy === 'link'} onPress={sendCode} />
+        </>
+      )}
+      {linkSent ? (
+        <Text style={[type.small, { marginTop: 10 }]} accessibilityLiveRegion="polite">{t('profile.verifyLinkSent', { email })}</Text>
+      ) : (
+        <Button style={{ marginTop: 10 }} variant="ghost" title={t('profile.sendLinkInstead')} busy={busy === 'link'} disabled={busy === 'code'} onPress={sendLink} />
+      )}
+      <AccountErr e={e} />
+    </Card>
+  );
+}
+
+// The API shows the email when no display name is set: edit an empty field then.
+const ownName = (u) => (u?.display_name === u?.email ? '' : u?.display_name || '');
+
 function AccountTab({ user, setUser, onError }) {
   const t = useT();
-  const [name, setName] = useState(user?.display_name || '');
+  const [name, setName] = useState(ownName(user));
   const [phone, setPhone] = useState(user?.phone || '');
   const [saving, setSaving] = useState(false);
   const [fieldErr, setFieldErr] = useState(null);
 
   useEffect(() => {
-    if (user) { setName(user.display_name || ''); setPhone(user.phone || ''); }
+    if (user) { setName(ownName(user)); setPhone(user.phone || ''); }
   }, [user?.user_id, user?.display_name, user?.phone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     if (saving) return;
     const n = name.trim();
     setFieldErr(null); onError(null);
-    if (!n || n.length > 50) return setFieldErr(t('m.account.displayNameRule'));
+    if (n.length > 50) return setFieldErr(t('m.account.displayNameRule'));
     setSaving(true);
     try {
       const d = await api.patch('/api/v1/me', { display_name: n, phone: phone.trim() || null });
@@ -108,8 +170,8 @@ function AccountTab({ user, setUser, onError }) {
     <Card>
       {!user ? <Skeleton h={46} /> : (
         <>
-          <Field label={t('profile.displayName')} error={fieldErr} hint={t('m.account.displayNameRule')} style={{ marginTop: 0 }}>
-            <Input value={name} onChangeText={setName} maxLength={50} error={!!fieldErr} accessibilityLabel={t('profile.displayName')} />
+          <Field label={t('profile.displayName')} error={fieldErr} hint={t('profile.displayNameHint')} style={{ marginTop: 0 }}>
+            <Input value={name} onChangeText={setName} maxLength={50} placeholder={user.email} error={!!fieldErr} accessibilityLabel={t('profile.displayName')} />
           </Field>
           <Field label={t('profile.phone')}>
             <Input value={phone} onChangeText={setPhone} keyboardType="phone-pad" accessibilityLabel={t('profile.phone')} />
@@ -121,7 +183,8 @@ function AccountTab({ user, setUser, onError }) {
   );
 }
 
-function PasswordTab({ onError }) {
+// Email-code accounts have no password yet: no "current password", and "Set password".
+function PasswordTab({ hasPw, onDone, onError }) {
   const t = useT();
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
@@ -135,18 +198,28 @@ function PasswordTab({ onError }) {
       await api.patch('/api/v1/me/password', { current_password: cur || null, new_password: next });
       setCur(''); setNext('');
       toast({ title: t('profile.passwordChanged'), color: 'teal' });
+      if (!hasPw) onDone?.();
     } catch (err) { onError(err); } finally { setBusy(false); }
   };
   return (
     <Card>
-      <Text style={[type.small, { marginBottom: 4 }]}>{t('profile.passwordHint')}</Text>
-      <Field label={t('profile.currentPassword')}>
-        <PasswordInput value={cur} onChangeText={setCur} autoComplete="current-password" />
-      </Field>
+      <Text style={[type.small, { marginBottom: 4 }]}>{t(hasPw ? 'profile.passwordHint' : 'profile.setPasswordHint')}</Text>
+      {hasPw ? (
+        <Field label={t('profile.currentPassword')}>
+          <PasswordInput value={cur} onChangeText={setCur} autoComplete="current-password" />
+        </Field>
+      ) : null}
       <Field label={t('profile.newPassword')} hint={t('m.account.passwordRule')}>
         <PasswordInput value={next} onChangeText={setNext} autoComplete="new-password" />
       </Field>
-      <Button style={{ marginTop: 16 }} icon="🔒" title={busy ? t('profile.saving') : t('profile.changePassword')} busy={busy} disabled={!next} onPress={change} />
+      <Button
+        style={{ marginTop: 16 }}
+        icon="🔒"
+        title={busy ? t('profile.saving') : t(hasPw ? 'profile.changePassword' : 'auth.setPassword')}
+        busy={busy}
+        disabled={!next}
+        onPress={change}
+      />
     </Card>
   );
 }

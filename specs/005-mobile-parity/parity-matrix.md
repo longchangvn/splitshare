@@ -101,6 +101,7 @@ Legend — **Action**: `align` = mobile has it, behaviour must match web;
 | G13 | Save & new | `onSaveNew` | missing | mirror | 3 |
 | G14 | Un-settle blocking confirm on edit | `submitEdit` | yes | align | 3 |
 | G15 | Live server preview + EQUAL floor/1¢ note | `preview` | yes | align | 3 |
+| G16 | One shared field set + draft rules for Add expense, Quick Add, Copy, Edit and every scan card; remembered split per user + group (specs/007) | `components/ExpenseFields.jsx`, `expenseDraft.js`, `splitMemory.js` | `components/expense/ExpenseFields.js`, `shared/expenseDraft.js`, `shared/splitMemory.js`, `splitMemoryStore.js` | mirror | 007 |
 
 ## H. Expense detail
 

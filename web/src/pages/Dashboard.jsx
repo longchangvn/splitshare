@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Autocomplete, Button, CopyButton, Group, Modal, Skeleton, Stack, Text,
+  Button, CopyButton, Group, Modal, Skeleton, Stack, Text,
   TextInput, Textarea, Title,
 } from '@mantine/core';
 import { api, fmt } from '../api.js';
 import { buildBalance, signPrefix, toneForNet } from '../balance.js';
-import { resolveTemplateKey } from '../wizardUtils.js';
-import { Err } from '../auth.jsx';
+import { Err, publicHandle } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { QuickAddExpense } from '../components/QuickAddExpense.jsx';
 import { ADD_EXPENSE_STATE } from '../quickAdd.js';
 import { ActivityKindThumb, ChevronRight, initialsOf, pastelFor } from '../components/Net.jsx';
-import { getTemplates, subscribeCatalogs } from '../settingsStore.js';
 import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
 import { inviteRows } from '../inviteResults.js';
 import { useT } from '../prefs.jsx';
@@ -26,7 +24,6 @@ export function Dashboard() {
   const [e, setE] = useState(null);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
-  const [tpl, setTpl] = useState('');
   const [cq, setCq] = useState('');
   const [contacts, setContacts] = useState([]);
   const [myContacts, setMyContacts] = useState([]); // top 20 by display name
@@ -37,14 +34,10 @@ export function Dashboard() {
   const [creating, setCreating] = useState(false);
   const [step, setStep] = useState(1);
   const [forExpense, setForExpense] = useState(false); // quick-add Flow 1: create → New expense
-  const [templates, setTemplates] = useState(() => getTemplates());
   const [openPanel, setOpenPanel] = useState(false); // My balance breakdown
 
   const load = () => api.get('/api/v1/me/balances').then(setData).catch(setE);
   useEffect(() => { load(); }, []);
-  useEffect(() => subscribeCatalogs(() => {
-    setTemplates(getTemplates());
-  }), []);
 
   const location = useLocation();
   const view = location.pathname === '/groups' ? 'groups'
@@ -60,7 +53,7 @@ export function Dashboard() {
 
   const openWizard = () => {
     setName('');
-    setTpl(''); setCq(''); setContacts([]);
+    setCq(''); setContacts([]);
     setPicked([]); setEmails(''); setCreated(null); setE(null);
     setStep(1); setOpen(true); setForExpense(false);
     loadMyContacts(); // refresh the "Your contacts" box
@@ -85,35 +78,15 @@ export function Dashboard() {
     try {
       const emailList = emails.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
       const memberIds = picked.map((p) => p.user_id);
-      // Free-text combobox: catalog labels resolve to their key; "None"/empty
-      // means no template (plain create). Unknown text passes through as-is.
-      const tplKey = resolveTemplateKey(templates, tpl, t('common.none'));
-      const tplLabel = tplKey ? (templates.find((x) => x.key === tplKey)?.label || tplKey) : '';
-      let g;
-      let link = null;
-      let invites = null;
-      if (tplKey) {
-        g = await api.post('/api/v1/groups/from-template', {
-          name, currency: DEFAULT_CURRENCY, template: tplKey,
-        });
-        const gid0 = g.group_id ?? g.group?.id;
-        if (!gid0) { setE({ message: t('errors.noGroupId') }); return; }
-        if (memberIds.length > 0) await api.post(`/api/v1/groups/${gid0}/members`, { user_ids: memberIds });
-        if (emailList.length > 0) invites = await api.post(`/api/v1/groups/${gid0}/invites`, { emails: emailList });
-        try {
-          const s = await api.post(`/api/v1/groups/${gid0}/share-link`, {});
-          link = s.invite_link || s.link || null;
-        } catch { link = null; }
-      } else {
-        g = await api.post('/api/v1/groups', {
-          name,
-          currency: DEFAULT_CURRENCY,
-          member_ids: memberIds,
-          invite_emails: emailList,
-        });
-        link = g.invite_link || null;
-        invites = g.invites || null;
-      }
+      // Group templates were removed (wizard, Settings catalog and API): always a plain group.
+      const g = await api.post('/api/v1/groups', {
+        name,
+        currency: DEFAULT_CURRENCY,
+        member_ids: memberIds,
+        invite_emails: emailList,
+      });
+      const link = g.invite_link || null;
+      const invites = g.invites || null;
       const gid = g.group_id ?? g.group?.id; // create returns nested {group:{id}}
       if (!gid) {
         setE({ message: t('errors.noGroupId') });
@@ -131,7 +104,6 @@ export function Dashboard() {
         link,
         name: g.group?.name || name,
         currency: DEFAULT_CURRENCY,
-        template: tplLabel,
         people: [...picked.map((p) => p.display_name), ...emailList],
         inviteResult,
       });
@@ -154,10 +126,10 @@ export function Dashboard() {
     <GroupWizard
       step={step} setStep={setStep}
       name={name} setName={setName}
-      tpl={tpl} setTpl={setTpl} create={create} cq={cq} setCq={setCq} searchContacts={searchContacts}
+      create={create} cq={cq} setCq={setCq} searchContacts={searchContacts}
       searching={searching} contacts={contacts} myContacts={myContacts} picked={picked} setPicked={setPicked}
       emails={emails} setEmails={setEmails} creating={creating} created={created}
-      templates={templates} forExpense={forExpense}
+      forExpense={forExpense}
       onOpenGroup={() => { setOpen(false); nav(`/groups/${created?.gid}`); }}
     />
   );
@@ -779,15 +751,13 @@ function BalancePanel({ groups, onClose }) {
 
 function GroupWizard({
   step, setStep,
-  name, setName, tpl, setTpl, create, cq, setCq, searchContacts,
+  name, setName, create, cq, setCq, searchContacts,
   searching, contacts, myContacts = [], picked, setPicked, emails, setEmails, creating, created, onOpenGroup,
-  templates = [], forExpense = false,
+  forExpense = false,
 }) {
   const t = useT();
   if (created) return <GroupCreated created={created} onOpenGroup={onOpenGroup} />;
   const nameOk = name.trim().length >= 3 && name.trim().length <= 50;
-  // Free-input combobox: suggestions are the localized "None" plus catalog labels.
-  const templateOptions = [t('common.none'), ...templates.map((item) => item.label)];
   // Pre-picked people (quick-add) stay visible even when outside the top 20.
   const boxContacts = [
     ...picked.filter((p) => !myContacts.some((c) => c.user_id === p.user_id)),
@@ -815,14 +785,6 @@ function GroupWizard({
             maxLength={50}
             value={name}
             onChange={(x) => setName(x.target.value)}
-          />
-          <Autocomplete
-            label={t('wizard.template')}
-            placeholder={t('common.none')}
-            value={tpl}
-            onChange={setTpl}
-            data={templateOptions}
-            comboboxProps={{ withinPortal: true }}
           />
         </div>
       )}
@@ -888,7 +850,7 @@ function WizardPersonRow({ c, picked, setPicked }) {
     <div className="wizard-person">
       <div style={{ minWidth: 0 }}>
         <Text size="sm" fw={600} truncate>{c.display_name}</Text>
-        <Text size="xs" c="dimmed" truncate>@{c.username}</Text>
+        {publicHandle(c.username) && <Text size="xs" c="dimmed" truncate>@{c.username}</Text>}
       </div>
       <button
         type="button"
@@ -919,7 +881,6 @@ function GroupCreated({ created, onOpenGroup }) {
         <div className="wizard-done-name">{created.name}</div>
         <div className="wizard-success-pills">
           <span>{created.currency}</span>
-          {created.template && <span>{created.template}</span>}
         </div>
         {created.people?.length > 0 && (
           <div className="wizard-success-people">{created.people.join(', ')}</div>
