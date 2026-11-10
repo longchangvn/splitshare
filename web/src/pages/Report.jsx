@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Anchor, Box, Button, Table, Text } from '@mantine/core';
 import { api, fmt } from '../api.js';
-import { Err, useAuth } from '../auth.jsx';
+import { Err, useAuth, userLabel } from '../auth.jsx';
 import { BrandMark, Shell } from '../components/Shell.jsx';
 import { displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
 import { MoneyDonut, PaidShareBars, chartColorsFor } from '../components/MoneyCharts.jsx';
@@ -581,7 +581,7 @@ export function ReportPanel({
     .sort((a, b) => b.value - a.value);
   const categoryTotal = breakdown.reduce((a, b) => a + b.paid_cents, 0);
   const categoryColors = chartColorsFor(categoryRows.map((row) => row.key), 'category');
-  const reporterName = user?.display_name || user?.username || '';
+  const reporterName = userLabel(user);
 
   const runPrint = () => {
     const prev = document.title;

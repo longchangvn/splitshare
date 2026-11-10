@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { AppShell, Avatar, Box, Group, Modal, Text, Tooltip } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { useAuth } from '../auth.jsx';
+import { useAuth, userLabel } from '../auth.jsx';
 import { usePrefs } from '../prefs.jsx';
 import { LOCALE_META, LOCALES } from '../i18n/messages.js';
 import { initialsOf, pastelFor } from './Net.jsx';
@@ -74,7 +74,8 @@ export function Shell({ children }) {
     localStorage.setItem(COLLAPSE_KEY, collapsed ? '1' : '0');
   }, [collapsed]);
 
-  const avatarPastel = pastelFor(user?.display_name || user?.username || '?');
+  const userName = userLabel(user);
+  const avatarPastel = pastelFor(userName || '?');
   const themeLabel = theme === 'dark' ? t('shell.themeToLight') : t('shell.themeToDark');
   const langLabel = t('shell.language');
 
@@ -126,13 +127,13 @@ export function Shell({ children }) {
             <Link
               to="/profile"
               className={`mobile-avatar${onProfile ? ' is-active' : ''}`}
-              aria-label={user ? t('shell.accountNamed', { name: user.display_name }) : t('shell.account')}
+              aria-label={user ? t('shell.accountNamed', { name: userName }) : t('shell.account')}
               aria-current={onProfile ? 'page' : undefined}
               style={{ '--av-from': avatarPastel.from, '--av-to': avatarPastel.to }}
             >
               <span className="mobile-avatar-ring">
                 <span className="mobile-avatar-face">
-                  {user ? initialsOf(user.display_name) : '?'}
+                  {user ? initialsOf(userName) : '?'}
                 </span>
               </span>
             </Link>
@@ -212,11 +213,11 @@ export function Shell({ children }) {
                 to="/profile"
                 className="sidebar-account"
                 aria-current={onProfile ? 'page' : undefined}
-                aria-label={user.display_name}
+                aria-label={userName}
               >
-                <Avatar className="sidebar-avatar" color="teal" radius="xl">{initialsOf(user.display_name)}</Avatar>
+                <Avatar className="sidebar-avatar" color="teal" radius="xl">{initialsOf(userName)}</Avatar>
                 <Box className="sidebar-account-copy" aria-hidden={collapsed}>
-                  <Text size="sm" fw={700} truncate>{user.display_name}</Text>
+                  <Text size="sm" fw={700} truncate>{userName}</Text>
                   <Text className={user.email_verified ? 'sidebar-verify is-ok' : 'sidebar-verify'} size="xs" truncate>
                     {user.email_verified ? t('shell.emailVerified') : t('shell.emailNotVerified')}
                   </Text>

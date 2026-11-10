@@ -4,7 +4,7 @@ import { modals } from '@mantine/modals';
 import { notifications } from '@mantine/notifications';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api.js';
-import { Err, publicHandle, useAuth } from '../auth.jsx';
+import { Err, publicHandle, useAuth, userLabel } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
 import { OtpStep } from './AuthPages.jsx';
 import { useT } from '../prefs.jsx';
@@ -129,6 +129,7 @@ export function Profile() {
             )}
             <form onSubmit={save}>
               <Stack gap="sm">
+                <Title order={3}>{userLabel(me)}</Title>
                 <Text size="sm" c="dimmed">
                   {publicHandle(me?.username) && `@${me.username} · `}{me?.email} {me && !me.email_verified && t('profile.unverified')}
                 </Text>

@@ -11,6 +11,9 @@ export const useAuth = () => useContext(AuthCtx);
 // Email sign-ups use the email as username: never show that as a public @handle.
 export const publicHandle = (username) => (username && !username.includes('@') ? username : null);
 
+/** Name to show for a user: display name, else email, else public handle. */
+export const userLabel = (u) => u?.display_name?.trim() || u?.email || publicHandle(u?.username) || '';
+
 const CRED_USER_KEY = 'ss_cred_user';
 const CRED_PW_KEY = 'ss_cred_pw';
 

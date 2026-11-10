@@ -2,7 +2,7 @@
 // and logout. (Group templates were removed from the product.)
 import React, { useState } from 'react';
 import { View, Text, Pressable } from 'react-native';
-import { useAuth } from '../auth/AuthContext';
+import { useAuth, userLabel } from '../auth/AuthContext';
 import { colors, type } from '../theme';
 import {
   Screen, Card, Row, Avatar, Badge, Button, SectionHeader, ConfirmSheet, DevApiUrlCard,
@@ -25,7 +25,7 @@ export default function SettingsScreen({ navigation }) {
     try { await logout(); } catch (err) { setLogoutOpen(false); setLogoutBusy(false); setE(err); }
   };
 
-  const name = user?.display_name || user?.username || '';
+  const name = userLabel(user);
 
   return (
     <Screen contentStyle={{ paddingBottom: 150 }}>

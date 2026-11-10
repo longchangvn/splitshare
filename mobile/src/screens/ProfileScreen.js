@@ -6,7 +6,7 @@ import { View, Text, Pressable } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../api/client';
 import { colors, type } from '../theme';
-import { publicHandle, useAuth } from '../auth/AuthContext';
+import { publicHandle, useAuth, userLabel } from '../auth/AuthContext';
 import {
   Screen, Card, Row, Avatar, Badge, Button, Segmented, Field, Input, ConfirmSheet, Skeleton, toast, DevApiUrlCard,
 } from '../ui';
@@ -40,9 +40,9 @@ export default function ProfileScreen() {
     <Screen>
       <Card>
         <Row gap={12}>
-          <Avatar name={user?.display_name || user?.username} size={52} />
+          <Avatar name={userLabel(user)} size={52} />
           <View style={{ flex: 1 }}>
-            <Text style={type.h1} numberOfLines={1}>{user?.display_name || user?.username || '…'}</Text>
+            <Text style={type.h1} numberOfLines={1}>{userLabel(user) || '…'}</Text>
             <Text style={type.small} numberOfLines={1}>
               {publicHandle(user?.username) ? `@${user.username} · ` : ''}{user?.email || '…'}
             </Text>
