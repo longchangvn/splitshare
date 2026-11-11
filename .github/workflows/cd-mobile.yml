@@ -233,10 +233,12 @@ jobs:
           echo "Environment: ${ENV_ID##*/} ($ENV_DOMAIN)"
 
           echo "=== 5/5 Container app: $CA_NAME ==="
-          # Metro is stateful (in-memory bundle cache, HMR sockets): exactly one
-          # always-on replica. 1 vCPU / 2Gi is the minimum that bundles reliably.
+          # Metro is stateful (in-memory bundle cache, HMR sockets): at most one
+          # replica. Cost-saving: scales to zero when idle (HTTP scale rule;
+          # the first request after idle cold-starts and rebuilds the bundle)
+          # and uses the smallest Consumption size (0.25 vCPU / 0.5Gi).
           SUFFIX="r${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          COMMON=(--image "$IMAGE" --cpu 1 --memory 2Gi --min-replicas 1 --max-replicas 1
+          COMMON=(--image "$IMAGE" --cpu 0.25 --memory 0.5Gi --min-replicas 0 --max-replicas 1
                   --revision-suffix "$SUFFIX")
           # Token is stored as a container app secret, referenced by env var.
           ENV_VARS=("EXPO_PACKAGER_PROXY_URL=$PROXY_URL" "EXPO_PROJECT_ID=$EXPO_PROJECT_ID"
