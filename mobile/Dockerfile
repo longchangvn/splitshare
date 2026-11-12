@@ -30,4 +30,7 @@ COPY docker/app.config.js ./app.config.js
 
 EXPOSE 8081
 # Exit (-> container restart) as soon as either process dies.
-CMD ["bash", "-c", "node docker/proxy.js & npx expo start --lan --port \"$METRO_PORT\" & wait -n; exit 1"]
+# --max-workers 1: Metro sizes its transform worker pool from the host's CPU
+# count, not the container's vCPU quota; each worker is a separate Node
+# process, which overflows the 0.5Gi container (see cd-mobile.yml).
+CMD ["bash", "-c", "node docker/proxy.js & npx expo start --lan --port \"$METRO_PORT\" --max-workers 1 & wait -n; exit 1"]
