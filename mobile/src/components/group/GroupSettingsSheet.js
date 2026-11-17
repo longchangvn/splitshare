@@ -2,23 +2,28 @@
 // destructive actions tucked at the bottom behind a confirm. One Modal, swapped content
 // (avoids stacking native modals).
 import React, { useEffect, useState } from 'react';
-import { View, Text } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
 import { api } from '../../api/client';
-import { colors, type } from '../../theme';
+import { colors, type, radius, groupTokens } from '../../theme';
+import { activeTheme } from '../../themes';
+import { ThemedIcon } from '../ThemedIcon';
 import { useT } from '../../i18n';
 import { categoryLabel } from '../../shared/categories';
 import { Sheet, Button, Input, Field, Row, ErrText, toast } from '../../ui';
 import { MenuRow, TextAction } from './parts';
 
 const STATUSES = ['opening', 'locked', 'closed'];
-const STATUS_DOT = { opening: colors.primary, locked: '#f59e0b', closed: colors.secondary };
+const STATUS_DOT = { opening: colors.primary, locked: groupTokens.warnDot, closed: colors.secondary };
+const STATUS_MS = { opening: 'lock_open', locked: 'lock', closed: 'archive' };
 
 export default function GroupSettingsSheet({
   visible, onClose, groupId, detail, categories, onReloadCategories, onChanged, onLeft, onOpenStatement, onOpenReport,
 }) {
   const t = useT();
+  const cards = !!activeTheme().features.settingsCards;
   const [mode, setMode] = useState('menu');
   const [name, setName] = useState('');
   const [pending, setPending] = useState(null);
@@ -108,17 +113,19 @@ export default function GroupSettingsSheet({
   if (mode === 'menu') {
     body = (
       <View>
-        {isOwner ? <MenuRow label={t('groupDetail.rename')} onPress={() => { setName(detail?.name || ''); go('rename'); }} /> : null}
+        {isOwner ? <MenuRow ms="edit" label={t('groupDetail.rename')} onPress={() => { setName(detail?.name || ''); go('rename'); }} /> : null}
         {isOwner ? (
-          <MenuRow label={t('groupStatus.label')} sub={t(`groupStatus.${lifecycle}`)} onPress={() => go('status')} />
+          <MenuRow ms={STATUS_MS[lifecycle]} label={t('groupStatus.label')} sub={t(`groupStatus.${lifecycle}`)} onPress={() => go('status')} />
         ) : null}
-        <MenuRow label={t('groupDetail.tabCategories')} sub={t('groupDetail.categoriesHint')} onPress={() => go('categories')} />
-        <MenuRow label={t('groupDetail.tabStatement')} onPress={() => { onClose(); onOpenStatement(); }} />
-        <MenuRow label={t('report.title')} onPress={() => { onClose(); onOpenReport(); }} />
-        <MenuRow label={t('groupDetail.exportCsv')} disabled={busy} onPress={exportCsv} right={null} />
-        <Text style={[type.kicker, { marginTop: 18, marginBottom: 2 }]}>{t('m.group.dangerZone')}</Text>
-        <MenuRow danger label={t('groupDetail.leaveGroup')} onPress={() => go('leave')} last={!isOwner} />
-        {isOwner ? <MenuRow danger last label={t('groupDetail.deleteGroup')} onPress={() => go('delete')} /> : null}
+        <MenuRow ms="sell" label={t('groupDetail.tabCategories')} sub={t('groupDetail.categoriesHint')} onPress={() => go('categories')} />
+        <MenuRow ms="description" label={t('groupDetail.tabStatement')} onPress={() => { onClose(); onOpenStatement(); }} />
+        <MenuRow ms="bar_chart" label={t('report.title')} onPress={() => { onClose(); onOpenReport(); }} />
+        <MenuRow ms="download" label={t('groupDetail.exportCsv')} disabled={busy} onPress={exportCsv} right={null} />
+        <Text style={[type.kicker, { marginTop: 18, marginBottom: 2 }, cards && { color: colors.danger }]}>{t('m.group.dangerZone')}</Text>
+        <View style={cards ? s.danger : null}>
+          <MenuRow ms="logout" danger label={t('groupDetail.leaveGroup')} onPress={() => go('leave')} last={!isOwner} />
+          {isOwner ? <MenuRow ms="delete_outline" danger last label={t('groupDetail.deleteGroup')} onPress={() => go('delete')} /> : null}
+        </View>
       </View>
     );
   } else if (mode === 'rename') {
@@ -138,14 +145,37 @@ export default function GroupSettingsSheet({
     title = t('groupStatus.label');
     body = (
       <View>
-        {STATUSES.map((st, i) => (
+        {cards ? STATUSES.map((st) => {
+          const on = st === lifecycle;
+          const [bg, fg] = groupTokens.lifecycle[st];
+          return (
+            // SplitEase access-status cards (Stitch M24): same pick → confirm flow.
+            <Pressable
+              key={st}
+              onPress={() => { if (on) return; setPending(st); go('statusConfirm'); }}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: on }}
+              accessibilityLabel={t(`groupStatus.${st}`)}
+              style={({ pressed }) => [s.stCard, on && { backgroundColor: bg, borderColor: fg }, pressed && { opacity: 0.85 }]}
+            >
+              <ThemedIcon ms={on ? 'radio_button_checked' : 'radio_button_unchecked'} size={22} color={on ? fg : colors.muted} />
+              <View style={{ flex: 1 }}>
+                <Row gap={6}>
+                  <Text style={type.h3}>{t(`groupStatus.${st}`)}</Text>
+                  <ThemedIcon ms={STATUS_MS[st]} size={16} color={on ? fg : colors.secondary} />
+                </Row>
+                <Text style={[type.small, { marginTop: 2 }]}>{t(`groupStatus.${st}Hint`)}</Text>
+              </View>
+            </Pressable>
+          );
+        }) : STATUSES.map((st, i) => (
           <MenuRow
             key={st}
             last={i === STATUSES.length - 1}
             label={t(`groupStatus.${st}`)}
             sub={t(`groupStatus.${st}Hint`)}
             onPress={() => { if (st === lifecycle) return; setPending(st); go('statusConfirm'); }}
-            right={st === lifecycle ? <Text style={{ color: colors.primary, fontWeight: '800' }}>✓</Text> : <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: STATUS_DOT[st] }} />}
+            right={st === lifecycle ? <ThemedIcon ms="check" size={20} color={colors.primary}><Text style={{ color: colors.primary, fontWeight: '800' }}>✓</Text></ThemedIcon> : <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: STATUS_DOT[st] }} />}
           />
         ))}
       </View>
@@ -253,3 +283,11 @@ export default function GroupSettingsSheet({
     </Sheet>
   );
 }
+
+const s = StyleSheet.create({
+  danger: { backgroundColor: colors.dangerCardBg, borderColor: colors.dangerCardBorder, borderWidth: 1, borderRadius: radius.tile, paddingHorizontal: 12 },
+  stCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14, marginBottom: 8,
+    borderRadius: radius.tile, borderWidth: 1, borderColor: colors.cardBorder, backgroundColor: colors.card,
+  },
+});

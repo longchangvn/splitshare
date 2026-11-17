@@ -12,7 +12,7 @@ public sealed class EmailTemplatesTests
     {
         var m = EmailTemplates.PasswordReset("Alex", "https://app.test/reset/AB12?x=1&y=2", 15, "alex@x.io");
 
-        Assert.Equal("Reset your SplitShare password", m.Subject);
+        Assert.Equal("Reset your SplitEase password", m.Subject);
         Assert.Contains("Reset password: https://app.test/reset/AB12?x=1&y=2", m.Text);
         Assert.Contains("15 minutes", m.Text);
         Assert.Contains("Ignore this email", m.Text);
@@ -29,14 +29,14 @@ public sealed class EmailTemplatesTests
         var m = EmailTemplates.GroupInvite("Minh", "Da Lat Trip", null,
             "Open the link and choose a password to join the group.", "https://app.test/invite/7C1E", 30);
 
-        Assert.Equal("Minh invited you to \"Da Lat Trip\" on SplitShare", m.Subject);
+        Assert.Equal("Minh invited you to \"Da Lat Trip\" on SplitEase", m.Subject);
         Assert.StartsWith("Hi,\n", m.Text);
         Assert.Contains("Accept the invitation: https://app.test/invite/7C1E", m.Text);
         Assert.Contains("choose a password", m.Text);
         Assert.Contains("30 days", m.Text);
         Assert.Contains(">Accept invitation</a>", m.Html);
         Assert.Contains("Da Lat Trip", m.Html);
-        Assert.Contains("Sent on behalf of Minh via SplitShare.", m.Html);
+        Assert.Contains("Sent on behalf of Minh via SplitEase.", m.Html);
 
         var known = EmailTemplates.GroupInvite("Minh", "Trip", "Lan", "Open the link and log in to join the group.", "https://t/i/1", 30);
         Assert.StartsWith("Hi Lan,\n", known.Text);

@@ -2,7 +2,8 @@
 // Idempotency-Key so retries never duplicate), push enable + per-group opt-out, and a
 // plain-language note on how settled groups lock. Activity feed lives in the Activity tab.
 import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, Switch, RefreshControl } from 'react-native';
+import { View, Switch, RefreshControl } from 'react-native';
+import { Text } from '../typography';
 import { useFocusEffect } from '@react-navigation/native';
 import * as Notifications from 'expo-notifications';
 import { api } from '../api/client';
@@ -12,6 +13,10 @@ import { registerPush, getOptOuts, setGroupOptOut } from '../push/notifications'
 import { Screen, Card, Row, Badge, Button, SectionHeader, toast } from '../ui';
 import { usePrefs, useT } from '../i18n';
 import { a } from '../components/account/AccountKit';
+import { IconTile, MINT, SLATE } from '../themes/splitease/components/IconTile';
+import { activeTheme } from '../themes';
+
+const iconTiles = !!activeTheme().features?.iconTiles;
 
 function fmtTime(iso, locale) {
   const d = new Date(iso);
@@ -118,7 +123,8 @@ export default function SystemScreen() {
       {/* Offline queue */}
       <Card>
         <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={type.h2}>{t('m.account.offlineTitle')}</Text>
+          <IconTile ms="cloud_sync" size={36} tone={MINT} />
+          <Text style={[type.h2, iconTiles && { flex: 1 }]}>{t('m.account.offlineTitle')}</Text>
           <Badge kind="settled" label={t('m.account.autoSync')} />
         </Row>
         <Text style={[type.small, { marginTop: 6 }]}>{t('m.account.offlineHint')}</Text>
@@ -143,7 +149,8 @@ export default function SystemScreen() {
       {/* Push notifications */}
       <Card>
         <Row style={{ justifyContent: 'space-between' }}>
-          <Text style={type.h2}>{t('m.account.pushTitle')}</Text>
+          <IconTile ms="notifications" size={36} tone={SLATE} />
+          <Text style={[type.h2, iconTiles && { flex: 1 }]}>{t('m.account.pushTitle')}</Text>
           {statusKey === 'granted' ? <Badge kind="settled" label={t('m.account.pushStatus.granted')} /> : null}
         </Row>
         <Text style={[type.small, { marginTop: 6 }]}>{t('m.account.pushHint')}</Text>

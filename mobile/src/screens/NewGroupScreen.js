@@ -5,14 +5,17 @@
 // Create: POST /groups {name, currency, member_ids, invite_emails}.
 // Params: prefillMembers (quick-add Flow 1) preselects people; forExpense → AddExpense.
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Share } from 'react-native';
+import { View, StyleSheet, Share } from 'react-native';
+import { Text } from '../typography';
 import { api, groupIdOf } from '../api/client';
 import { useT } from '../i18n';
-import { colors, type } from '../theme';
+import { colors, type, tk } from '../theme';
 import { Button, Card, ErrText, Field, Input, Row, Screen } from '../ui';
 import { inviteRows } from '../shared/inviteResults';
 import { InviteResultList, toastInviteResults } from '../components/group/InviteResultList';
 import { PersonRow } from '../components/home/parts';
+import { ThemedIcon } from '../components/ThemedIcon';
+import { IconTile } from '../themes/splitease/components/IconTile';
 import {
   DEFAULT_CURRENCY, asList, boxContacts, nameOk as isNameOk, parseEmails, sortByName,
 } from '../components/home/homeUtils';
@@ -115,7 +118,7 @@ export default function NewGroupScreen({ navigation, route }) {
         )}
       >
         <View style={s.success}>
-          <View style={s.happy}><View style={s.happyIn}><Text style={s.happyT}>☺</Text></View></View>
+          <View style={s.happy}><View style={s.happyIn}><ThemedIcon ms="check" size={26} color="#fff"><Text style={s.happyT}>☺</Text></ThemedIcon></View></View>
           <Text style={s.doneName} accessibilityRole="header">{created.name}</Text>
           <View style={s.pills}>
             <Text style={s.pill}>{created.currency}</Text>
@@ -168,6 +171,7 @@ export default function NewGroupScreen({ navigation, route }) {
 
       {step === 1 ? (
         <Card>
+          <IconTile ms="group_add" size={64} round style={{ alignSelf: 'center', marginBottom: 12 }} />
           <Text style={type.h2}>{t('wizard.groupDetails')}</Text>
           <Field label={t('wizard.groupName')} hint={t('m.home.nameRule')}>
             <Input
@@ -184,6 +188,7 @@ export default function NewGroupScreen({ navigation, route }) {
         </Card>
       ) : (
         <Card>
+          <IconTile ms="person_add" size={64} round style={{ alignSelf: 'center', marginBottom: 12 }} />
           <Text style={type.h2}>{t('wizard.inviteMember')}</Text>
           <Field label={t('wizard.inviteByEmail')}>
             <Input
@@ -239,14 +244,14 @@ const s = StyleSheet.create({
   steps: { flexDirection: 'row', gap: 6 },
   stepBar: { flex: 1, height: 4, borderRadius: 2, backgroundColor: colors.line },
   stepOn: { backgroundColor: colors.primary },
-  box: { borderWidth: 1, borderColor: '#e4ebe7', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, marginTop: 14 },
+  box: { borderWidth: 1, borderColor: tk('#e4ebe7'), borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, marginTop: 14 },
   boxTitle: { fontSize: 13, fontWeight: '700', color: colors.secondary, marginBottom: 4 },
   success: { alignItems: 'center', paddingVertical: 16, gap: 10 },
-  happy: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#e7f6ee', alignItems: 'center', justifyContent: 'center' },
+  happy: { width: 76, height: 76, borderRadius: 38, backgroundColor: tk('#e7f6ee'), alignItems: 'center', justifyContent: 'center' },
   happyIn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center' },
   happyT: { color: '#fff', fontSize: 24, marginTop: -2 },
   doneName: { fontSize: 24, fontWeight: '700', letterSpacing: -0.5, color: colors.text, textAlign: 'center' },
   pills: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
-  pill: { backgroundColor: '#f2f4f3', color: colors.text, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, fontSize: 13, fontWeight: '600', overflow: 'hidden' },
-  people: { color: '#5c6560', fontSize: 14, textAlign: 'center' },
+  pill: { backgroundColor: tk('#f2f4f3'), color: colors.text, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, fontSize: 13, fontWeight: '600', overflow: 'hidden' },
+  people: { color: tk('#5c6560'), fontSize: 14, textAlign: 'center' },
 });

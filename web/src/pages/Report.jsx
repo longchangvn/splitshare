@@ -164,7 +164,7 @@ function ReportPrintDoc({
                     return (
                       <tr key={row.key}>
                         <td>
-                          <span className="report-doc-cat-swatch" style={{ background: categoryColors.get(row.key) }} aria-hidden />
+                          <span className="report-doc-cat-swatch" style={{ background: categoryColors.get(row.key) }} data-chart-color={categoryColors.get(row.key)} aria-hidden />
                           {row.label}
                           <span className="report-doc-cat-count">
                             {' '}
@@ -430,7 +430,7 @@ function ReportPrintDoc({
                 const pct = categoryTotal > 0 ? Math.round((row.value / categoryTotal) * 100) : 0;
                 return (
                   <div key={row.key} className="report-doc-highlight">
-                    <div className="report-doc-ring" style={{ '--pct': pct, '--ring-color': categoryColors.get(row.key) }}>
+                    <div className="report-doc-ring" style={{ '--pct': pct, '--ring-color': categoryColors.get(row.key) }} data-chart-color={categoryColors.get(row.key)}>
                       <span className="report-doc-ring-hole"><b>{pct}%</b></span>
                     </div>
                     <p className="report-doc-highlight-label">
@@ -674,7 +674,7 @@ export function ReportPanel({
                     <Button
                       size="compact-xs"
                       variant="light"
-                      color="teal"
+                      color="brand"
                       className="report-settle-pay"
                       onClick={() => onPay(xfer)}
                     >
@@ -800,7 +800,7 @@ export function ReportPanel({
                   const pct = categoryTotal > 0 ? Math.round((row.value / categoryTotal) * 100) : 0;
                   return (
                     <div key={row.key} className="report-cat-row" role="listitem">
-                      <span className="report-cat-swatch" style={{ background: categoryColors.get(row.key) }} aria-hidden />
+                      <span className="report-cat-swatch" style={{ background: categoryColors.get(row.key) }} data-chart-color={categoryColors.get(row.key)} aria-hidden />
                       <div className="report-cat-copy">
                         <div className="report-cat-head">
                           <span className="report-cat-name">{row.label}</span>
@@ -809,7 +809,7 @@ export function ReportPanel({
                           </span>
                         </div>
                         <div className="report-cat-track" aria-hidden>
-                          <span className="report-cat-fill" style={{ width: `${pct}%`, background: categoryColors.get(row.key) }} />
+                          <span className="report-cat-fill" style={{ width: `${pct}%`, background: categoryColors.get(row.key) }} data-chart-color={categoryColors.get(row.key)} />
                         </div>
                       </div>
                       <div className="report-cat-nums">

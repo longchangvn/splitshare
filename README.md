@@ -133,6 +133,19 @@ set -a; . ./.env; set +a; OCR_LIVE_TEST=1 dotnet test tests --filter ReceiptScan
 Compose: `OCR_ENABLED`, `OCR_API_KEY`, `OCR_MODEL`. CD: vars `OCR__ENABLED`, `OCR__MODEL`,
 secret `OCR__APIKEY`. Spec: `specs/004-multi-receipt-expenses/`.
 
+## Themes (switch without code changes)
+Two UI themes ship side by side: `splitease` (default, Google Stitch design) and `classic`
+(the original look). Each theme lives in its own folder: `web/src/themes/<name>/` and
+`mobile/src/themes/<name>/` (tokens, fonts, icons, strings and theme-only screens).
+- **Web**: set `{ "theme": "classic" }` in `config.json` next to `index.html`
+  (`web/public/config.json`; in Docker, mount over `/usr/share/nginx/html/config.json`) and refresh.
+  `?theme=classic` in the URL overrides it for one page load.
+- **Mobile**: the API returns `theme` from `Ui__Theme` (`UI_THEME` in docker-compose) in
+  `GET /api/v1/capabilities`; the app saves it and applies it on the next launch. Without a server
+  value it uses `EXPO_PUBLIC_THEME`, then `app.json` `expo.extra.theme`.
+- Dark mode (web) works in both themes. Screens listed in a theme's `screens/` folder exist only
+  in that theme.
+
 ## Mobile (Expo) — web parity
 
 `mobile/` is an Expo (React Native) client that mirrors the web app feature for

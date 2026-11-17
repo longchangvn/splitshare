@@ -2,7 +2,8 @@
 // Tabs: Account (PATCH /me) · Password (PATCH /me/password) · Payments (GET/POST/DELETE /me/handles)
 // · Danger (DELETE /me, 422 HAS_OPEN_BALANCE). Logout via confirm sheet. Dev-only API URL card.
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Pressable } from 'react-native';
+import { Text } from '../typography';
 import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../api/client';
 import { colors, type } from '../theme';
@@ -13,6 +14,10 @@ import {
 import { useT } from '../i18n';
 import { AccountErr, PasswordInput, a } from '../components/account/AccountKit';
 import { OtpStep } from './AuthScreen';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
+
+const features = activeTheme().features || {};
 
 export default function ProfileScreen() {
   const t = useT();
@@ -38,6 +43,25 @@ export default function ProfileScreen() {
 
   return (
     <Screen>
+      {features.profileHero ? (
+        <Card style={{ alignItems: 'center', gap: 6, paddingVertical: 24 }}>
+          <Avatar name={userLabel(user)} size={88} />
+          <Text style={[type.title, { marginTop: 6, textAlign: 'center' }]} numberOfLines={1}>{userLabel(user) || '…'}</Text>
+          {publicHandle(user?.username) ? <Text style={type.small}>@{user.username}</Text> : null}
+          {user?.email ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <ThemedIcon ms={user.email_verified ? 'verified_user' : 'mail'} size={16} color={user.email_verified ? colors.primary : colors.secondary} />
+              <Text style={[type.small, { color: colors.body, fontWeight: '600' }]} numberOfLines={1}>{user.email}</Text>
+            </View>
+          ) : null}
+          {user ? (
+            <Badge
+              kind={user.email_verified ? 'settled' : 'nudge'}
+              label={user.email_verified ? t('shell.emailVerified') : t('shell.emailNotVerified')}
+            />
+          ) : null}
+        </Card>
+      ) : (
       <Card>
         <Row gap={12}>
           <Avatar name={userLabel(user)} size={52} />
@@ -57,6 +81,7 @@ export default function ProfileScreen() {
           </View>
         </Row>
       </Card>
+      )}
 
       {user && !user.email_verified ? <VerifyEmailPanel email={user.email} /> : null}
 
@@ -68,7 +93,7 @@ export default function ProfileScreen() {
       {tab === 'payments' ? <PaymentsTab onError={setE} /> : null}
       {tab === 'danger' ? <DangerTab onError={setE} logout={logout} /> : null}
 
-      <Button variant="ghost" title={`⎋  ${t('profile.logOut')}`} onPress={() => setLogoutOpen(true)} style={{ borderColor: colors.dangerCardBorder }} />
+      <Button variant="ghost" icon="⎋" title={t('profile.logOut')} onPress={() => setLogoutOpen(true)} style={{ borderColor: colors.dangerCardBorder }} />
       <DevApiUrlCard />
 
       <ConfirmSheet
@@ -266,7 +291,12 @@ function PaymentsTab({ onError }) {
 
   return (
     <Card>
-      <Text style={type.small}>{t('profile.paymentsHint')}</Text>
+      {features.iconTiles ? (
+        <Row gap={8} style={{ marginBottom: 2 }}>
+          <ThemedIcon ms="info_outline" size={18} color={colors.secondary} />
+          <Text style={[type.small, { flex: 1 }]}>{t('profile.paymentsHint')}</Text>
+        </Row>
+      ) : <Text style={type.small}>{t('profile.paymentsHint')}</Text>}
       <View style={{ marginTop: 8 }}>
         {handles === null ? <Skeleton h={40} /> : null}
         {handles?.length === 0 ? <Text style={[type.body, { color: colors.secondary, paddingVertical: 8 }]}>{t('profile.noHandles')}</Text> : null}
@@ -274,6 +304,7 @@ function PaymentsTab({ onError }) {
           <View key={h.handle_id}>
             {i > 0 ? <View style={a.sep} /> : null}
             <Row style={{ paddingVertical: 10, minHeight: 48 }}>
+              {features.iconTiles ? <Avatar name={h.label} size={40} /> : null}
               <View style={{ flex: 1 }}>
                 <Text style={type.h3} numberOfLines={1}>{h.label}</Text>
                 <Text style={type.small} numberOfLines={2} selectable>{h.details}</Text>
@@ -335,6 +366,12 @@ function DangerTab({ onError, logout }) {
   };
   return (
     <Card style={{ borderColor: colors.dangerCardBorder }}>
+      {features.iconTiles ? (
+        <Row gap={10} style={{ marginBottom: 8 }}>
+          <ThemedIcon ms="warning_amber" size={22} color={colors.danger} />
+          <Text style={[type.h2, { color: colors.danger, flex: 1 }]}>{t('profile.deleteAccount')}</Text>
+        </Row>
+      ) : null}
       <Text style={type.body}>{t('profile.deleteAccountHint')}</Text>
       <AccountErr e={err} />
       <Button style={{ marginTop: 14 }} variant="danger" icon="🗑" title={t('profile.deleteAccount')} onPress={() => { setErr(null); setOpen(true); }} />

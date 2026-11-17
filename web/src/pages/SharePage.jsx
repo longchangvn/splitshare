@@ -3,6 +3,8 @@ import { Link, useParams } from 'react-router-dom';
 import { Anchor, Card, Container, List, Stack, Table, Text, Title } from '@mantine/core';
 import { fmt } from '../api.js';
 import { useT } from '../prefs.jsx';
+import { useAppTheme } from '../themes/index.js';
+import { BrandMark } from '../components/Shell.jsx';
 
 // Public read-only trip page. No login, no emails, no handles.
 export function SharePage() {
@@ -10,6 +12,7 @@ export function SharePage() {
   const { token } = useParams();
   const [d, setD] = useState(null);
   const [err, setErr] = useState(null);
+  const brandHeader = !!useAppTheme().features?.publicBrandHeader;
 
   useEffect(() => {
     fetch(`/api/v1/shared/${token}`).then(async (r) => {
@@ -20,8 +23,15 @@ export function SharePage() {
   }, [token]);
 
   return (
-    <Container size="sm" py="lg">
-      <Text fw={800} size="lg" c="teal.7" component={Link} to="/" style={{ textDecoration: 'none' }}>SplitShare</Text>
+    <Container size="sm" py="lg" className="share-page">
+      {brandHeader ? (
+        <Link to="/" className="brand-logo is-light share-brand" aria-label={t('shell.brand')}>
+          <BrandMark size={32} />
+          <span className="brand-word">{t('shell.brand')}</span>
+        </Link>
+      ) : (
+        <Text fw={800} size="lg" c="brand.7" component={Link} to="/" style={{ textDecoration: 'none' }}>SplitEase</Text>
+      )}
       {err && <Card withBorder padding="md" radius="md" mt="md"><Text c="red">{err}</Text></Card>}
       {!d && !err && <Text c="dimmed" mt="md">{t('common.loading')}</Text>}
       {d && (

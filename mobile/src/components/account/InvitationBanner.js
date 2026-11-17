@@ -2,9 +2,11 @@
 // invite/<token> or shared g/<token>) — web parity with components/InvitationBanner.jsx:
 // the group, who invited, and who is invited.
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import { colors, type } from '../../theme';
 import { useT } from '../../i18n';
+import { ThemedIcon } from '../ThemedIcon';
 
 function Row({ label, value }) {
   return (
@@ -25,7 +27,7 @@ export function InvitationBanner({ inviter, group, memberCount, email, style }) 
   ].filter(Boolean).join('. ');
   return (
     <View style={[s.banner, style]} accessible accessibilityRole="summary" accessibilityLabel={a11y}>
-      <View style={s.icon}><Text style={s.iconT}>✉</Text></View>
+      <View style={s.icon}><ThemedIcon ms="mail" size={18} color="#fff"><Text style={s.iconT}>✉</Text></ThemedIcon></View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={s.badge}>{t('invitation.badge')}</Text>
         <Text style={[type.small, { marginTop: 8 }]}>{t('invitation.groupLabel')}</Text>

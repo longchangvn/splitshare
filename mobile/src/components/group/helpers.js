@@ -161,6 +161,44 @@ export function distributionOf(rows, mode = 'member') {
   return { total, rows: data.map((r) => ({ ...r, color: colors.get(String(r.key)), pct: pct(r.value, total) })) };
 }
 
+/**
+ * What a ledger row means for me, from the API's my_share_cents (expense: my split share;
+ * payment: +amount received / −amount paid). kind: lent | borrowed | received | paid | none.
+ */
+export function ledgerImpact(item, meId) {
+  if (!item || item.excluded || item.reversed) return { kind: 'none', cents: 0 };
+  const share = Number(item.my_share_cents) || 0;
+  if (item.kind === 'payment') {
+    if (share > 0) return { kind: 'received', cents: share };
+    if (share < 0) return { kind: 'paid', cents: -share };
+    return { kind: 'none', cents: 0 };
+  }
+  if (meId && item.payer_id === meId) {
+    const lent = (Number(item.amount_cents) || 0) - share;
+    return lent > 0 ? { kind: 'lent', cents: lent } : { kind: 'none', cents: 0 };
+  }
+  return share > 0 ? { kind: 'borrowed', cents: share } : { kind: 'none', cents: 0 };
+}
+
+/** Local calendar day key (YYYY-MM-DD) of an ISO timestamp; '' when invalid. */
+export function dayKeyOf(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Consecutive rows grouped by local day of `created_at`, order preserved: [{ key, items }]. */
+export function groupByDay(items) {
+  const out = [];
+  for (const it of items || []) {
+    const key = dayKeyOf(it.created_at);
+    const last = out[out.length - 1];
+    if (last && last.key === key) last.items.push(it);
+    else out.push({ key, items: [it] });
+  }
+  return out;
+}
+
 /** Split an emails textarea the same way as web (commas, spaces, semicolons, new lines). */
 export function parseEmails(raw) {
   return String(raw || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);

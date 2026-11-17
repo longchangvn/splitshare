@@ -1,18 +1,17 @@
 // People tab — web gd-people: pastel avatars, role + deposit tags, owner actions in a per-member sheet.
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { colors, type } from '../../theme';
+import { View, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
+import { colors, type, groupTokens } from '../../theme';
+import { activeTheme } from '../../themes';
+import RemovalPreviewSheet from '../../themes/splitease/components/group/RemovalPreviewSheet';
 import { useT } from '../../i18n';
 import { fmt } from '../../api/client';
 import { Card, Avatar, Sheet, ConfirmSheet, ErrText } from '../../ui';
 import { isStaleRemoval, removalSummary } from '../../shared/memberRemoval';
-import { ListRow, MenuRow, p as parts } from './parts';
+import { ListRow, MenuRow, Chevron, p as parts } from './parts';
 
-const ROLE_TONE = {
-  owner: ['#e8f7ef', '#0c7a4b'],
-  treasurer: ['#eff6ff', '#1d4ed8'],
-  member: ['#f1f5f9', '#475569'],
-};
+const ROLE_TONE = groupTokens.roleTone;
 
 export default function PeopleTab({ detail, members, meId, onSetRole, onSetDeposit, onRemove, onRemovalPreview }) {
   const t = useT();
@@ -91,7 +90,7 @@ export default function PeopleTab({ detail, members, meId, onSetRole, onSetDepos
                 {m.username ? <Text style={parts.meta} numberOfLines={1}>@{m.username}</Text> : null}
               </View>
               <Text style={[s.tag, { backgroundColor: rbg, color: rfg }]}>{roleLabel(m.role)}</Text>
-              {actionable ? <Text style={{ color: colors.muted, fontSize: 18 }}>›</Text> : null}
+              {actionable ? <Chevron /> : null}
             </ListRow>
           );
         })}
@@ -128,7 +127,14 @@ export default function PeopleTab({ detail, members, meId, onSetRole, onSetDepos
         ) : null}
       </Sheet>
 
-      <ConfirmSheet
+      <RemoveSheet
+        structured={!!activeTheme().features.removalPreview}
+        name={confirmRemove?.display_name}
+        preview={preview}
+        previewErr={previewErr}
+        stale={stale}
+        members={members}
+        currency={preview?.currency || detail?.currency}
         visible={!!confirmRemove}
         title={t('groupDetail.removeMember')}
         message={confirmRemove ? removalMessage() : ''}
@@ -154,8 +160,24 @@ export default function PeopleTab({ detail, members, meId, onSetRole, onSetDepos
   );
 }
 
+/** Classic: text ConfirmSheet. SplitEase (features.removalPreview): structured re-split preview. */
+function RemoveSheet({ structured, name, preview, previewErr, stale, members, currency, ...confirm }) {
+  if (!structured) return <ConfirmSheet {...confirm} />;
+  return (
+    <RemovalPreviewSheet
+      {...confirm}
+      name={name}
+      preview={preview}
+      previewErr={previewErr}
+      stale={stale}
+      members={members}
+      currency={currency}
+    />
+  );
+}
+
 const s = StyleSheet.create({
   tag: { fontSize: 11, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, overflow: 'hidden' },
-  depOk: { backgroundColor: '#e8f7ef', color: '#0c7a4b' },
-  depDue: { backgroundColor: '#fff7ed', color: '#c2410c' },
+  depOk: { backgroundColor: groupTokens.tagOn[0], color: groupTokens.tagOn[1] },
+  depDue: { backgroundColor: groupTokens.tagDue[0], color: groupTokens.tagDue[1] },
 });

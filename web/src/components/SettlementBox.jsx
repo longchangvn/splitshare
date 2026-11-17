@@ -5,6 +5,7 @@ import {
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { displayNameOf } from './Net.jsx';
+import { ThemedIcon } from './ThemedIcon.jsx';
 import { useT } from '../prefs.jsx';
 
 function InfoIcon() {
@@ -21,20 +22,24 @@ function StatusGlyph({ settled }) {
   if (settled) {
     return (
       <span className="report-status-glyph is-settled" aria-hidden>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
-          <path d="M7.5 12.5 10.5 15.5 16.5 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <ThemedIcon ms="task_alt" size={22}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M7.5 12.5 10.5 15.5 16.5 9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </ThemedIcon>
       </span>
     );
   }
   return (
     <span className="report-status-glyph is-open" aria-hidden>
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
-        <path d="M12 7.5v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        <circle cx="12" cy="16.5" r="1.15" fill="currentColor" />
-      </svg>
+      <ThemedIcon ms="account_balance_wallet" size={22}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M12 7.5v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="12" cy="16.5" r="1.15" fill="currentColor" />
+        </svg>
+      </ThemedIcon>
     </span>
   );
 }
@@ -145,7 +150,7 @@ export function SettlementBox({ groupId, currency, members, onPay, plan: planPro
             size="md"
             aria-hidden
           >
-            <InfoIcon />
+            <ThemedIcon ms="info" size={18}><InfoIcon /></ThemedIcon>
           </ActionIcon>
         </div>
       </section>
@@ -223,7 +228,7 @@ export function SettlementBox({ groupId, currency, members, onPay, plan: planPro
                         <Button
                           size="compact-xs"
                           variant="filled"
-                          color="teal"
+                          color="brand"
                           className="settle-xfer-pay"
                           onClick={() => { onPay(xfer); setOpen(false); }}
                         >

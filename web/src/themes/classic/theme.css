@@ -1,0 +1,3 @@
+/* Classic theme: intentionally empty. styles.css falls back to the original colours
+   for every var(--ss-*) token, which is the classic look. Add classic-only rules here,
+   scoped with :root[data-theme="classic"]. */

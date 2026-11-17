@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import {
   Button, Checkbox, Group, Modal, Select, Stack, Text, TextInput,
 } from '@mantine/core';
@@ -6,12 +6,16 @@ import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err } from '../auth.jsx';
 import { categoryLabelForKey, categorySelectData } from '../categories.js';
-import { displayNameOf } from './Net.jsx';
+import { displayNameOf, initialsOf, pastelFor } from './Net.jsx';
+import { ThemedIcon } from './ThemedIcon.jsx';
 import { useT } from '../prefs.jsx';
+import { useAuth } from '../auth.jsx';
+import { useAppTheme } from '../themes/index.js';
+import { categoryIcon } from '../themes/splitease/components/group/ledger.js';
 import { normalizeDecimalInput as dec } from '../decimalInput.js';
 import {
   TITLE_MAX, changeType, effectiveAmount, equalNote, hasBillDetails, isFxLocked, moneyAmountError,
-  runningTotals, sanitizeMoneyInput, setSplitValue, toggleParticipant,
+  runningTotals, sanitizeMoneyInput, setSplitValue, splitCheck, toggleParticipant,
 } from '../expenseDraft.js';
 
 // validateDraft code → message (same wording in the form and on scan cards).
@@ -35,6 +39,12 @@ export function ExpenseFields({
   preview = null, errors = [], disabled = false, splitHint = null, receiptCurrency = '',
 }) {
   const t = useT();
+  // SplitEase card layout (chips, payer tiles, allocation banner); classic keeps the plain fields.
+  const cards = !!useAppTheme().features?.expenseCards;
+  const meId = useAuth()?.user?.user_id;
+  const section = (cls, children) => (cards
+    ? <div className={`se-exp-section ${cls}`}>{children}</div>
+    : <Fragment>{children}</Fragment>);
   const err = (code) => (errors.includes(code) ? t(ERR_KEY[code]) : null);
   const fx = isFxLocked(draft);
   const type = draft.splitType;
@@ -60,7 +70,7 @@ export function ExpenseFields({
       onChange({ category: created.key });
       setNewCatName('');
       setCatModalOpen(false);
-      notifications.show({ message: t('groupDetail.categoryAdded'), color: 'teal' });
+      notifications.show({ message: t('groupDetail.categoryAdded'), color: 'brand' });
     } catch (e) {
       setCatModalErr(e);
     } finally {
@@ -91,8 +101,15 @@ export function ExpenseFields({
   const guests = draft.guests || [];
   const setGuests = (next) => onChange({ guests: next });
 
+  const check = cards ? splitCheck(draft) : null;
+  const remainingCents = check && type === 'EXACT' && check.base != null && !Number.isNaN(check.sum)
+    ? check.base - Math.round(check.sum * 100)
+    : null;
+
   return (
     <>
+      {section('is-details', (
+        <>
       <TextInput
         label={t('forms.expense.title')}
         required
@@ -104,6 +121,7 @@ export function ExpenseFields({
         onChange={(x) => onChange({ title: x.target.value })}
       />
       <TextInput
+        className="expense-amount-input"
         label={t('forms.expense.amount')}
         required
         inputMode="decimal"
@@ -116,6 +134,28 @@ export function ExpenseFields({
       />
       <div className="wizard-field">
         <span className="wizard-label">{t('forms.expense.category')}</span>
+        {cards ? (
+          <div className="wizard-chips se-cat-chips" role="radiogroup" aria-label={t('forms.expense.category')}>
+            {catData.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                role="radio"
+                aria-checked={draft.category === c.value}
+                className={draft.category === c.value ? 'wizard-chip is-on' : 'wizard-chip'}
+                disabled={disabled}
+                onClick={() => onChange({ category: c.value })}
+              >
+                <ThemedIcon ms={categoryIcon(c.value)} size={16} />
+                {c.label}
+              </button>
+            ))}
+            <button type="button" className="wizard-chip is-add" disabled={disabled} onClick={openAddCategory}>
+              <ThemedIcon ms="add" size={16} />
+              {t('forms.expense.addCategoryBtn')}
+            </button>
+          </div>
+        ) : (
         <Group gap="xs" align="flex-end" wrap="nowrap">
           <Select
             style={{ flex: 1 }}
@@ -130,7 +170,7 @@ export function ExpenseFields({
           <Button
             type="button"
             variant="light"
-            color="teal"
+            color="brand"
             className="wizard-cat-add"
             disabled={disabled}
             onClick={openAddCategory}
@@ -138,6 +178,7 @@ export function ExpenseFields({
             {t('forms.expense.addCategoryBtn')}
           </Button>
         </Group>
+        )}
       </div>
       <TextInput
         label={t('forms.expense.spentOn')}
@@ -147,6 +188,42 @@ export function ExpenseFields({
         error={err('date')}
         onChange={(x) => onChange({ spentAt: x.target.value })}
       />
+        </>
+      ))}
+      {cards ? section('is-payer', (
+        <div className="wizard-field">
+          <span className="wizard-label">{t('seGroup.paidInFullBy')}</span>
+          <div className="se-payer-tiles" role="radiogroup" aria-label={t('forms.expense.payer')}>
+            {members.map((m) => {
+              const on = draft.payerId === m.user_id;
+              const pastel = pastelFor(m.display_name);
+              return (
+                <button
+                  key={m.user_id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  className={`se-payer-tile${on ? ' is-on' : ''}`}
+                  disabled={disabled}
+                  onClick={() => onChange({ payerId: m.user_id })}
+                >
+                  <span className="se-avatar" style={{ '--gt-from': pastel.from, '--gt-to': pastel.to }} aria-hidden>
+                    {initialsOf(m.display_name)}
+                  </span>
+                  <span className="se-payer-copy">
+                    <span className="se-payer-name">
+                      {m.display_name}
+                      {m.user_id === meId ? ` (${t('seGroup.you')})` : ''}
+                    </span>
+                    {on && shownAmount && <span className="se-payer-sub">{fmt(Math.round(Number(shownAmount) * 100), currency)}</span>}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {err('payer') && <Text size="xs" c="red" mt={4}>{err('payer')}</Text>}
+        </div>
+      )) : (
       <Select
         label={t('forms.expense.payer')}
         value={draft.payerId || null}
@@ -156,6 +233,7 @@ export function ExpenseFields({
         error={err('payer')}
         comboboxProps={{ withinPortal: true }}
       />
+      )}
 
       <details className="wizard-optional" open={billOpen} onToggle={(ev) => setBillOpen(ev.currentTarget.open)}>
         <summary>{t('forms.expense.billDetails')}</summary>
@@ -230,10 +308,12 @@ export function ExpenseFields({
         </div>
       </details>
 
+      {section('is-split', (
+        <>
       <div className="wizard-field">
         <span className="wizard-label">{t('forms.expense.method')}</span>
         {splitHint}
-        <div className="wizard-chips" role="radiogroup" aria-label={t('forms.expense.method')}>
+        <div className="wizard-chips split-method-chips" role="radiogroup" aria-label={t('forms.expense.method')}>
           {splitTypes.map((st) => (
             <button
               key={st.value}
@@ -279,12 +359,23 @@ export function ExpenseFields({
         </Stack>
         {err('participants') && <Text size="xs" c="red" mt={4}>{err('participants')}</Text>}
       </div>
-      {type !== 'EQUAL' && totals && (
-        <Text size="sm" c={totals.ok ? 'teal' : 'orange'}>{totals.text}</Text>
-      )}
+      {type !== 'EQUAL' && totals && (cards ? (
+        <div className={`se-alloc-banner is-${totals.ok ? 'ok' : 'warn'}`} role="status">
+          <span className="se-alloc-icon" aria-hidden><ThemedIcon ms={totals.ok ? 'done_all' : 'error'} size={20} /></span>
+          <span className="se-alloc-copy">
+            <strong>{totals.ok ? t('seGroup.balanced') : t('seGroup.unbalanced')}</strong>
+            <span>{totals.text}</span>
+          </span>
+          {remainingCents != null && (
+            <span className="se-alloc-remaining">{t('seGroup.remaining', { amount: fmt(remainingCents, currency) })}</span>
+          )}
+        </div>
+      ) : (
+        <Text size="sm" c={totals.ok ? 'brand' : 'orange'}>{totals.text}</Text>
+      ))}
       {err('split') && <Text size="xs" c="red">{err('split')}</Text>}
       {preview && (
-        <div className="wizard-person wizard-pay-hint">
+        <div className="wizard-person wizard-pay-hint expense-live-preview">
           <Text size="sm" fw={600}>{t('forms.expense.livePreview')}</Text>
           <Text size="sm">
             {Object.entries(preview.shares || {}).map(([id, v]) => (
@@ -298,6 +389,8 @@ export function ExpenseFields({
           )}
         </div>
       )}
+        </>
+      ))}
 
       <Modal
         opened={catModalOpen}
@@ -329,7 +422,7 @@ export function ExpenseFields({
             <Button variant="default" disabled={addingCat} onClick={() => setCatModalOpen(false)}>
               {t('common.cancel')}
             </Button>
-            <Button color="teal" loading={addingCat} disabled={!newCatName.trim()} onClick={addCategoryFromModal}>
+            <Button color="brand" loading={addingCat} disabled={!newCatName.trim()} onClick={addCategoryFromModal}>
               {t('forms.expense.addCategoryBtn')}
             </Button>
           </Group>

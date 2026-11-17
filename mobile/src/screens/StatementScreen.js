@@ -2,14 +2,18 @@
 // member picker (defaults to userId param / me), entry rows with kind chips, date + time,
 // amount, running balance, closing net, footnote.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, RefreshControl, StyleSheet } from 'react-native';
+import { View, RefreshControl, StyleSheet } from 'react-native';
+import { Text } from '../typography';
 import { api, fmt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
 import { Screen, Card, SelectField, SkeletonCard, ErrText, Row } from '../ui';
-import { ListRow, NetChip, useDateFmt, p as parts } from '../components/group/parts';
+import { ListRow, NetChip, IconTile, useDateFmt, p as parts } from '../components/group/parts';
+import { activeTheme } from '../themes';
 
+// Material icon tile per entry kind (themes with icons: 'material').
+const KIND_MS = { paid: 'payments', share: 'call_split', payment_out: 'north_east', payment_in: 'south_west' };
 const KIND_KEY = { paid: 'm.group.kind.paid', share: 'm.group.kind.share', payment_out: 'm.group.kind.paymentOut', payment_in: 'm.group.kind.paymentIn' };
 
 export default function StatementScreen({ route, navigation }) {
@@ -79,6 +83,7 @@ export default function StatementScreen({ route, navigation }) {
             const [bg, fg] = colors.kind[k] || colors.kind.comment;
             return (
               <ListRow key={`${r.entry?.at}-${k}-${i}`} last={false}>
+                {activeTheme().icons === 'material' ? <IconTile ms={KIND_MS[k] || 'receipt_long'} color={fg} size={40} /> : null}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={type.h3} numberOfLines={1}>{r.entry?.title}</Text>
                   <Row gap={6} style={{ marginTop: 4, flexWrap: 'wrap' }}>

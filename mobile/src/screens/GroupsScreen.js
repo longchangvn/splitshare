@@ -1,13 +1,16 @@
 // Groups tab — native port of the web Dashboard groups board (GroupsPage + GroupTile
 // in web/src/pages/Dashboard.jsx). Data: GET /api/v1/me/balances groups[].
 import React, { useState } from 'react';
-import { View, Text, RefreshControl } from 'react-native';
+import { View, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import { Text } from '../typography';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
 import { Button, Card, ErrText, Screen } from '../ui';
 import { useBalances } from '../components/home/data';
 import { GroupTile, GroupTileSkeleton, StatusChip, TabHeader } from '../components/home/parts';
 import { GROUP_STATUSES, statusOf } from '../components/home/homeUtils';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
 
 export default function GroupsScreen({ navigation }) {
   const t = useT();
@@ -20,7 +23,7 @@ export default function GroupsScreen({ navigation }) {
 
   return (
     <Screen
-      contentStyle={{ paddingTop: 12, paddingBottom: 150 }}
+      contentStyle={{ paddingTop: 12, paddingBottom: activeTheme().features?.flatTabBar ? 40 : 150 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => reload({ pull: true })} tintColor={colors.primary} />}
     >
       <TabHeader
@@ -48,6 +51,17 @@ export default function GroupsScreen({ navigation }) {
               onPress={() => toggle(st)}
             />
           ))}
+          {activeTheme().features?.archivedGroups ? (
+            <Pressable
+              style={({ pressed }) => [s.archived, pressed && { opacity: 0.8 }]}
+              onPress={() => navigation.navigate('Archived')}
+              accessibilityRole="button"
+              accessibilityLabel={t('se.archived.title')}
+            >
+              <ThemedIcon ms="inventory_2" size={16} color={colors.body} />
+              <Text style={s.archivedT}>{t('se.groups.archived')}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -74,3 +88,9 @@ export default function GroupsScreen({ navigation }) {
     </Screen>
   );
 }
+
+// SplitEase-only "Archived" link chip (features.archivedGroups).
+const s = StyleSheet.create({
+  archived: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 12, borderRadius: 999, backgroundColor: colors.chipBg },
+  archivedT: { fontSize: 13, fontWeight: '600', color: colors.body },
+});

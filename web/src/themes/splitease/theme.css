@@ -1,0 +1,5 @@
+/* SplitEase theme entry. Everything here must be scoped with :root[data-theme="splitease"]. */
+@import './tokens.css';
+@import './skin.css';
+@import './skin-shell.css';
+@import './skin-group.css';

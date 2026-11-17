@@ -5,7 +5,8 @@
 // (POST /groups/join idempotent; 410 INVITE_ROTATED / 404).
 // splitshare://invite/<token> -> Invitation (emailed per-address invite: accept / join).
 import React from 'react';
-import { Text, View, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { Text } from './src/typography';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -36,6 +37,7 @@ import JoinScreen from './src/screens/JoinScreen';
 import { colors, shadow } from './src/theme';
 import { ToastHost } from './src/ui';
 import { registerPush, addNotificationResponseListener } from './src/push/notifications';
+import { activeTheme } from './src/themes';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -102,9 +104,11 @@ function Dock({ state, navigation }) {
 }
 
 function Main() {
+  // Themes may supply their own tab bar (splitease: flat bar + centre "+"); classic uses the Dock.
+  const TabBar = activeTheme().TabBar || Dock;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.screen }} edges={['top']}>
-      <Tab.Navigator screenOptions={{ headerShown: false }} tabBar={(p) => <Dock {...p} />}>
+      <Tab.Navigator screenOptions={{ headerShown: false }} tabBar={(p) => <TabBar {...p} />}>
         <Tab.Screen name="Home" component={HomeScreen} />
         <Tab.Screen name="Groups" component={GroupsScreen} />
         <Tab.Screen name="Activity" component={ActivityScreen} />
@@ -129,12 +133,14 @@ function Root({ navigationRef }) {
     headerShadowVisible: false,
     headerStyle: { backgroundColor: colors.screen },
     headerTintColor: colors.text,
-    headerTitleStyle: { fontWeight: '700' },
+    headerTitleStyle: { fontWeight: '700', ...(activeTheme().fonts ? { fontFamily: activeTheme().fonts.byWeight['700'] } : null) },
     headerBackButtonDisplayMode: 'minimal',
     contentStyle: { backgroundColor: colors.screen },
   };
-  // Auth sub-screens sit on the dark AuthLayout hero — header blends into it.
-  const authHeader = { headerStyle: { backgroundColor: colors.darkHero }, headerTintColor: '#fff', contentStyle: { backgroundColor: colors.darkHero } };
+  // Auth sub-screens sit on the AuthLayout hero (dark in classic, light in splitease) — header blends into it.
+  const authHeader = {
+    headerStyle: { backgroundColor: colors.darkHero }, headerTintColor: colors.heroText ?? '#fff', contentStyle: { backgroundColor: colors.darkHero },
+  };
   return (
     <Stack.Navigator screenOptions={header}>
       {!user ? (
@@ -167,6 +173,10 @@ function Root({ navigationRef }) {
           <Stack.Screen name="System" component={SystemScreen} options={{ title: t('m.settings.offlinePush') }} />
           <Stack.Screen name="Join" component={JoinScreen} options={{ title: '' }} />
           <Stack.Screen name="Invitation" component={InvitationScreen} options={{ title: '' }} />
+          {/* Theme-only screens (src/themes/<name>/screens). */}
+          {activeTheme().screens.map((sc) => (
+            <Stack.Screen key={sc.name} name={sc.name} component={sc.component} options={typeof sc.options === 'function' ? sc.options(t) : sc.options} />
+          ))}
         </>
       )}
     </Stack.Navigator>

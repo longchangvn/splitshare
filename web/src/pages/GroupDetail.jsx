@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ActionIcon, Anchor, Avatar, Box, Button, Card, Collapse, CopyButton, Group, Indicator, Loader,
@@ -10,7 +10,7 @@ import { notifications } from '@mantine/notifications';
 import { api, fmt } from '../api.js';
 import { Err, publicHandle, useAuth } from '../auth.jsx';
 import { Shell } from '../components/Shell.jsx';
-import { ActivityKindThumb, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
+import { ActivityKindThumb, GroupThumb, displayNameOf, initialsOf, pastelFor } from '../components/Net.jsx';
 import { RowMenu } from '../components/Mobile.jsx';
 import { ExpenseForm, PaymentForm } from '../components/Forms.jsx';
 import { loadLastSplit } from '../splitMemoryStore.js';
@@ -25,6 +25,14 @@ import { useT } from '../prefs.jsx';
 import { normalizeDecimalInput as dec } from '../decimalInput.js';
 import { fetchRemovalPreview, isStaleRemoval, removalPath, removalSummary } from '../memberRemoval.js';
 import { canToggleExpense, groupRawDebts, ledgerTotals } from '../expenseToggle.js';
+import { useAppTheme } from '../themes/index.js';
+import { ThemedIcon } from '../components/ThemedIcon.jsx';
+import { dayHeads, dayLabel, ledgerIcon, myPosition, timeLabel } from '../themes/splitease/components/group/ledger.js';
+import { YourNetCard } from '../themes/splitease/components/group/YourNetCard.jsx';
+import { ClosedGroupBanner } from '../themes/splitease/screens/ClosedGroupBanner.jsx';
+import { GroupSettingsView } from '../themes/splitease/screens/GroupSettingsView.jsx';
+import { PaymentRecordedView } from '../themes/splitease/screens/PaymentRecordedView.jsx';
+import { QrInviteCard } from '../themes/splitease/screens/QrCode.jsx';
 
 // Kill switch for batch "Scan receipts": false keeps the button visible but disabled.
 const SCAN_RECEIPTS_ENABLED = true;
@@ -55,8 +63,11 @@ export function formatGroupCreatedAt(createdAt, label, locale) {
   return `${label} · ${date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })}`;
 }
 
-export function GroupDetail() {
+export function GroupDetail({ view = 'ledger' }) {
   const t = useT();
+  // Theme-only presentation flags (themes/<name>/screens); classic defines none.
+  const ff = useAppTheme().features || {};
+  const isSettingsView = view === 'settings' && !!ff.groupSettings;
   const { user } = useAuth();
   const { id } = useParams();
   const nav = useNavigate();
@@ -104,6 +115,8 @@ export function GroupDetail() {
   const [toggling, setToggling] = useState(null); // expense id whose enable/disable is in flight
   const [payOpen, setPayOpen] = useState(false);
   const [payPreset, setPayPreset] = useState(null);
+  // SplitEase success view after a payment ({ r, fresh }); classic only shows the toast.
+  const [payDone, setPayDone] = useState(null);
   // Bumped after each recorded payment so Report/SettlementBox re-fetch their
   // own settlement plan + completed-payments copies.
   const [settleTick, setSettleTick] = useState(0);
@@ -400,7 +413,7 @@ export function GroupDetail() {
       await api.patch(`/api/v1/expenses/${item.id}/excluded`, { excluded });
       notifications.show({
         message: t(excluded ? 'groupDetail.expenseNowDisabled' : 'groupDetail.expenseNowEnabled', { title: item.title }),
-        color: 'teal',
+        color: 'brand',
       });
       load(); loadLedger(); loadActivityFeed();
       setSettleTick((x) => x + 1);
@@ -428,21 +441,21 @@ export function GroupDetail() {
   const nudge = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/nudges`, { user_ids: [uid] });
-      notifications.show({ title: t('groupDetail.nudged', { name }), color: 'teal' });
+      notifications.show({ title: t('groupDetail.nudged', { name }), color: 'brand' });
       loadActivity();
     } catch (err) { setE(err); }
   };
   const reversePay = async (pid) => {
     try {
       await api.post(`/api/v1/payments/${pid}/reverse`, {});
-      notifications.show({ title: t('groupDetail.paymentReversed'), color: 'teal' });
+      notifications.show({ title: t('groupDetail.paymentReversed'), color: 'brand' });
       load(); loadLedger(); loadSummary(); loadActivityFeed();
     } catch (err) { setE(err); }
   };
   const setRole = async (uid, role) => {
     try {
       await api.patch(`/api/v1/groups/${id}/members/${uid}`, { role });
-      notifications.show({ title: t('groupDetail.roleUpdated', { role }), color: 'teal' });
+      notifications.show({ title: t('groupDetail.roleUpdated', { role }), color: 'brand' });
       load();
     } catch (err) { setE(err); }
   };
@@ -478,7 +491,7 @@ export function GroupDetail() {
       }
       await loadCategories();
       setCategoryModalOpen(false);
-      notifications.show({ message: t(categoryTarget ? 'groupDetail.categorySaved' : 'groupDetail.categoryAdded'), color: 'teal' });
+      notifications.show({ message: t(categoryTarget ? 'groupDetail.categorySaved' : 'groupDetail.categoryAdded'), color: 'brand' });
     } catch (err) { setE(err); } finally { setCatBusy(false); }
   };
   const confirmDeleteCategory = async () => {
@@ -489,7 +502,7 @@ export function GroupDetail() {
       await api.del(`/api/v1/groups/${id}/categories/${categoryDeleteTarget.category_id}`);
       await loadCategories();
       setCategoryDeleteTarget(null);
-      notifications.show({ message: t('groupDetail.categoryDeleted'), color: 'teal' });
+      notifications.show({ message: t('groupDetail.categoryDeleted'), color: 'brand' });
     } catch (err) { setE(err); } finally { setCatBusy(false); }
   };
   const exportPdf = () => {
@@ -528,7 +541,7 @@ export function GroupDetail() {
   const addFromContact = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/members`, { user_ids: [uid] });
-      notifications.show({ title: t('invite.memberAdded', { name }), color: 'teal' });
+      notifications.show({ title: t('invite.memberAdded', { name }), color: 'brand' });
       setContacts((prev) => prev.filter((c) => c.user_id !== uid));
       load();
     } catch (err) { setE(err); }
@@ -543,7 +556,7 @@ export function GroupDetail() {
       notifications.show({
         title: t('invite.rotated'),
         message: t('invite.rotatedHint'),
-        color: 'teal',
+        color: 'brand',
       });
       setE(null);
     } catch (err) { setE(err); } finally { setRotateBusy(false); }
@@ -566,7 +579,7 @@ export function GroupDetail() {
       await api.patch(`/api/v1/groups/${id}`, { name: next });
       setRenameOpen(false);
       await load();
-      notifications.show({ title: t('groupDetail.groupRenamed'), color: 'teal' });
+      notifications.show({ title: t('groupDetail.groupRenamed'), color: 'brand' });
       setE(null);
     } catch (err) { setE(err); } finally { setRenaming(false); }
   };
@@ -586,7 +599,7 @@ export function GroupDetail() {
       await load();
       setStatusConfirmOpen(false);
       setPendingGroupStatus(null);
-      notifications.show({ message: t('groupStatus.updated'), color: 'teal' });
+      notifications.show({ message: t('groupStatus.updated'), color: 'brand' });
     } catch (err) {
       setE(err?.code === 'HAS_OPEN_BALANCE' && next === 'closed'
         ? { message: t('groupStatus.closeUnsettled') }
@@ -689,9 +702,115 @@ export function GroupDetail() {
   }
 
   const heroPastel = pastelFor(detail.name);
+  const ledgerDayHeads = ff.ledgerByDate ? dayHeads(ledger?.items || []) : null;
+  const lifecycleSelect = (
+    <Select
+      aria-label={t('groupStatus.label')}
+      classNames={{ option: 'group-status-option' }}
+      data={[
+        { value: 'opening', label: t('groupStatus.opening') },
+        { value: 'locked', label: t('groupStatus.locked') },
+        { value: 'closed', label: t('groupStatus.closed') },
+      ]}
+      value={groupLifecycle}
+      onChange={requestGroupStatusChange}
+      disabled={statusBusy}
+      size="sm"
+      allowDeselect={false}
+      withCheckIcon={false}
+    />
+  );
+  const categoryManager = (
+    <CategoryManager
+      categories={categories}
+      t={t}
+      onAdd={openAddCategory}
+      onEdit={openEditCategory}
+      onDelete={setCategoryDeleteTarget}
+    />
+  );
+  const desktopActions = (
+    <div className="gd-actions">
+      <button
+        type="button"
+        className="gd-action-btn is-expense"
+        onClick={() => setShowExp(true)} disabled={!canWriteGroup}
+      >
+        <GdActionIcon name="expense" />
+        <span>{t('groupDetail.addExpense')}</span>
+      </button>
+      <button
+        type="button"
+        className="gd-action-btn is-pay"
+        onClick={() => { setPayPreset(null); setPayOpen(true); }} disabled={!canWriteGroup}
+      >
+        <GdActionIcon name="pay" />
+        <span>{t('groupDetail.recordPayment')}</span>
+      </button>
+      {showScan && (
+        <button
+          type="button"
+          className="gd-action-btn is-scan"
+          onClick={() => setScanOpen(true)}
+          disabled={scanDisabled}
+          title={scanTitle}
+        >
+          <GdActionIcon name="scan" />
+          <span>{t('scan.open')}</span>
+        </button>
+      )}
+      <button type="button" className="gd-action-btn is-export" onClick={exportPdf}>
+        <GdActionIcon name="export" />
+        <span>{t('groupDetail.exportPdf')}</span>
+      </button>
+      <button type="button" className="gd-action-btn is-invite" onClick={() => openInvite('email')}>
+        <GdActionIcon name="invite" />
+        <span>{t('groupDetail.inviteMembers')}</span>
+      </button>
+      {ff.groupSettings && (
+        <Link
+          to={`/groups/${id}/settings`}
+          className="gd-action-btn is-settings"
+          aria-label={t('seGroup.settings')}
+          title={t('seGroup.settings')}
+        >
+          <ThemedIcon ms="settings" size={18} />
+        </Link>
+      )}
+      <button type="button" className="gd-action-btn is-danger" onClick={leave}>
+        <GdActionIcon name="leave" />
+        <span>{t('groupDetail.leaveGroup')}</span>
+      </button>
+      {detail.my_role === 'owner' && (
+        <button type="button" className="gd-action-btn is-danger" onClick={delGroup}>
+          <GdActionIcon name="trash" />
+          <span>{t('groupDetail.delete')}</span>
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <Shell>
+      {isSettingsView ? (
+        <GroupSettingsView
+          groupId={id}
+          detail={detail}
+          createdSubtitle={groupCreatedSubtitle}
+          lifecycleLabel={lifecycleLabel}
+          groupLifecycle={groupLifecycle}
+          lifecyclePicker={detail.my_role === 'owner' ? <div className="gd-lifecycle-picker">{lifecycleSelect}</div> : null}
+          onRename={openRename}
+          onInvite={() => openInvite('email')}
+          onSetRole={setRole}
+          onSetDeposit={setDeposit}
+          onRemove={remove}
+          onLeave={leave}
+          onDelete={delGroup}
+          categoryManager={categoryManager}
+          error={<Err e={e} />}
+        />
+      ) : (<>
       <div className="gd-chrome">
         <Anchor component={Link} to="/groups" size="sm" className="gd-back no-print">{t('common.backToGroups')}</Anchor>
         <div
@@ -707,7 +826,7 @@ export function GroupDetail() {
             <div className="gd-tags">
               {detail.my_role === 'owner' && <span className="gd-tag is-owner">{t('common.owner')}</span>}
               {detail.my_role === 'treasurer' && <span className="gd-tag">{t('common.treasurer')}</span>}
-              <span className="gd-tag">
+              <span className="gd-tag is-count">
                 {t('groupDetail.membersCount', {
                   count: members.length,
                   unit: members.length === 1 ? t('common.person') : t('common.people'),
@@ -719,6 +838,7 @@ export function GroupDetail() {
               )}
             </div>
           </div>
+          {ff.heroActions && <GroupThumb name={detail.name} size={72} className="gd-hero-tile" />}
           <div className="gd-hero-main">
             <div className="gd-title-row">
               <Title order={2} className="gd-title" lineClamp={1}>{detail.name}</Title>
@@ -746,6 +866,21 @@ export function GroupDetail() {
               >
                 <GdActionIcon name="share" />
               </ActionIcon>
+              {ff.groupSettings && (
+                <ActionIcon
+                  component={Link}
+                  to={`/groups/${id}/settings`}
+                  variant="subtle"
+                  color="gray"
+                  size="sm"
+                  hiddenFrom={ff.heroActions ? 'sm' : undefined}
+                  title={t('seGroup.settings')}
+                  aria-label={t('seGroup.settings')}
+                  className="gd-rename gd-settings-link"
+                >
+                  <ThemedIcon ms="settings" size={18} />
+                </ActionIcon>
+              )}
             </div>
             {groupCreatedSubtitle && <Text className="gd-created-subtitle" size="xs">{groupCreatedSubtitle}</Text>}
             <div className="gd-net">
@@ -761,25 +896,36 @@ export function GroupDetail() {
                 </span>
               )}
             </div>
+            {ff.heroActions && members.length > 0 && (
+              <div className="gd-hero-members">
+                <span className="gd-hero-avatars" aria-hidden>
+                  {members.slice(0, 5).map((m) => {
+                    const p = pastelFor(m.display_name || m.username);
+                    return (
+                      <span key={m.user_id} className="se-avatar" style={{ '--gt-from': p.from, '--gt-to': p.to }} title={m.display_name}>
+                        {initialsOf(m.display_name)}
+                      </span>
+                    );
+                  })}
+                  {members.length > 5 && <span className="se-avatar is-more">+{members.length - 5}</span>}
+                </span>
+                <span className="gd-hero-members-label">
+                  {t('groupDetail.membersCount', {
+                    count: members.length,
+                    unit: members.length === 1 ? t('common.person') : t('common.people'),
+                  })}
+                </span>
+                <button type="button" className="gd-hero-invite" onClick={() => openInvite('email')} aria-label={t('groupDetail.inviteMembers')} title={t('groupDetail.inviteMembers')}>
+                  <ThemedIcon ms="person_add" size={16} />
+                </button>
+              </div>
+            )}
           </div>
-          {detail.my_role === 'owner' && (
+          {ff.heroActions && !isMobile && desktopActions}
+          {detail.my_role === 'owner' && !(ff.groupSettings && ff.heroActions) && (
             <div className="gd-lifecycle-control">
               <div className="gd-lifecycle-picker">
-                <Select
-                  aria-label={t('groupStatus.label')}
-                  classNames={{ option: 'group-status-option' }}
-                  data={[
-                    { value: 'opening', label: t('groupStatus.opening') },
-                    { value: 'locked', label: t('groupStatus.locked') },
-                    { value: 'closed', label: t('groupStatus.closed') },
-                  ]}
-                  value={groupLifecycle}
-                  onChange={requestGroupStatusChange}
-                  disabled={statusBusy}
-                  size="sm"
-                  allowDeselect={false}
-                  withCheckIcon={false}
-                />
+                {lifecycleSelect}
               </div>
             </div>
           )}
@@ -799,7 +945,7 @@ export function GroupDetail() {
               </Group>
               <Progress
                 value={Math.min(100, detail.budget.pct)}
-                color={detail.budget.over ? 'red' : detail.budget.alert ? 'orange' : 'teal'}
+                color={detail.budget.over ? 'red' : detail.budget.alert ? 'orange' : 'brand'}
                 size="sm"
                 radius="xl"
                 mt={4}
@@ -810,6 +956,9 @@ export function GroupDetail() {
         </div>
         <Err e={e} />
       </div>
+      {ff.closedBanner && groupLifecycle === 'closed' && (
+        <ClosedGroupBanner summary={summary} currency={detail.currency} />
+      )}
 
       <Stack gap="xl" mt="md">
         {isMobile ? (
@@ -853,57 +1002,11 @@ export function GroupDetail() {
               )}
             </div>
           </div>
-        ) : (
-          <div className="gd-actions">
-            <button
-              type="button"
-              className="gd-action-btn is-expense"
-              onClick={() => setShowExp(true)} disabled={!canWriteGroup}
-            >
-              <GdActionIcon name="expense" />
-              <span>{t('groupDetail.addExpense')}</span>
-            </button>
-            <button
-              type="button"
-              className="gd-action-btn is-pay"
-              onClick={() => { setPayPreset(null); setPayOpen(true); }} disabled={!canWriteGroup}
-            >
-              <GdActionIcon name="pay" />
-              <span>{t('groupDetail.recordPayment')}</span>
-            </button>
-            {showScan && (
-              <button
-                type="button"
-                className="gd-action-btn"
-                onClick={() => setScanOpen(true)}
-                disabled={scanDisabled}
-                title={scanTitle}
-              >
-                <GdActionIcon name="scan" />
-                <span>{t('scan.open')}</span>
-              </button>
-            )}
-            <button type="button" className="gd-action-btn" onClick={exportPdf}>
-              <GdActionIcon name="export" />
-              <span>{t('groupDetail.exportPdf')}</span>
-            </button>
-            <button type="button" className="gd-action-btn" onClick={() => openInvite('email')}>
-              <GdActionIcon name="invite" />
-              <span>{t('groupDetail.inviteMembers')}</span>
-            </button>
-            <button type="button" className="gd-action-btn is-danger" onClick={leave}>
-              <GdActionIcon name="leave" />
-              <span>{t('groupDetail.leaveGroup')}</span>
-            </button>
-            {detail.my_role === 'owner' && (
-              <button type="button" className="gd-action-btn is-danger" onClick={delGroup}>
-                <GdActionIcon name="trash" />
-                <span>{t('groupDetail.delete')}</span>
-              </button>
-            )}
-          </div>
-        )}
+        ) : (ff.heroActions ? null : desktopActions)}
         <div className="sticky-spacer" />
+        {ff.yourNet && !(ff.closedBanner && groupLifecycle === 'closed') && (
+          <YourNetCard me={me} currency={detail.currency} />
+        )}
 
         <ReportPanel
           groupId={id}
@@ -913,15 +1016,7 @@ export function GroupDetail() {
           settleTick={settleTick}
           embedded
           onPay={(xfer) => { setPayPreset(xfer); setPayOpen(true); }}
-          categoryManager={(
-            <CategoryManager
-              categories={categories}
-              t={t}
-              onAdd={openAddCategory}
-              onEdit={openEditCategory}
-              onDelete={setCategoryDeleteTarget}
-            />
-          )}
+          categoryManager={categoryManager}
           afterMetrics={(
         <Card withBorder shadow="sm" padding="md" radius="md" className="gd-tabs">
           <Tabs value={tab} onChange={(v) => {
@@ -1112,9 +1207,20 @@ export function GroupDetail() {
               </Stack>
             </Collapse>
           </Box>
-          <Box hiddenFrom="sm">
-            <div className="ledger-list">
-              {(ledger?.items || []).map((item) => (
+          <Box hiddenFrom={ff.ledgerByDate ? undefined : 'sm'}>
+            <div className={`ledger-list${ff.ledgerByDate ? ' is-by-date' : ''}`}>
+              {(ledger?.items || []).map((item, idx) => (
+                <Fragment key={item.id}>
+                {ledgerDayHeads?.get(idx) && (
+                  <div className="ledger-day-head">
+                    <span className="ledger-day-label">{dayLabel(ledgerDayHeads.get(idx).at)}</span>
+                    {ledgerDayHeads.get(idx).total > 0 && (
+                      <span className="ledger-day-total">
+                        {t('seGroup.dailyTotal', { amount: fmt(ledgerDayHeads.get(idx).total, detail.currency) })}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div
                   key={item.id}
                   className={`ledger-row${item.kind === 'expense' ? ' is-link' : ''}${item.reversed ? ' is-reversed' : ''}${item.excluded ? ' is-excluded' : ''}`}
@@ -1126,8 +1232,8 @@ export function GroupDetail() {
                     if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); nav(`/groups/${id}/expenses/${item.id}`); }
                   } : undefined}
                 >
-                  <Avatar className="ledger-thumb" radius="md" size={40} style={{ background: tileFor(item)[1] }}>
-                    {tileFor(item)[0]}
+                  <Avatar className={`ledger-thumb is-${item.kind}`} radius="md" size={40} style={{ background: tileFor(item)[1] }}>
+                    <ThemedIcon ms={ledgerIcon(item)} size={22}>{tileFor(item)[0]}</ThemedIcon>
                   </Avatar>
                   <div className="ledger-copy">
                     <span className="ledger-title">
@@ -1139,6 +1245,7 @@ export function GroupDetail() {
                     <span className="ledger-meta">
                       {item.kind === 'expense'
                         ? [
+                            ff.ledgerByDate ? timeLabel(item.created_at) : null,
                             item.category ? categoryLabelForKey(item.category, categories, t) : null,
                             item.payer_name || displayNameOf(members, item.payer_id),
                           ].filter(Boolean).join(' · ')
@@ -1147,10 +1254,16 @@ export function GroupDetail() {
                   </div>
                   <div className="ledger-amounts">
                     <span className="ledger-amount">{fmt(item.amount_cents, detail.currency)}</span>
-                    <span className="ledger-meta">
-                      {t('groupDetail.myShare')}{' '}
-                      {item.my_share_cents != null ? fmt(item.my_share_cents, detail.currency) : '—'}
-                    </span>
+                    {ff.ledgerByDate && myPosition(item, user?.user_id) ? (
+                      <span className={`ledger-position is-${myPosition(item, user?.user_id).tone}`}>
+                        {t(myPosition(item, user?.user_id).key, { amount: fmt(myPosition(item, user?.user_id).cents, detail.currency) })}
+                      </span>
+                    ) : (
+                      <span className="ledger-meta">
+                        {t('groupDetail.myShare')}{' '}
+                        {item.my_share_cents != null ? fmt(item.my_share_cents, detail.currency) : '—'}
+                      </span>
+                    )}
                     <span className={`ledger-status is-${String(item.status || '').toLowerCase()}`}>
                       {item.status === 'LOCKED' ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}
                     </span>
@@ -1165,6 +1278,7 @@ export function GroupDetail() {
                     </div>
                   )}
                 </div>
+                </Fragment>
               ))}
               {(ledger?.items || []).length > 0 && (
                 <div className="ledger-row is-total">
@@ -1182,6 +1296,7 @@ export function GroupDetail() {
               )}
             </div>
           </Box>
+          {!ff.ledgerByDate && (
           <Box visibleFrom="sm">
             <div className="ledger-list is-table">
               <div className="ledger-row is-head" role="row">
@@ -1253,6 +1368,7 @@ export function GroupDetail() {
               )}
             </div>
           </Box>
+          )}
           {ledgerEmpty && (
             <div className="ledger-empty" role="status">
               {fStatus === 'LOCKED' ? (
@@ -1580,6 +1696,7 @@ export function GroupDetail() {
 
       {/* Inside a group the FAB skips the picker and opens the normal expense form. */}
       <AddExpenseFab onClick={() => setShowExp(true)} disabled={!canWriteGroup} />
+      </>)}
 
       <Modal
         opened={showExp}
@@ -1658,7 +1775,7 @@ export function GroupDetail() {
 
       <Modal
         opened={payOpen}
-        onClose={() => setPayOpen(false)}
+        onClose={() => { setPayOpen(false); setPayDone(null); }}
         closeOnClickOutside={false}
         title={<span className="wizard-title-name">{t('groupDetail.recordPayment')}</span>}
         classNames={{
@@ -1673,24 +1790,42 @@ export function GroupDetail() {
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
       >
+        {payDone ? (
+          <PaymentRecordedView
+            result={payDone.r}
+            members={members}
+            currency={detail.currency}
+            plan={plan}
+            planFresh={payDone.fresh}
+            onDone={() => { setPayOpen(false); setPayDone(null); }}
+            onAnother={() => { setPayPreset(null); setPayDone(null); }}
+          />
+        ) : (
         <PaymentForm
           groupId={id}
           members={members}
           preset={payPreset}
           onDone={(r) => {
-            setPayOpen(false);
+            if (!ff.paymentRecorded) setPayOpen(false);
             setPayPreset(null);
-            load();
+            const reloaded = load();
             loadLedger();
             loadSummary();
             loadActivityFeed();
             setSettleTick((x) => x + 1);
-            notifications.show({
-              title: r.fully_settled ? 'Fully settled' : 'Payment recorded',
-              color: 'teal',
-            });
+            if (!ff.paymentRecorded) {
+              notifications.show({
+                title: r.fully_settled ? 'Fully settled' : 'Payment recorded',
+                color: 'brand',
+              });
+              return;
+            }
+            // SplitEase: success view; balance shows once load() has re-fetched the plan.
+            setPayDone({ r, fresh: false });
+            Promise.resolve(reloaded).finally(() => setPayDone((d) => (d && d.r === r ? { ...d, fresh: true } : d)));
           }}
         />
+        )}
       </Modal>
 
       <Modal
@@ -1724,6 +1859,7 @@ export function GroupDetail() {
                   </Button>
                 )}
               </CopyButton>
+              {ff.inviteQr && <QrInviteCard link={detail.invite_link} />}
             </>
           ) : (
             <Text className="confirm-dialog-text">
@@ -1806,7 +1942,7 @@ export function GroupDetail() {
         padding={0}
         overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
       >
-        <div className="wizard-form confirm-dialog">
+        <div className="wizard-form confirm-dialog remove-member-dialog">
           {(() => {
             const nameOf = (uid) => detail?.members?.find((m) => m.user_id === uid)?.display_name || '?';
             const cur = removePreview?.currency || detail?.currency;
@@ -1825,18 +1961,21 @@ export function GroupDetail() {
             }
             return (
               <div className="confirm-dialog-text">
-                <Text>{t('groupDetail.removeResplit', {
+                <Text className="remove-preview-warning">{t('groupDetail.removeResplit', {
                   name, amount: fmt(Math.abs(removePreview.net_cents), cur), count: sum.expenses.length,
                 })}</Text>
-                <Stack gap={8} mt="sm" style={{ maxHeight: 260, overflowY: 'auto' }}>
+                <Stack gap={8} mt="sm" className="remove-preview-list" style={{ maxHeight: 260, overflowY: 'auto' }}>
                   {sum.expenses.map((x) => (
-                    <div key={x.id}>
-                      <Text size="sm" fw={700}>
+                    <div key={x.id} className="remove-preview-expense">
+                      <Text size="sm" fw={700} className="remove-preview-title">
                         {x.title} · {fmt(x.amountCents, cur)} · {t(`forms.expense.${x.method}`)}
                       </Text>
                       {x.rows.map((r) => (
-                        <Text key={r.userId} size="xs" c="dimmed">
-                          {r.name}: {fmt(r.fromCents, cur)} → {fmt(r.toCents, cur)}
+                        <Text key={r.userId} size="xs" c="dimmed" className="remove-preview-row">
+                          <span className="remove-preview-name">{r.name}: </span>
+                          <span className="remove-preview-from">{fmt(r.fromCents, cur)}</span>
+                          <span className="remove-preview-arrow"> → </span>
+                          <span className={`remove-preview-to is-${r.toCents > r.fromCents ? 'up' : r.toCents < r.fromCents ? 'down' : 'same'}`}>{fmt(r.toCents, cur)}</span>
                         </Text>
                       ))}
                     </div>
@@ -1959,7 +2098,7 @@ export function GroupDetail() {
             value={inviteTab}
             onChange={(v) => setInviteTab(v || 'email')}
             className="invite-tabs"
-            color="teal"
+            color="brand"
           >
             <Tabs.List grow>
               <Tabs.Tab value="email">{t('invite.byEmail')}</Tabs.Tab>
@@ -2075,6 +2214,7 @@ export function GroupDetail() {
                         </Button>
                       )}
                     </CopyButton>
+                    {ff.inviteQr && <QrInviteCard link={inviteLinkLive || detail.invite_link} />}
                   </>
                 ) : (
                   <Text className="invite-link-hint">
@@ -2224,7 +2364,17 @@ export function CategoryManager({ categories, t, onAdd, onEdit, onDelete }) {
   );
 }
 
+const GD_ACTION_MS = {
+  pay: 'payments', expense: 'add_card', scan: 'document_scanner', edit: 'edit', export: 'picture_as_pdf',
+  invite: 'person_add', leave: 'logout', trash: 'delete', deposit: 'account_balance_wallet',
+  'deposit-on': 'price_check', treasurer: 'star', share: 'share', copy: 'content_copy', close: 'close', plus: 'add',
+};
+
 function GdActionIcon({ name }) {
+  return <ThemedIcon ms={GD_ACTION_MS[name] || 'add'} size={18}><GdActionSvg name={name} /></ThemedIcon>;
+}
+
+function GdActionSvg({ name }) {
   const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true };
   if (name === 'pay') {
     return (

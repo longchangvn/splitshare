@@ -32,7 +32,9 @@ Deep link test: `npx uri-scheme open splitshare://g/<token> --ios`.
 ## Hosted Expo Go dev server (Azure Container Apps)
 
 `.github/workflows/cd-mobile.yml` (manual) builds `mobile/Dockerfile` — a Metro dev
-server, not a store build — and runs it as container app `mobile-expo[-<label>]`.
+server, not a store build — and runs it as container app `mobile-expo[-<label>]`
+(0.25 vCPU / 0.5Gi, scales 0–1: the first request after idle cold-starts Metro and
+rebuilds the bundle, so expect a slow first load).
 Open `exp://<app>.<env-domain>` (or `exps://…`) in Expo Go; the run summary prints
 the URL + QR. Ingress allows plain HTTP because `exp://` is HTTP to Expo Go, and
 `EXPO_PACKAGER_PROXY_URL` points the manifest at the public origin. Expo Go on a

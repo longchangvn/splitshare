@@ -12,11 +12,14 @@ import { initialsOf } from '../components/Net.jsx';
 import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
 import { inviteRows } from '../inviteResults.js';
 import { useT } from '../prefs.jsx';
+import { useAppTheme } from '../themes/index.js';
+import { QrInviteCard } from '../themes/splitease/screens/QrCode.jsx';
 
 // Single invitation hub: invite multiple people at once (emails and/or contacts)
 // plus the shareable link. GroupDetail links here with one button.
 export function InvitePage() {
   const t = useT();
+  const inviteQr = !!useAppTheme().features?.inviteQr;
   const { id } = useParams();
   const [detail, setDetail] = useState(null);
   const [emails, setEmails] = useState('');
@@ -63,7 +66,7 @@ export function InvitePage() {
   const addMember = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/members`, { user_ids: [uid] });
-      notifications.show({ title: t('invite.memberAdded', { name }), color: 'teal' });
+      notifications.show({ title: t('invite.memberAdded', { name }), color: 'brand' });
     } catch (err) { setE(err); }
   };
 
@@ -71,19 +74,19 @@ export function InvitePage() {
     try {
       const r = await api.post(`/api/v1/groups/${id}/rotate-invite`, {});
       setLink(r.invite_link);
-      notifications.show({ title: t('invite.rotated'), message: t('invite.rotatedHint'), color: 'teal' });
+      notifications.show({ title: t('invite.rotated'), message: t('invite.rotatedHint'), color: 'brand' });
     } catch (err) { setE(err); }
   };
 
   return (
     <Shell>
       <Anchor component={Link} to={`/groups/${id}`} size="sm">{t('common.backToGroup')}</Anchor>
-      <Title order={2} mt="xs">
+      <Title order={2} mt="xs" className="invite-page-title">
         {detail ? t('invite.toGroup', { name: detail.name }) : t('invite.title')}
       </Title>
       <Err e={e} />
 
-      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="md" className="invite-page-card is-email">
         <form onSubmit={inviteMany}>
           <Stack gap="sm">
             <Title order={4}>{t('invite.byEmail')}</Title>
@@ -101,7 +104,7 @@ export function InvitePage() {
         <InviteResults rows={inviteResult} />
       </Card>
 
-      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="md" className="invite-page-card is-contacts">
         <form onSubmit={searchContacts}>
           <Stack gap="sm">
             <Title order={4}>{t('invite.fromContacts')}</Title>
@@ -119,7 +122,7 @@ export function InvitePage() {
         </form>
         <Stack gap="xs" mt="sm">
           {contacts.map((c) => (
-            <Group key={c.user_id} justify="space-between" wrap="nowrap">
+            <Group key={c.user_id} justify="space-between" wrap="nowrap" className="invite-page-contact">
               <Group gap="sm" wrap="nowrap">
                 <Avatar color="blue" radius="xl" size="sm">{initialsOf(c.display_name)}</Avatar>
                 <Text size="sm">{c.display_name}{publicHandle(c.username) && <> <Text span c="dimmed">@{c.username}</Text></>}</Text>
@@ -139,29 +142,30 @@ export function InvitePage() {
       <Card shadow="sm" padding="md" radius="md" mt="md" className="invite-share-card">
         <Title order={4}>{t('invite.shareableLink')}</Title>
         {detail?.my_role === 'owner' && (
-          <Button variant="light" color="teal" mt="sm" onClick={rotate}>
+          <Button variant="light" color="brand" mt="sm" onClick={rotate}>
             {t('invite.newLinkRotates')}
           </Button>
         )}
         {link && (
           <>
-            <Text size="xs" c="dimmed" mt="sm" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
+            <Text size="xs" c="dimmed" mt="sm" className="invite-page-link" style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>
               {link}
             </Text>
             <CopyButton value={link}>
               {({ copied, copy }) => (
                 <Group gap="xs" mt="sm">
-                  <Button color={copied ? 'teal' : 'blue'} onClick={copy}>
+                  <Button color={copied ? 'brand' : 'blue'} onClick={copy}>
                     {copied ? t('common.copied') : t('invite.copyLink')}
                   </Button>
                   {navigator.share && (
-                    <Button variant="light" color="teal" onClick={() => navigator.share({ url: link }).catch(() => {})}>
+                    <Button variant="light" color="brand" onClick={() => navigator.share({ url: link }).catch(() => {})}>
                       {t('invite.share')}
                     </Button>
                   )}
                 </Group>
               )}
             </CopyButton>
+            {inviteQr && <QrInviteCard link={link} />}
           </>
         )}
       </Card>

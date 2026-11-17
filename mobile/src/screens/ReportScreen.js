@@ -2,17 +2,21 @@
 // Same endpoints: /groups/:id, /summary, /settlement, /breakdown. Charts are View-based
 // (no svg dependency): paid-vs-share bars, stacked distribution bars, category % bars.
 import React, { useCallback, useState } from 'react';
-import { View, Text, RefreshControl, StyleSheet } from 'react-native';
+import { View, RefreshControl, StyleSheet } from 'react-native';
+import { Text } from '../typography';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, fmt, displayNameOf } from '../api/client';
 import { useT } from '../i18n';
-import { colors, type } from '../theme';
+import { colors, type, groupTokens } from '../theme';
+import { ThemedIcon } from '../components/ThemedIcon';
 import { Screen, Card, Button, Row, Avatar, SkeletonCard, ErrText } from '../ui';
 import { Bar, Swatch, ListRow, NetChip, useDateFmt, p as parts } from '../components/group/parts';
 import { categoryRowsOf, distributionOf, chartColorsFor, pct, canWriteGroup } from '../components/group/helpers';
 
-const PAID = '#14b8a6';
-const SHARE = '#38bdf8';
+const PAID = groupTokens.reportPaid;
+const SHARE = groupTokens.reportShare;
+/** helpers.js chart literals → the theme's chart colours (identity in classic). */
+const chart = (hex) => groupTokens.chartRemap[hex] ?? hex;
 
 export default function ReportScreen({ route, navigation }) {
   const { id } = route.params || {};
@@ -74,7 +78,7 @@ export default function ReportScreen({ route, navigation }) {
   const barMax = Math.max(1, ...rows.flatMap((m) => [m.total_paid_cents || 0, m.total_share_cents || 0]));
   const catRows = categoryRowsOf(breakdown, t);
   const catTotal = catRows.reduce((a, r) => a + r.value, 0);
-  const catColors = chartColorsFor(catRows.map((r) => r.key), 'category');
+  const catColors = new Map([...chartColorsFor(catRows.map((r) => r.key), 'category')].map(([k, v]) => [k, chart(v)]));
 
   return (
     <Screen refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} tintColor={colors.primary} />}>
@@ -86,7 +90,9 @@ export default function ReportScreen({ route, navigation }) {
             <Text style={type.h2}>{settled ? t('settlement.statusSettled') : t('settlement.statusOpen')}</Text>
             <Text style={type.small}>{settled ? t('settlement.statusSettledHint') : t('settlement.statusOpenHint', { n: transfers.length })}</Text>
           </View>
-          <Text style={{ color: colors.muted, fontSize: 20 }}>›</Text>
+          <ThemedIcon ms="chevron_right" size={24} color={colors.muted}>
+            <Text style={{ color: colors.muted, fontSize: 20 }}>›</Text>
+          </ThemedIcon>
         </Row>
       </Card>
       <View style={s.grid}>
@@ -227,7 +233,8 @@ function Metric({ label, value, sub, alert }) {
 }
 
 /** Stacked proportion bar + legend rows (native stand-in for web MoneyDonut). */
-function Distribution({ title, data, currency, empty, totalLabel }) {
+function Distribution({ title, data: raw, currency, empty, totalLabel }) {
+  const data = { ...raw, rows: raw.rows.map((r) => ({ ...r, color: chart(r.color) })) };
   return (
     <Card style={{ paddingBottom: 4 }}>
       <Row style={{ justifyContent: 'space-between' }}>
@@ -258,6 +265,6 @@ const s = StyleSheet.create({
   metric: { flexBasis: '47%', flexGrow: 1, padding: 14 },
   step: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   stepT: { fontSize: 12, fontWeight: '800', color: colors.primaryText },
-  stack: { flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', backgroundColor: '#eef2f0', gap: 2 },
+  stack: { flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', backgroundColor: groupTokens.barTrack, gap: 2 },
   barNum: { minWidth: 76, textAlign: 'right' },
 });

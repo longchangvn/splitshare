@@ -19,6 +19,8 @@ import {
 import { restoreSplit } from '../splitMemory.js';
 import { saveLastSplit } from '../splitMemoryStore.js';
 import { useSplitPreview } from '../useSplitPreview.js';
+import { useAppTheme } from '../themes/index.js';
+import { PayRouteCard } from '../themes/splitease/components/group/PayRouteCard.jsx';
 
 // Shorten long filenames for the staged list (keep start + extension).
 const shortName = (name) => {
@@ -189,7 +191,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit
         notifications.show({
           title: t('forms.expense.scanDone', { amount: fmt(Math.round(Number(shown) * 100), scan.receiptCurrency || currency) }),
           message: scan.lowConfidence ? t('forms.expense.scanLowConfidence') : t('forms.expense.scanCheck'),
-          color: scan.lowConfidence ? 'orange' : 'teal',
+          color: scan.lowConfidence ? 'orange' : 'brand',
         });
       } else {
         notifications.show({
@@ -232,11 +234,11 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit
             setImgErrs(failures);
             notifications.show({ title: t('forms.expense.savedSomeFailed'), message: failures.join('; '), color: 'orange' });
           } else {
-            notifications.show({ title: t('forms.expense.savedWithReceipts'), color: 'teal' });
+            notifications.show({ title: t('forms.expense.savedWithReceipts'), color: 'brand' });
           }
         }
         if (mode === 'new' && onSaveNew) {
-          if (!notified) notifications.show({ title: t('forms.expense.saved'), color: 'teal' });
+          if (!notified) notifications.show({ title: t('forms.expense.saved'), color: 'brand' });
           onSaveNew(r);
         } else {
           onDone(r);
@@ -291,7 +293,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit
   ) : null;
 
   return (
-    <form className="wizard-form" onSubmit={existing ? submitEdit : submit}>
+    <form className="wizard-form expense-form" onSubmit={existing ? submitEdit : submit}>
       {isCopy && dropped.length > 0 && (
         <Alert color="yellow" variant="light" title={t('forms.expense.formerExcluded')}>
           <Text size="sm">{dropped.map((id) => id.slice(0, 8)).join(', ')}</Text>
@@ -299,7 +301,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit
       )}
 
       <div className="wizard-fields">
-        <div className="wizard-person wizard-pay-hint">
+        <div className="wizard-person wizard-pay-hint expense-receipts">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
             {receiptCount > 0 ? (
               Array.from({ length: Math.min(receiptCount, 3) }).map((_, i) => (
@@ -367,7 +369,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit
               type="button"
               fullWidth
               variant="light"
-              color="teal"
+              color="brand"
               loading={scanning}
               onClick={() => scanRef.current?.click()}
             >
@@ -432,7 +434,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit
       )}
       {!confirm && !multiSave && (
         <Button
-          className="wizard-primary"
+          className="wizard-primary expense-save-single"
           fullWidth
           type="submit"
           loading={saving}
@@ -452,6 +454,7 @@ export function ExpenseForm({ groupId, members, existing, copyFrom, initialSplit
 
 export function PaymentForm({ groupId, members, preset, onDone }) {
   const t = useT();
+  const payRoute = !!useAppTheme().features?.payRoute;
   const options = [...members];
   for (const key of ['from_user_id', 'to_user_id']) {
     const id = preset?.[key];
@@ -504,14 +507,16 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
 
   const data = options.map((m) => ({ value: m.user_id, label: m.display_name }));
   const toName = options.find((m) => m.user_id === to)?.display_name;
+  const fromName = options.find((m) => m.user_id === from)?.display_name;
   const methods = [
     { value: 'cash', label: t('forms.payment.cash') },
     { value: 'transfer', label: t('forms.payment.bank') },
     { value: 'other', label: t('forms.payment.other') },
   ];
   return (
-    <form className="wizard-form" onSubmit={go}>
+    <form className="wizard-form payment-form" onSubmit={go}>
       <div className="wizard-fields">
+        {payRoute && <PayRouteCard fromName={fromName} toName={toName} />}
         <Select
           label={t('forms.payment.from')}
           required
@@ -531,6 +536,7 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           comboboxProps={{ withinPortal: true }}
         />
         <TextInput
+          className="payment-amount-input"
           label={t('forms.expense.amount')}
           required
           inputMode="decimal"
@@ -543,7 +549,7 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
           }}
         />
         {to && (
-          <div className="wizard-person wizard-pay-hint">
+          <div className="wizard-person wizard-pay-hint payment-handles">
             <Text size="sm" fw={600}>
               {isValidMoneyAmount(amount)
                 ? t('forms.payment.payNamedAmount', { name: toName, amount })
@@ -556,13 +562,13 @@ export function PaymentForm({ groupId, members, preset, onDone }) {
                 </Text>
               )
               : handles.map((h) => (
-                <Text key={h.handle_id} size="sm">{h.label}: <b>{h.details}</b></Text>
+                <Text key={h.handle_id} size="sm" className="payment-handle">{h.label}: <b>{h.details}</b></Text>
               ))}
           </div>
         )}
         <div className="wizard-field">
           <span className="wizard-label">{t('forms.payment.method')}</span>
-          <div className="wizard-chips" role="radiogroup" aria-label={t('forms.payment.method')}>
+          <div className="wizard-chips payment-methods" role="radiogroup" aria-label={t('forms.payment.method')}>
             {methods.map((m) => (
               <button
                 key={m.value}

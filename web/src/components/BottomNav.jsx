@@ -1,6 +1,9 @@
 import { Box, Group } from '@mantine/core';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useT } from '../prefs.jsx';
+import { useAppTheme } from '../themes/index.js';
+import { ThemedIcon } from './ThemedIcon.jsx';
+
 function I({ children }) {
   return (
     <svg
@@ -45,19 +48,29 @@ export function usePrimaryNav() {
   const nav = useNavigate();
   const loc = useLocation();
   const t = useT();
+  const themeNav = useAppTheme().nav || [];
   const path = loc.pathname;
   const active = path === '/activity' ? 'activity'
     : path === '/groups' || path.startsWith('/groups/') ? 'groups'
       : path === '/' ? 'home' : null;
 
   return [
-    { id: 'home', label: t('nav.dashboard'), short: t('nav.home'), icon: <HomeIcon />, active: active === 'home', onClick: () => nav('/') },
-    { id: 'groups', label: t('nav.groups'), short: t('nav.groups'), icon: <GroupsIcon />, active: active === 'groups', onClick: () => nav('/groups') },
-    { id: 'activity', label: t('nav.activity'), short: t('nav.activity'), icon: <ActivityIcon />, active: active === 'activity', onClick: () => nav('/activity') },
+    { id: 'home', label: t('nav.dashboard'), short: t('nav.home'), icon: <ThemedIcon ms="space_dashboard"><HomeIcon /></ThemedIcon>, active: active === 'home', onClick: () => nav('/') },
+    { id: 'groups', label: t('nav.groups'), short: t('nav.groups'), icon: <ThemedIcon ms="group"><GroupsIcon /></ThemedIcon>, active: active === 'groups', onClick: () => nav('/groups') },
+    { id: 'activity', label: t('nav.activity'), short: t('nav.activity'), icon: <ThemedIcon ms="history"><ActivityIcon /></ThemedIcon>, active: active === 'activity', onClick: () => nav('/activity') },
+    // Theme-only screens (classic has none).
+    ...themeNav.map((item) => ({
+      id: item.id,
+      label: t(item.labelKey),
+      short: t(item.labelKey),
+      icon: <ThemedIcon ms={item.ms} />,
+      active: path === item.to || path.startsWith(`${item.to}/`),
+      onClick: () => nav(item.to),
+    })),
   ];
 }
 
-function Tab({ label, icon, active, onClick }) {
+function Tab({ label, icon, active, onClick, alwaysLabel = false }) {
   return (
     <Box
       component="button"
@@ -69,6 +82,7 @@ function Tab({ label, icon, active, onClick }) {
     >
       <span className="bottom-nav-icon">{icon}</span>
       {active && <span className="bottom-nav-label">{label}</span>}
+      {!active && alwaysLabel && <span className="bottom-nav-label">{label}</span>}
     </Box>
   );
 }
@@ -76,6 +90,7 @@ function Tab({ label, icon, active, onClick }) {
 export function BottomNav() {
   const items = usePrimaryNav();
   const t = useT();
+  const alwaysLabel = !!useAppTheme().features?.bottomNavLabels;
   return (
     <Box
       component="nav"
@@ -98,6 +113,7 @@ export function BottomNav() {
             icon={item.icon}
             active={item.active}
             onClick={item.onClick}
+            alwaysLabel={alwaysLabel}
           />
         ))}
       </Group>

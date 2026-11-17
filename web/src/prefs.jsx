@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { MESSAGES, LOCALES, LOCALE_META } from './i18n/messages.js';
+import { getAppTheme } from './themes/index.js';
 
 const THEME_KEY = 'ss-theme';
 const LOCALE_KEY = 'ss-locale';
@@ -55,7 +56,8 @@ export function PrefsProvider({ children }) {
 
   const t = useCallback((key, vars) => {
     const dict = MESSAGES[locale] || MESSAGES.en;
-    const raw = dict[key] ?? MESSAGES.en[key] ?? key;
+    const themed = getAppTheme().messages;
+    const raw = themed[locale]?.[key] ?? dict[key] ?? themed.en?.[key] ?? MESSAGES.en[key] ?? key;
     return formatMessage(raw, vars);
   }, [locale]);
 

@@ -245,10 +245,13 @@ public static class TripPackEndpoints
     /// <summary>Public surface: anonymous share page + capabilities. Mapped on the public v1 group.</summary>
     public static void MapPublic(RouteGroupBuilder v1)
     {
-        v1.MapGet("/capabilities", (IOcrService ocr) =>
+        v1.MapGet("/capabilities", (IOcrService ocr, IConfiguration cfg) =>
             Results.Ok(new
             {
                 ocr_enabled = ocr.Enabled,
+                // Mobile UI theme (Ui__Theme env var); null = app uses its build default.
+                // Applied by the app on its next launch (mobile/src/themes/Boot.js).
+                theme = string.IsNullOrWhiteSpace(cfg["Ui:Theme"]) ? null : cfg["Ui:Theme"],
                 // Opt-in client capabilities: older app builds ignore unknown keys and
                 // fall back to per-group requests / local-only push UI (spec 005 §8).
                 features = new { activity_feed = true, push_devices = true }

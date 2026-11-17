@@ -1,12 +1,6 @@
-import { createTheme } from '@mantine/core';
+import { getAppTheme } from './themes/index.js';
 
-export const theme = createTheme({
-  primaryColor: 'teal',
-  defaultRadius: 'md',
-  fontFamily:
-    '"Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  headings: {
-    fontFamily:
-      '"Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  },
-});
+// Mantine theme of the active app theme (see web/src/themes/).
+export function mantineTheme() {
+  return getAppTheme().mantine;
+}

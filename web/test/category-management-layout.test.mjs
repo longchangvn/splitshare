@@ -24,6 +24,7 @@ await build({
   platform: 'node',
   packages: 'external',
   jsx: 'automatic',
+  loader: { '.svg': 'dataurl', '.css': 'empty' },
   define: { 'import.meta.env.VITE_API_BASE': '""' },
   outfile: groupBundlePath,
 });
@@ -41,6 +42,7 @@ await build({
   platform: 'node',
   packages: 'external',
   jsx: 'automatic',
+  loader: { '.svg': 'dataurl', '.css': 'empty' },
   define: { 'import.meta.env.VITE_API_BASE': '""' },
   outbase: new URL('../src', import.meta.url).pathname,
   outdir: bundleDir,
@@ -172,7 +174,7 @@ test('print report headers use the per-page brand and group hierarchy', async ()
   assert.match(styles, /\.report-doc-section-head\.is-page\s*\{[\s\S]*border-left:/);
 });
 
-test('print report cover places the app mark before the SplitShare brand label', async () => {
+test('print report cover places the app mark before the SplitEase brand label', async () => {
   const [report, styles] = await Promise.all([
     readFile(new URL('../src/pages/Report.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
@@ -187,13 +189,13 @@ test('mobile dark shell uses the same surface as the app stage', async () => {
 
   assert.match(
     styles,
-    /@media \(max-width: 47\.99em\)\s*\{[\s\S]*?\[data-ss-theme="dark"\] \.mantine-AppShell-main\s*\{\s*background:\s*#151718;/,
+    /@media \(max-width: 47\.99em\)\s*\{[\s\S]*?\[data-ss-theme="dark"\] \.mantine-AppShell-main\s*\{\s*background:\s*(?:var\(--ss-[\w-]+, )?#151718\)?;/,
   );
 });
 
 test('mobile dark app stage does not render a separate background plate', async () => {
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
-  const darkStageRule = '[data-ss-theme="dark"] .app-stage {\n  background: #151718;';
+  const darkStageRule = '[data-ss-theme="dark"] .app-stage {\n  background: var(--ss-d-bg-neutral-0, #151718);';
   const mobileOverride = '@media (max-width: 47.99em) {\n  [data-ss-theme="dark"] .app-stage {';
 
   assert.ok(styles.indexOf(darkStageRule) >= 0);
@@ -288,8 +290,8 @@ test('mobile bottom navigation shows a brand pill and menu name only for the act
   assert.match(bottomNav, /bottom-nav-tab\$\{active \? ' is-active' : ''\}/);
   assert.match(bottomNav, /className="bottom-nav-dock"/);
   assert.match(bottomNav, /active && <span className="bottom-nav-label">\{label\}<\/span>/);
-  assert.match(styles, /\.bottom-nav-dock\s*\{[\s\S]*background:\s*rgba\(255, 255, 255, 0\.9\);/);
-  assert.match(styles, /\.bottom-nav-tab\.is-active\s*\{[\s\S]*background:\s*#16a34a;/);
+  assert.match(styles, /\.bottom-nav-dock\s*\{[\s\S]*background:\s*(?:var\(--ss-[\w-]+, )?rgba\(255, 255, 255, 0\.9\)\)?;/);
+  assert.match(styles, /\.bottom-nav-tab\.is-active\s*\{[\s\S]*background:\s*(?:var\(--ss-[\w-]+, )?#16a34a\)?;/);
   assert.doesNotMatch(styles, /\.bottom-nav-tab\.is-active \.bottom-nav-icon\s*\{/);
 });
 
@@ -404,8 +406,8 @@ test('category donut charts use distinct semantic colors', () => {
 test('printed reports use dark document colors when the app theme is dark', async () => {
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
-  assert.match(styles, /\[data-ss-theme="dark"\] \.report-doc\s*\{[\s\S]*?background:\s*#151718;/);
-  assert.match(styles, /@media print\s*\{[\s\S]*?html\[data-ss-theme="dark"\],[\s\S]*?background:\s*#151718 !important;/);
+  assert.match(styles, /\[data-ss-theme="dark"\] \.report-doc\s*\{[\s\S]*?background:\s*(?:var\(--ss-[\w-]+, )?#151718\)?;/);
+  assert.match(styles, /@media print\s*\{[\s\S]*?html\[data-ss-theme="dark"\],[\s\S]*?background:\s*(?:var\(--ss-[\w-]+, )?#151718\)? !important;/);
 });
 
 test('printed report sheets keep their body in the physical page flow instead of clipping it', async () => {
@@ -428,7 +430,7 @@ test('printed dark reports fill the page while keeping content inset and categor
   assert.match(styles, /\.report-doc-ring-hole\s*\{[\s\S]*?background:\s*var\(--rd-surface\);/);
   assert.match(styles, /@media print\s*\{[\s\S]*?@page\s*\{[\s\S]*?size:\s*A4;[\s\S]*?margin:\s*0;/);
   assert.match(styles, /@media print\s*\{[\s\S]*?\.report-doc-sheet\s*\{[\s\S]*?min-height:\s*297mm;[\s\S]*?padding:\s*12mm 10mm 10mm;/);
-  assert.match(styles, /@media print\s*\{[\s\S]*?html\[data-ss-theme="dark"\] \.shell-frame,[\s\S]*?background:\s*#151718 !important;/);
+  assert.match(styles, /@media print\s*\{[\s\S]*?html\[data-ss-theme="dark"\] \.shell-frame,[\s\S]*?background:\s*(?:var\(--ss-[\w-]+, )?#151718\)? !important;/);
 });
 
 test('group access stages an owner status change for confirmation before it can update', async () => {
@@ -542,8 +544,8 @@ test('mobile statement uses flat, scannable transaction rows', async () => {
   assert.match(amountRule, /padding:/);
   assert.match(amountRule, /background:\s*transparent;/);
   assert.match(darkAmountRule, /background:\s*transparent;/);
-  assert.match(amountRule, /color:\s*#075f3d;/);
-  assert.match(darkAmountRule, /color:\s*#6ef0aa;/);
+  assert.match(amountRule, /color:\s*(?:var\(--ss-[\w-]+, )?#075f3d\)?;/);
+  assert.match(darkAmountRule, /color:\s*(?:var\(--ss-[\w-]+, )?#6ef0aa\)?;/);
 });
 
 test('desktop statement uses flat rows with a distinct event status label', async () => {
@@ -669,7 +671,7 @@ test('settlement transfers use a flat list and a primary Pay action', async () =
   assert.match(report, /className="report-settle-pay"/);
   assert.match(styles, /\.report-settle-row\s*\{[\s\S]*?border-radius:\s*0;[\s\S]*?background:\s*transparent;/);
   assert.match(styles, /\.report-settle-row:not\(:last-child\)::after\s*\{[\s\S]*?height:\s*1px;/);
-  assert.match(styles, /\.report-settle-pay\s*\{[\s\S]*?min-height:\s*32px;[\s\S]*?background:\s*#0f9f6e/);
+  assert.match(styles, /\.report-settle-pay\s*\{[\s\S]*?min-height:\s*32px;[\s\S]*?background:\s*(?:var\(--ss-[\w-]+, )?#0f9f6e\)?/);
 });
 
 test('settlement detail dialog keeps the body scrollable with flat rows and compact Pay controls', async () => {

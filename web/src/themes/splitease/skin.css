@@ -1,0 +1,30 @@
+/* SplitEase skin: rules beyond colour tokens (font, radius, layout, icons).
+   Every selector must start with :root[data-theme="splitease"]. */
+
+:root[data-theme="splitease"] body {
+  background: #f7f9fb;
+  color: #191c1e;
+}
+:root[data-theme="splitease"][data-ss-theme="dark"] body {
+  background: #101415;
+  color: #e0e3e5;
+}
+
+/* Material Symbols glyphs rendered by <ThemedIcon ms="…"> */
+:root[data-theme="splitease"] .ms-icon {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  direction: ltr;
+  flex: none;
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+:root[data-theme="splitease"] .ms-icon.is-filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}

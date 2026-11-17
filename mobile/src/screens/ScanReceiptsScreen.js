@@ -5,11 +5,15 @@
 // (3 in flight), review/edit one card per receipt, then create expenses one by one —
 // each card keeps its own Idempotency-Key so retries never double-create.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, Image, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Image, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
+import { Text } from '../typography';
 import { api, fmt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, radius, type } from '../theme';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
+import { IconTile } from '../components/group/parts';
 import {
   Screen, Card, Row, Button, Badge, Empty, ErrText, SkeletonCard, toast,
 } from '../ui';
@@ -267,25 +271,54 @@ export default function ScanReceiptsScreen({ route, navigation }) {
     </View>
   );
 
+  const addButton = (
+    <Button
+      style={{ flex: 1 }}
+      variant="soft"
+      icon="📷"
+      busy={picking}
+      disabled={busy || cards.length >= MAX_BATCH}
+      title={cards.length === 0 ? t('scan.addPhotos') : t('scan.takePhotos')}
+      onPress={addPhotos}
+    />
+  );
+
   return (
     <Screen footer={footer}>
-      <Text style={type.small}>{t('scan.hint')}</Text>
-      <Row>
-        <Button
-          style={{ flex: 1 }}
-          variant="soft"
-          icon="📷"
-          busy={picking}
-          disabled={busy || cards.length >= MAX_BATCH}
-          title={cards.length === 0 ? t('scan.addPhotos') : t('scan.takePhotos')}
-          onPress={addPhotos}
-        />
-        {scanning > 0 && <ActivityIndicator color={colors.primary} />}
-      </Row>
-      <Text style={type.small}>
-        {scanning > 0 ? `${t('scan.scanning')} · ` : ''}{t('scan.limit', { max: MAX_BATCH })}
-      </Text>
-      <Text style={type.small}>{t('scan.thirdParty')}</Text>
+      {activeTheme().features.expenseCards ? (
+        // SplitEase (Stitch M2): scan header card with the same hint, limits and add button.
+        <Card>
+          <Row gap={12}>
+            <IconTile ms="document_scanner" size={44} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={type.h2}>{t('scan.title')}</Text>
+              <Text style={type.small}>{t('scan.hint')}</Text>
+            </View>
+          </Row>
+          <Row style={{ marginTop: 12 }}>
+            {addButton}
+            {scanning > 0 && <ActivityIndicator color={colors.primary} />}
+          </Row>
+          <Row gap={6} style={{ marginTop: 8 }}>
+            <ThemedIcon ms="verified_user" size={14} color={colors.secondary} />
+            <Text style={[type.small, { flex: 1 }]}>
+              {scanning > 0 ? `${t('scan.scanning')} · ` : ''}{t('scan.limit', { max: MAX_BATCH })} · {t('scan.thirdParty')}
+            </Text>
+          </Row>
+        </Card>
+      ) : (
+        <>
+          <Text style={type.small}>{t('scan.hint')}</Text>
+          <Row>
+            {addButton}
+            {scanning > 0 && <ActivityIndicator color={colors.primary} />}
+          </Row>
+          <Text style={type.small}>
+            {scanning > 0 ? `${t('scan.scanning')} · ` : ''}{t('scan.limit', { max: MAX_BATCH })}
+          </Text>
+          <Text style={type.small}>{t('scan.thirdParty')}</Text>
+        </>
+      )}
 
       {cards.length === 0 && <Empty emoji="🧾" title={t('scan.empty')} />}
 
@@ -327,7 +360,7 @@ function ScanCard({
   return (
     <Card>
       <Row style={{ alignItems: 'flex-start' }}>
-        {card.file?.uri ? <Image source={{ uri: card.file.uri }} style={s.thumb} accessibilityIgnoresInvertColors /> : null}
+        {card.file?.uri ? <Image source={{ uri: card.file.uri }} style={s.thumb} accessibilityIgnoresInvertColors /> : activeTheme().icons === 'material' ? <IconTile ms="receipt_long" size={52} color={colors.secondary} /> : null}
         <View style={{ flex: 1, gap: 4 }}>
           <Text style={type.h3}>{t('scan.receiptOf', { index: index + 1, total })}</Text>
           <Badge kind={STATUS_KIND[card.status] || 'comment'} label={statusLabel} />

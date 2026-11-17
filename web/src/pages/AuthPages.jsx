@@ -9,6 +9,9 @@ import { takePending, PING, makeNonce, REDIRECT_FLOW_KEY } from '../googleReturn
 import { BrandMark } from '../components/Shell.jsx';
 import { InvitationBanner } from '../components/InvitationBanner.jsx';
 import { useT } from '../prefs.jsx';
+import { useAppTheme } from '../themes/index.js';
+import { AuthBrandPanel } from '../themes/splitease/components/shell/AuthBrandPanel.jsx';
+import { ThemedIcon } from '../components/ThemedIcon.jsx';
 
 // Sanitized in-app destination from ?next= (same-origin path only).
 const safeNext = (search) => {
@@ -28,8 +31,9 @@ function AuthBrand() {
 }
 
 export function AuthLayout({ children }) {
+  const brandPanel = !!useAppTheme().features?.authBrandPanel;
   return (
-    <div className="auth-page">
+    <div className={brandPanel ? 'auth-page has-brand-panel' : 'auth-page'}>
       <div className="auth-bg" aria-hidden>
         <span className="auth-orb auth-orb-a" />
         <span className="auth-orb auth-orb-b" />
@@ -38,6 +42,7 @@ export function AuthLayout({ children }) {
         <span className="auth-beam" />
       </div>
       <div className="auth-shell">
+        {brandPanel && <AuthBrandPanel />}
         <div className="auth-card">
           <AuthBrand />
           <div className="auth-body">{children}</div>
@@ -62,7 +67,17 @@ export function AuthSubmit({ children, loading, icon = 'enter', ...props }) {
   );
 }
 
+const AUTH_ICON_MS = { plus: 'person_add', mail: 'mail', lock: 'lock' };
+
 function AuthActionIcon({ name }) {
+  return (
+    <ThemedIcon ms={AUTH_ICON_MS[name] || 'login'} size={20}>
+      <AuthActionSvg name={name} />
+    </ThemedIcon>
+  );
+}
+
+function AuthActionSvg({ name }) {
   const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': true };
   if (name === 'plus') {
     return (
@@ -664,7 +679,7 @@ export function GoogleBtn({ next, intent = 'signin', loginHint, label: labelOver
       // as a stray blank page during the One Tap wait.
       try {
         p.document.write(
-          '<!doctype html><meta charset="utf-8"><title>SplitShare</title>'
+          '<!doctype html><meta charset="utf-8"><title>SplitEase</title>'
           + '<body style="margin:0;display:grid;place-items:center;height:100vh;'
           + 'font:500 15px/1.4 system-ui,-apple-system,sans-serif;color:#3d4a44;'
           + `background:linear-gradient(180deg,#fff,#f7faf8)">${t('auth.googleContinueWindow')}</body>`,

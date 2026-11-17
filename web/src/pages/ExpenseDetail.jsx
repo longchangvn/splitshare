@@ -15,7 +15,7 @@ import { categoryLabelForKey } from '../categories.js';
 import { useT } from '../prefs.jsx';
 import { GroupLinkInvitation } from './InvitationPage.jsx';
 
-const statusColor = (s) => (s === 'LOCKED' ? 'gray' : s === 'OPEN' ? 'teal' : 'blue');
+const statusColor = (s) => (s === 'LOCKED' ? 'gray' : s === 'OPEN' ? 'brand' : 'blue');
 
 export function ExpenseDetail() {
   const t = useT();
@@ -87,7 +87,7 @@ export function ExpenseDetail() {
     setUploading(true);
     try {
       await api.postForm(`/api/v1/expenses/${eid}/images`, form);
-      notifications.show({ title: 'Receipt uploaded', color: 'teal' });
+      notifications.show({ title: 'Receipt uploaded', color: 'brand' });
       load();
     } catch (err) { setE(err); } finally { setUploading(false); }
   };
@@ -119,9 +119,9 @@ export function ExpenseDetail() {
   return (
     <Shell>
       <Anchor component={Link} to={`/groups/${id}`} size="sm">{t('common.backToGroup')}</Anchor>
-      <Card withBorder shadow="sm" padding="md" radius="md" mt="xs">
-        <Group gap="sm" mb="xs">
-          <Title order={2}>{x.title}</Title>
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="xs" className="expense-detail-hero">
+        <Group gap="sm" mb="xs" className="expense-detail-head">
+          <Title order={2} className="expense-detail-title">{x.title}</Title>
           <Badge color={statusColor(x.status)} variant="light">
             {String(x.status || '').toUpperCase() === 'LOCKED'
               ? t('groupDetail.statusLocked')
@@ -131,8 +131,8 @@ export function ExpenseDetail() {
           </Badge>
         </Group>
         {x.description && <Text mb="sm">{x.description}</Text>}
-        <Text size="sm" mb="sm">{t('expense.paidBy')} <b>{displayNameOf(members, x.payer_id)}</b> · <b>{fmt(x.amount_cents, '')}</b></Text>
-        <Group gap="xs" mb="sm">
+        <Text size="sm" mb="sm" className="expense-detail-paid">{t('expense.paidBy')} <b>{displayNameOf(members, x.payer_id)}</b> · <b className="expense-detail-amount">{fmt(x.amount_cents, '')}</b></Text>
+        <Group gap="xs" mb="sm" className="expense-detail-tags">
           {x.category && <Badge variant="light">{categoryLabelForKey(x.category, categories, t)}</Badge>}
           {x.spent_at && <Badge variant="light">{String(x.spent_at).slice(0, 10)}</Badge>}
         </Group>
@@ -148,7 +148,7 @@ export function ExpenseDetail() {
           </Text>
         )}
         <Err e={e} />
-        <Group gap="sm">
+        <Group gap="sm" className="expense-detail-actions">
           {canModify && (
             <Button variant="light" onClick={() => setEdit(true)}>
               {t('groupDetail.editExpense')}
@@ -159,7 +159,7 @@ export function ExpenseDetail() {
           )}
           <Button
             variant="light"
-            color="teal"
+            color="brand"
             onClick={() => nav(`/groups/${id}`, { state: { copyFrom: x } })}
           >
             {t('groupDetail.copyExpense')}
@@ -194,9 +194,9 @@ export function ExpenseDetail() {
         />
       </Modal>
 
-      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="md" className="expense-detail-card is-splits">
         <Title order={4} mb="sm">{t('expense.splits')}</Title>
-        <List size="sm" spacing="xs">
+        <List size="sm" spacing="xs" className="expense-detail-splits">
           {x.splits.map((s) => (
             <List.Item key={s.user_id}>
               {displayNameOf(members, s.user_id)}: <b>{fmt(s.share_cents, '')}</b>
@@ -205,7 +205,7 @@ export function ExpenseDetail() {
         </List>
       </Card>
 
-      <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+      <Card withBorder shadow="sm" padding="md" radius="md" mt="md" className="expense-detail-card is-receipts">
         <Group justify="space-between" mb="sm">
           <Title order={4}>{t('expense.receipts')}</Title>
           <input
@@ -231,7 +231,7 @@ export function ExpenseDetail() {
         </Group>
       </Card>
 
-      <details style={{ marginTop: 12 }}>
+      <details style={{ marginTop: 12 }} className="expense-detail-history">
         <summary><Title order={4} style={{ display: 'inline' }}>History ({d.audit.length})</Title></summary>
         {d.audit.length === 0 && <Text size="sm" c="dimmed">No changes recorded.</Text>}
         <List size="sm" spacing="xs" mt="sm">
@@ -268,7 +268,7 @@ function Comments({ eid, members }) {
     try { await api.del(`/api/v1/comments/${cid}`); load(); } catch (err) { setE(err); }
   };
   return (
-    <Card withBorder shadow="sm" padding="md" radius="md" mt="md">
+    <Card withBorder shadow="sm" padding="md" radius="md" mt="md" className="expense-detail-card is-comments">
       <Title order={4} mb="sm">Comments ({items.length})</Title>
       <Err e={e} />
       <Stack gap="xs" mb="sm">
@@ -340,7 +340,7 @@ export function JoinPage() {
   if (!loading && !user) return <GroupLinkInvitation token={token} />;
   return (
     <Shell>
-      <Card withBorder shadow="sm" padding="lg" radius="md">
+      <Card withBorder shadow="sm" padding="lg" radius="md" className="join-card">
         <Text>{msg}</Text>
         <Anchor component={Link} to="/" size="sm">{t('common.home')}</Anchor>
       </Card>

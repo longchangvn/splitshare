@@ -7,12 +7,26 @@ import { usePrefs } from '../prefs.jsx';
 import { LOCALE_META, LOCALES } from '../i18n/messages.js';
 import { initialsOf, pastelFor } from './Net.jsx';
 import { BottomNav, usePrimaryNav } from './BottomNav.jsx';
+import { ThemedIcon } from './ThemedIcon.jsx';
+import { useAppTheme } from '../themes/index.js';
+import { SidebarBalance } from '../themes/splitease/components/shell/SidebarBalance.jsx';
 
 const COLLAPSE_KEY = 'ss-nav-collapsed';
 
 export function BrandMark({ size = 22 }) {
   const maskId = `brand-socket-${useId().replace(/:/g, '')}`;
   const h = Math.round((size * 48) / 42);
+  if (useAppTheme().name === 'splitease') {
+    // SplitEase logo tile (same artwork as themes/splitease/favicon.svg).
+    return (
+      <svg className="brand-mark is-tile" viewBox="0 0 48 48" width={size} height={size} aria-hidden>
+        <rect width="48" height="48" rx="12" fill="#006948" />
+        <circle cx="24" cy="24" r="13" fill="none" stroke="#ffffff" strokeWidth="4" />
+        <path d="M24 11 A13 13 0 0 1 37 24 L24 24 Z" fill="#85f8c4" />
+        <path d="M24 11 V37" stroke="#ffffff" strokeWidth="4" />
+      </svg>
+    );
+  }
   return (
     <svg className="brand-mark" viewBox="0 0 42 48" width={size} height={h} aria-hidden>
       <defs>
@@ -30,26 +44,32 @@ export function BrandMark({ size = 22 }) {
 
 function CollapseIcon() {
   return (
-    <svg className="collapse-chevron" width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M15 6l-6 6 6 6" />
-    </svg>
+    <ThemedIcon ms="chevron_left" size={20} className="collapse-chevron">
+      <svg className="collapse-chevron" width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M15 6l-6 6 6 6" />
+      </svg>
+    </ThemedIcon>
   );
 }
 
 function SunIcon() {
   return (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2.5v2.2M12 19.3v2.2M4.5 12H2.3M21.7 12h-2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M16.8 7.2l1.6-1.6M5.6 18.4l1.6-1.6" />
-    </svg>
+    <ThemedIcon ms="light_mode" size={20}>
+      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2.5v2.2M12 19.3v2.2M4.5 12H2.3M21.7 12h-2.2M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M16.8 7.2l1.6-1.6M5.6 18.4l1.6-1.6" />
+      </svg>
+    </ThemedIcon>
   );
 }
 
 function MoonIcon() {
   return (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M20.2 13.4A8.2 8.2 0 0 1 10.6 3.8 8.4 8.4 0 1 0 20.2 13.4Z" />
-    </svg>
+    <ThemedIcon ms="dark_mode" size={20}>
+      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M20.2 13.4A8.2 8.2 0 0 1 10.6 3.8 8.4 8.4 0 1 0 20.2 13.4Z" />
+      </svg>
+    </ThemedIcon>
   );
 }
 
@@ -66,6 +86,7 @@ export function Shell({ children }) {
   const { theme, toggleTheme, locale, setLocale, localeMeta, t } = usePrefs();
   const onProfile = useLocation().pathname === '/profile';
   const items = usePrimaryNav();
+  const showBalance = !!useAppTheme().features?.sidebarBalance && !!user;
   const isDesktop = useMediaQuery('(min-width: 48em)');
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1');
   const [langOpen, setLangOpen] = useState(false);
@@ -176,6 +197,8 @@ export function Shell({ children }) {
             ))}
           </Box>
 
+          {showBalance && <SidebarBalance collapsed={collapsed} />}
+
           <Box className="sidebar-user">
             <div className="sidebar-utils">
               <Tooltip label={themeLabel} position="right" disabled={!collapsed} openDelay={300}>
@@ -215,7 +238,7 @@ export function Shell({ children }) {
                 aria-current={onProfile ? 'page' : undefined}
                 aria-label={userName}
               >
-                <Avatar className="sidebar-avatar" color="teal" radius="xl">{initialsOf(userName)}</Avatar>
+                <Avatar className="sidebar-avatar" color="brand" radius="xl">{initialsOf(userName)}</Avatar>
                 <Box className="sidebar-account-copy" aria-hidden={collapsed}>
                   <Text size="sm" fw={700} truncate>{userName}</Text>
                   <Text className={user.email_verified ? 'sidebar-verify is-ok' : 'sidebar-verify'} size="xs" truncate>

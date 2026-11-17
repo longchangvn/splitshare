@@ -11,7 +11,7 @@ test('password login then logout from profile', async ({ page, request }) => {
 
   await page.goto('/profile');
   await page.getByRole('button', { name: 'Log out' }).click();
-  const confirm = page.getByRole('dialog').filter({ hasText: 'Log out of SplitShare?' });
+  const confirm = page.getByRole('dialog').filter({ hasText: 'Log out of SplitEase?' });
   await confirm.getByRole('button', { name: 'Log out' }).click();
 
   await expect(page).toHaveURL(/\/login/);

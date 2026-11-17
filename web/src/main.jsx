@@ -5,7 +5,8 @@ import { ModalsProvider } from '@mantine/modals';
 import { Notifications } from '@mantine/notifications';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
-import { theme } from './theme.js';
+import { mantineTheme } from './theme.js';
+import { loadTheme } from './themes/index.js';
 import { PrefsProvider, usePrefs } from './prefs.jsx';
 import App from './App.jsx'
 import { initOneSignal } from './onesignal.js';
@@ -28,7 +29,7 @@ bootstrapThemeAttr();
 function ThemedRoot() {
   const { theme: colorScheme } = usePrefs();
   return (
-    <MantineProvider theme={theme} forceColorScheme={colorScheme} defaultColorScheme={colorScheme}>
+    <MantineProvider theme={mantineTheme()} forceColorScheme={colorScheme} defaultColorScheme={colorScheme}>
       <ModalsProvider>
         <Notifications position="top-right" />
         <App />
@@ -37,8 +38,10 @@ function ThemedRoot() {
   );
 }
 
-createRoot(document.getElementById('root')).render(
-  <PrefsProvider>
-    <ThemedRoot />
-  </PrefsProvider>
-)
+loadTheme().then(() => {
+  createRoot(document.getElementById('root')).render(
+    <PrefsProvider>
+      <ThemedRoot />
+    </PrefsProvider>
+  );
+});

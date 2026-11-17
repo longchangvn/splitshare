@@ -2,7 +2,8 @@
 // adapted to native: dark hero with brand mark + language switch, bright form card,
 // biometric unlock, Google with a paste-token fallback, dev-only API URL switcher.
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Alert, Pressable } from 'react-native';
+import { View, Alert, Pressable } from 'react-native';
+import { Text } from '../typography';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { useAuth, savedCredentials } from '../auth/AuthContext';
 import { colors, type } from '../theme';
@@ -12,6 +13,8 @@ import { useT } from '../i18n';
 import { AuthLayout, AccountErr, PasswordInput, a } from '../components/account/AccountKit';
 import { nativeGoogleAvailable, useGoogleIdToken } from '../auth/google';
 import { InvitationBanner } from '../components/account/InvitationBanner';
+import { activeTheme } from '../themes';
+import QuickPassCard from '../themes/splitease/components/QuickPassCard';
 
 // Same client-side rules as the server (pw 8+ letter+digit). Sign-up is email-only:
 // the email is the username and the display name is set later in Profile.
@@ -329,16 +332,19 @@ export default function AuthScreen({ navigation, route }) {
     }
   };
 
+  // SplitEase shows biometric unlock as a Quick Pass card above the form.
+  const quickPass = !!activeTheme().features?.quickPass;
   return (
     <AuthLayout
       title={t('auth.welcomeBack')}
       desc={t('auth.loginContinue')}
       footer={<DevApiUrlCard />}
       banner={invitation ? <InvitationBanner {...invitation} /> : null}
+      top={quickPass ? <QuickPassCard onPress={doBiometric} disabled={busy} /> : null}
     >
       <LoginForm />
       <AccountErr e={e} />
-      <Button style={{ marginTop: 10 }} variant="soft" title={t('m.account.biometric')} onPress={doBiometric} disabled={busy} />
+      {!quickPass ? <Button style={{ marginTop: 10 }} variant="soft" title={t('m.account.biometric')} onPress={doBiometric} disabled={busy} /> : null}
       <GoogleButton navigation={navigation} intent="signin" />
       <View style={a.links}>
         <Text style={a.linkT} onPress={() => navigation.navigate('Register')} accessibilityRole="link">{t('auth.register')}</Text>

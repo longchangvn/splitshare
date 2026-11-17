@@ -68,7 +68,7 @@ services:
       Email__Smtp__Username: ${SMTP_USERNAME:-noreply.splitshares@gmail.com}
       Email__Smtp__Password: ${SMTP_PASSWORD:-}
       Email__Twilio__ApiKey: ${TWILIO_SENDGRID_API_KEY:-}
-      Email__FromName: ${EMAIL_FROM_NAME:-SplitShare}
+      Email__FromName: ${EMAIL_FROM_NAME:-SplitEase}
       Email__FromAddress: ${EMAIL_FROM_ADDRESS:-noreply.splitshares@gmail.com}
       # Receipt scan (OpenCode Console by default; local Ollama works keyless).
       # Off unless OCR_ENABLED=true + OCR_API_KEY (or a loopback OCR_BASE_URL).
@@ -76,6 +76,8 @@ services:
       Ocr__BaseUrl: ${OCR_BASE_URL:-https://opencode.ai/inference/openai/v1}
       Ocr__Model: ${OCR_MODEL:-glm-5.3-flash}
       Ocr__ApiKey: ${OCR_API_KEY:-}
+      # Mobile UI theme sent in GET /capabilities (classic | splitease); empty = app build default.
+      Ui__Theme: ${UI_THEME:-}
     ports:
       - "8081:8080"
     volumes:

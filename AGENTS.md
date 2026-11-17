@@ -112,3 +112,9 @@ Keep the response proportional to the task.
 ## Definition of Done
 
 A task is complete when the requested outcome is implemented or the investigation is fully reported, applicable instructions have been followed, changes have been reviewed, relevant verification has been performed where feasible, and remaining limitations have been disclosed.
+
+## UI themes (web + mobile)
+- Themes live in `web/src/themes/<name>/` and `mobile/src/themes/<name>/` (`classic`, `splitease`; default `splitease`). See README "Themes".
+- `web/src/styles.css` colours are `var(--ss-<role>, <classic literal>)`: never change the literals (that is the classic look); style other themes in their own folder with selectors scoped to `:root[data-theme="<name>"]`.
+- Mobile tokens: `mobile/src/theme.js` re-exports the active theme; hard-coded colours go through `tk('#hex')`; use `Text`/`TextInput` from `mobile/src/typography.js`. Any new token key must exist in every theme.
+- Theme-only strings: `themes/<name>/messages/*.js` (en + vi). Theme-only screens: `themes/<name>/screens/`.

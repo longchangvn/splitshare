@@ -1,27 +1,51 @@
 // Ledger tab — web GroupDetail "ledger" panel (mobile layout): search, type filter,
 // collapsible filter sheet with active-count badge, receipt-style rows, archive empty states.
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import { fmt, displayNameOf } from '../../api/client';
-import { colors, type } from '../../theme';
+import { colors, type, groupTokens } from '../../theme';
 import { useT } from '../../i18n';
 import { sanitizeMoneyInput } from '../../money';
 import { categoryLabelForKey, categorySelectData } from '../../shared/categories';
 import { ledgerTotals } from '../../shared/expenseToggle';
-import { Card, Input, Segmented, Button, SelectField, Field, Sheet, Badge, Row, Skeleton } from '../../ui';
+import { Card, Input, Segmented, Button, SelectField, Field, Sheet, Badge, Row, Skeleton, ChipRow } from '../../ui';
+import { activeTheme } from '../../themes';
+import { ThemedIcon } from '../ThemedIcon';
+import LedgerCards from '../../themes/splitease/components/group/LedgerCards';
 import { Tile, ListRow, useDateFmt, p as parts } from './parts';
 import { DEFAULT_FILTERS, activeFilterCount, isValidDateInput } from './helpers';
 
 export default function LedgerTab({
   items, loading, loaded, currency, members, categories, type: kind, onType, q, onQ,
-  filters, onApplyFilters, emptyKind, onOpen, onItemActions,
+  filters, onApplyFilters, emptyKind, onOpen, onItemActions, meId,
 }) {
   const t = useT();
+  const { features } = activeTheme();
   const d = useDateFmt();
   const [open, setOpen] = useState(false);
   const count = activeFilterCount(filters);
   // Disabled expenses stay listed but do not count (API leaves them out of balances).
   const totals = ledgerTotals(items);
+
+  const emptyState = loaded && !loading && items.length === 0 ? (
+    <View style={{ paddingVertical: 18, alignItems: 'center', gap: 6 }} accessibilityRole="text">
+      {emptyKind === 'archive' ? (
+        <>
+          <Text style={[type.small, { textAlign: 'center' }]}>{t('groupDetail.ledgerEmptyArchive')}</Text>
+          <Button small variant="soft" title={t('groupDetail.viewActive')} onPress={() => onApplyFilters({ ...filters, status: 'OPEN' })} />
+        </>
+      ) : emptyKind === 'settled' ? (
+        <>
+          <Text style={type.h2}>{t('groupDetail.ledgerAllSettled')}</Text>
+          <Text style={[type.small, { textAlign: 'center' }]}>{t('groupDetail.ledgerAllSettledHint')}</Text>
+          <Button small variant="soft" title={t('groupDetail.viewArchive')} onPress={() => onApplyFilters({ ...filters, status: 'LOCKED' })} />
+        </>
+      ) : (
+        <Text style={[type.small, { textAlign: 'center' }]}>{t('groupDetail.ledgerEmptyActive')}</Text>
+      )}
+    </View>
+  ) : null;
 
   return (
     <View style={{ gap: 10 }}>
@@ -50,95 +74,110 @@ export default function LedgerTab({
           accessibilityRole="button"
           accessibilityLabel={count > 0 ? t('groupDetail.filtersActive', { count }) : t('common.filters')}
         >
-          <Text style={{ fontSize: 16, color: colors.text }}>⧩</Text>
+          <ThemedIcon ms="tune" size={20} color={colors.text}><Text style={{ fontSize: 16, color: colors.text }}>⧩</Text></ThemedIcon>
           {count > 0 ? <View style={s.dot}><Text style={s.dotT}>{count}</Text></View> : null}
         </Pressable>
       </Row>
-      {filters.status === 'LOCKED' ? (
+      {features.ledgerByDate ? (
+        // SplitEase: quick category chips + Active / Archived scope (same filters as the sheet).
+        <>
+          <ChipRow
+            scroll
+            options={[{ value: '', label: t('groupDetail.filterAll') }, ...categorySelectData(categories, t)]}
+            value={filters.cat || ''}
+            onChange={(v) => onApplyFilters({ ...filters, cat: v })}
+          />
+          <Segmented
+            value={filters.status === 'LOCKED' ? 'LOCKED' : 'OPEN'}
+            onChange={(v) => onApplyFilters({ ...filters, status: v })}
+            options={[{ value: 'OPEN', label: t('groupDetail.statusOpen') }, { value: 'LOCKED', label: t('groupDetail.statusLocked') }]}
+          />
+        </>
+      ) : null}
+      {filters.status === 'LOCKED' && !features.ledgerByDate ? (
         <Row style={{ justifyContent: 'space-between' }}>
           <Badge kind="comment" label={t('groupDetail.statusLocked')} />
           <Text style={parts.textAction} onPress={() => onApplyFilters({ ...filters, status: 'OPEN' })} accessibilityRole="button">{t('groupDetail.viewActive')}</Text>
         </Row>
       ) : null}
 
-      <Card style={{ paddingVertical: 4 }}>
-        {!loaded && loading ? (
-          <View style={{ gap: 12, paddingVertical: 12 }}>{[0, 1, 2].map((i) => <Skeleton key={i} h={36} />)}</View>
-        ) : null}
-        {items.map((it, i) => {
-          const isExp = it.kind === 'expense';
-          const meta = isExp
-            ? [it.category ? categoryLabelForKey(it.category, categories, t) : null, it.payer_name || displayNameOf(members, it.payer_id)].filter(Boolean).join(' · ')
-            : `${it.from_name || displayNameOf(members, it.from_user_id)} → ${it.to_name || displayNameOf(members, it.to_user_id)}`;
-          const locked = it.status === 'LOCKED';
-          return (
-            <ListRow
-              key={`${it.kind}-${it.id}`}
-              onPress={isExp ? () => onOpen(it) : undefined}
-              onLongPress={isExp ? () => onItemActions(it) : undefined}
-              accessibilityLabel={isExp ? t('groupDetail.openItem', { title: it.title }) : undefined}
-              style={it.reversed || it.excluded ? { opacity: 0.55 } : null}
-            >
-              <Tile item={it} />
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[type.h3, it.reversed && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
-                  {it.title}{it.has_image ? ' 🧾' : ''}{it.reversed ? ` (${t('common.reversed')})` : ''}
-                  {it.excluded ? ` (${t('groupDetail.expenseDisabled')})` : ''}
-                </Text>
-                <Text style={parts.meta} numberOfLines={1}>{meta}</Text>
-                <Text style={[parts.meta, { color: colors.muted }]}>{d.date(it.created_at)}</Text>
+      {features.ledgerByDate ? (
+        <LedgerCards
+          items={items}
+          loading={loading}
+          loaded={loaded}
+          currency={currency}
+          members={members}
+          categories={categories}
+          meId={meId}
+          totals={totals}
+          onOpen={onOpen}
+          onItemActions={onItemActions}
+          emptyState={emptyState}
+        />
+      ) : (
+        <Card style={{ paddingVertical: 4 }}>
+          {!loaded && loading ? (
+            <View style={{ gap: 12, paddingVertical: 12 }}>{[0, 1, 2].map((i) => <Skeleton key={i} h={36} />)}</View>
+          ) : null}
+          {items.map((it, i) => {
+            const isExp = it.kind === 'expense';
+            const meta = isExp
+              ? [it.category ? categoryLabelForKey(it.category, categories, t) : null, it.payer_name || displayNameOf(members, it.payer_id)].filter(Boolean).join(' · ')
+              : `${it.from_name || displayNameOf(members, it.from_user_id)} → ${it.to_name || displayNameOf(members, it.to_user_id)}`;
+            const locked = it.status === 'LOCKED';
+            return (
+              <ListRow
+                key={`${it.kind}-${it.id}`}
+                onPress={isExp ? () => onOpen(it) : undefined}
+                onLongPress={isExp ? () => onItemActions(it) : undefined}
+                accessibilityLabel={isExp ? t('groupDetail.openItem', { title: it.title }) : undefined}
+                style={it.reversed || it.excluded ? { opacity: 0.55 } : null}
+              >
+                <Tile item={it} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[type.h3, it.reversed && { textDecorationLine: 'line-through' }]} numberOfLines={1}>
+                    {it.title}{it.has_image ? ' 🧾' : ''}{it.reversed ? ` (${t('common.reversed')})` : ''}
+                    {it.excluded ? ` (${t('groupDetail.expenseDisabled')})` : ''}
+                  </Text>
+                  <Text style={parts.meta} numberOfLines={1}>{meta}</Text>
+                  <Text style={[parts.meta, { color: colors.muted }]}>{d.date(it.created_at)}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 2 }}>
+                  <Text style={[parts.amount, it.excluded && { textDecorationLine: 'line-through' }]}>{fmt(it.amount_cents, currency)}</Text>
+                  <Text style={parts.meta}>{t('groupDetail.myShare')} {it.my_share_cents != null ? fmt(it.my_share_cents, currency) : '—'}</Text>
+                  <Text style={[s.status, locked ? s.stLocked : s.stOpen]}>{locked ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}</Text>
+                </View>
+                {isExp ? (
+                  // ⋮ opens the item sheet (same as long-press); the include switch lives there.
+                  <Pressable
+                    onPress={() => onItemActions(it)}
+                    hitSlop={8}
+                    style={s.more}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('groupDetail.expenseMore', { title: it.title })}
+                  >
+                    <Text style={s.moreT}>⋮</Text>
+                  </Pressable>
+                ) : null}
+              </ListRow>
+            );
+          })}
+          {items.length > 0 ? (
+            <ListRow last>
+              <View style={{ flex: 1 }}>
+                <Text style={type.h3}>{t('groupDetail.totalCount', { count: items.length })}</Text>
+                {totals.excluded > 0 ? <Text style={parts.meta}>{t('groupDetail.excludedNotCounted', { count: totals.excluded })}</Text> : null}
               </View>
-              <View style={{ alignItems: 'flex-end', gap: 2 }}>
-                <Text style={[parts.amount, it.excluded && { textDecorationLine: 'line-through' }]}>{fmt(it.amount_cents, currency)}</Text>
-                <Text style={parts.meta}>{t('groupDetail.myShare')} {it.my_share_cents != null ? fmt(it.my_share_cents, currency) : '—'}</Text>
-                <Text style={[s.status, locked ? s.stLocked : s.stOpen]}>{locked ? t('groupDetail.statusLocked') : t('groupDetail.statusOpen')}</Text>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={parts.amount}>{fmt(totals.amount, currency)}</Text>
+                <Text style={parts.meta}>{t('groupDetail.mine')} {fmt(totals.mine, currency)}</Text>
               </View>
-              {isExp ? (
-                // ⋮ opens the item sheet (same as long-press); the include switch lives there.
-                <Pressable
-                  onPress={() => onItemActions(it)}
-                  hitSlop={8}
-                  style={s.more}
-                  accessibilityRole="button"
-                  accessibilityLabel={t('groupDetail.expenseMore', { title: it.title })}
-                >
-                  <Text style={s.moreT}>⋮</Text>
-                </Pressable>
-              ) : null}
             </ListRow>
-          );
-        })}
-        {items.length > 0 ? (
-          <ListRow last>
-            <View style={{ flex: 1 }}>
-              <Text style={type.h3}>{t('groupDetail.totalCount', { count: items.length })}</Text>
-              {totals.excluded > 0 ? <Text style={parts.meta}>{t('groupDetail.excludedNotCounted', { count: totals.excluded })}</Text> : null}
-            </View>
-            <View style={{ alignItems: 'flex-end' }}>
-              <Text style={parts.amount}>{fmt(totals.amount, currency)}</Text>
-              <Text style={parts.meta}>{t('groupDetail.mine')} {fmt(totals.mine, currency)}</Text>
-            </View>
-          </ListRow>
-        ) : null}
-        {loaded && !loading && items.length === 0 ? (
-          <View style={{ paddingVertical: 18, alignItems: 'center', gap: 6 }} accessibilityRole="text">
-            {emptyKind === 'archive' ? (
-              <>
-                <Text style={[type.small, { textAlign: 'center' }]}>{t('groupDetail.ledgerEmptyArchive')}</Text>
-                <Button small variant="soft" title={t('groupDetail.viewActive')} onPress={() => onApplyFilters({ ...filters, status: 'OPEN' })} />
-              </>
-            ) : emptyKind === 'settled' ? (
-              <>
-                <Text style={type.h2}>{t('groupDetail.ledgerAllSettled')}</Text>
-                <Text style={[type.small, { textAlign: 'center' }]}>{t('groupDetail.ledgerAllSettledHint')}</Text>
-                <Button small variant="soft" title={t('groupDetail.viewArchive')} onPress={() => onApplyFilters({ ...filters, status: 'LOCKED' })} />
-              </>
-            ) : (
-              <Text style={[type.small, { textAlign: 'center' }]}>{t('groupDetail.ledgerEmptyActive')}</Text>
-            )}
-          </View>
-        ) : null}
-      </Card>
+          ) : null}
+          {emptyState}
+        </Card>
+      )}
       {items.length > 0 ? <Text style={[type.small, { textAlign: 'center' }]}>{t('m.group.longPressHint')}</Text> : null}
 
       <FilterSheet
@@ -222,7 +261,7 @@ function FilterSheet({ visible, onClose, initial, members, categories, onApply }
 }
 
 const s = StyleSheet.create({
-  fbtn: { width: 46, height: 46, borderRadius: 14, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  fbtn: { width: 46, height: 46, borderRadius: 14, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: groupTokens.filterBtnBg, alignItems: 'center', justifyContent: 'center' },
   dot: { position: 'absolute', top: -5, right: -5, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   dotT: { color: '#fff', fontSize: 10, fontWeight: '800' },
   status: { fontSize: 10, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: 'hidden' },

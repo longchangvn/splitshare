@@ -14,12 +14,16 @@ import { ActivityKindThumb, ChevronRight, initialsOf, pastelFor } from '../compo
 import { InviteResults, notifyInviteResults } from '../components/InviteResults.jsx';
 import { inviteRows } from '../inviteResults.js';
 import { useT } from '../prefs.jsx';
+import { useAppTheme } from '../themes/index.js';
+import { DashboardHome } from '../themes/splitease/components/shell/DashboardHome.jsx';
+import { ThemedIcon } from '../components/ThemedIcon.jsx';
 
 const DEFAULT_CURRENCY = 'USD';
 
 export function Dashboard() {
   const t = useT();
   const nav = useNavigate();
+  const tiles = !!useAppTheme().features?.dashboardTiles;
   const [data, setData] = useState(null);
   const [e, setE] = useState(null);
   const [open, setOpen] = useState(false);
@@ -136,7 +140,25 @@ export function Dashboard() {
 
   return (
     <Shell>
-      {view === 'home' && <>
+      {view === 'home' && tiles && (
+        <DashboardHome
+          data={data}
+          error={e}
+          groups={groups}
+          balance={balance}
+          settledPct={settledPct}
+          activeGroups={activeGroups}
+          breakdownOpen={openPanel}
+          onToggleBreakdown={() => setOpenPanel(!openPanel)}
+          onOpenGroups={() => nav('/groups')}
+          breakdown={openPanel ? <BalancePanel groups={balance.groups} onClose={() => setOpenPanel(false)} /> : null}
+          history={<HistoryCard groups={groups} ready={!!data && !e} />}
+          onCreate={openWizard}
+          errorSlot={<Err e={e} />}
+          newGroupIcon={<NewGroupIcon />}
+        />
+      )}
+      {view === 'home' && !tiles && <>
       <div className="dash-head">
         <div>
           <Title order={2}>{t('dashboard.title')}</Title>
@@ -283,7 +305,7 @@ export function Dashboard() {
           <div className="dash-banner-index">{data ? settledPct : '—'}</div>
           <div>
             <Text fw={800}>{t('dashboard.settleIndex')}</Text>
-            <Text size="sm" c="teal.1" mt={4}>
+            <Text size="sm" c="brand.1" mt={4}>
               {groups.length === 0
                 ? t('dashboard.settleHint')
                 : settledCount === groups.length
@@ -294,10 +316,10 @@ export function Dashboard() {
         </section>
 
         <section className="dash-promo">
-          <Text size="xs" fw={700} tt="uppercase" style={{ letterSpacing: '0.06em', opacity: 0.8 }}>SplitShare</Text>
+          <Text size="xs" fw={700} tt="uppercase" style={{ letterSpacing: '0.06em', opacity: 0.8 }}>SplitEase</Text>
           <div>
             <Title order={3} c="white">{t('dashboard.promoTitle')}</Title>
-            <Text size="sm" mt={4} c="teal.0">{t('dashboard.promoBody')}</Text>
+            <Text size="sm" mt={4} c="brand.0">{t('dashboard.promoBody')}</Text>
           </div>
           <Button variant="white" color="dark" radius="xl" onClick={openWizard} leftSection={<NewGroupIcon />}>{t('dashboard.newGroup')}</Button>
         </section>
@@ -341,9 +363,11 @@ export function Dashboard() {
 
 function NewGroupIcon() {
   return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
+    <ThemedIcon ms="add" size={20}>
+      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      </svg>
+    </ThemedIcon>
   );
 }
 

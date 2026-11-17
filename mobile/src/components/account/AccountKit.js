@@ -1,11 +1,15 @@
 // Account-area building blocks: brand mark, auth layout (web AuthLayout), password input,
 // language switch (web Shell language picker) and friendly API error text.
 import React, { useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Pressable, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { Text } from '../../typography';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius, shadow, type } from '../../theme';
+import { colors, radius, shadow, type, tk } from '../../theme';
 import { Input, u } from '../../ui';
 import { usePrefs, useT } from '../../i18n';
+import { activeTheme } from '../../themes';
+import { ThemedIcon } from '../ThemedIcon';
+import { IconTile } from '../../themes/splitease/components/IconTile';
 
 /**
  * Two-piece SplitShare mark (web Shell BrandMark, 42×48 viewBox) drawn with Views:
@@ -57,10 +61,53 @@ export function LanguageSwitch({ dark = false, style }) {
   );
 }
 
-/** Web AuthLayout adapted to native: dark atmospheric hero + bright form card. */
-export function AuthLayout({ title, desc, children, footer, compact = false, banner }) {
+/**
+ * SplitEase auth layout (Stitch M30/M45): light page, round green logo, centred title,
+ * optional `top` block (Quick Pass) above the white form card.
+ */
+function LightAuthLayout({ title, desc, children, footer, compact, banner, top }) {
   const t = useT();
   const insets = useSafeAreaInsets();
+  const logo = compact ? 56 : 72;
+  return (
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.page }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1, padding: 20, paddingTop: (compact ? 8 : 16) + (compact ? 0 : insets.top), paddingBottom: 24 + insets.bottom, gap: 16 }}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={a.lightTop}><LanguageSwitch /></View>
+        <View style={a.lightHead}>
+          <View style={[a.logo, { width: logo, height: logo, borderRadius: logo / 2 }]} accessible accessibilityRole="header" accessibilityLabel={t('shell.brand')}>
+            <ThemedIcon ms="pie_chart" size={Math.round(logo * 0.5)} color="#fff" />
+          </View>
+          {!compact ? (
+            <View style={a.kickerPill}>
+              <View style={a.kickerDot} />
+              <Text style={a.kickerT}>{t('shell.brand')}</Text>
+            </View>
+          ) : null}
+          {title ? <Text style={[a.lightTitle, compact && { fontSize: 26 }]} accessibilityRole="header">{title}</Text> : null}
+          {desc ? <Text style={a.lightDesc}>{desc}</Text> : null}
+        </View>
+        {top}
+        <View style={a.lightCard}>
+          {banner ? <View style={{ marginBottom: 16 }}>{banner}</View> : null}
+          {children}
+        </View>
+        {footer}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+/** Web AuthLayout adapted to native: dark atmospheric hero + bright form card. */
+export function AuthLayout({ title, desc, children, footer, compact = false, banner, top }) {
+  const t = useT();
+  const insets = useSafeAreaInsets();
+  if (activeTheme().features?.lightAuth) {
+    return <LightAuthLayout {...{ title, desc, footer, compact, banner, top }}>{children}</LightAuthLayout>;
+  }
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.darkHero }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
@@ -124,7 +171,9 @@ export function PasswordInput({ value, onChangeText, placeholder, autoComplete, 
         accessibilityRole="button"
         accessibilityLabel={t(show ? 'm.account.hidePassword' : 'm.account.showPassword')}
       >
-        <Text style={u.link}>{t(show ? 'm.account.hide' : 'm.account.show')}</Text>
+        <ThemedIcon ms={show ? 'visibility_off' : 'visibility'} size={22} color={colors.secondary}>
+          <Text style={u.link}>{t(show ? 'm.account.hide' : 'm.account.show')}</Text>
+        </ThemedIcon>
       </Pressable>
     </View>
   );
@@ -154,8 +203,8 @@ export function AccountErr({ e, style }) {
   );
 }
 
-/** Tappable list row with chevron (settings-row). */
-export function LinkRow({ title, sub, onPress, danger, right }) {
+/** Tappable list row with chevron (settings-row). `ms` adds a Material icon tile in icon themes. */
+export function LinkRow({ title, sub, onPress, danger, right, ms }) {
   return (
     <Pressable
       style={({ pressed }) => [a.linkRow, pressed && { opacity: 0.7 }]}
@@ -163,17 +212,28 @@ export function LinkRow({ title, sub, onPress, danger, right }) {
       accessibilityRole="button"
       accessibilityLabel={title}
     >
+      <IconTile ms={ms} size={36} />
       <View style={{ flex: 1 }}>
         <Text style={[type.h3, danger && { color: colors.danger }]}>{title}</Text>
         {sub ? <Text style={type.small}>{sub}</Text> : null}
       </View>
       {right}
-      {onPress ? <Text style={a.chev}>›</Text> : null}
+      {onPress ? <ThemedIcon ms="chevron_right" size={22} color={colors.muted}><Text style={a.chev}>›</Text></ThemedIcon> : null}
     </Pressable>
   );
 }
 
 export const a = StyleSheet.create({
+  // SplitEase light layout (LightAuthLayout only).
+  lightTop: { flexDirection: 'row', justifyContent: 'flex-end' },
+  lightHead: { alignItems: 'center', gap: 10 },
+  logo: { backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', ...shadow.fab },
+  kickerPill: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.chipBg, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 5 },
+  kickerDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
+  kickerT: { fontSize: 11, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase', color: colors.body },
+  lightTitle: { fontSize: 32, fontWeight: '800', color: colors.text, letterSpacing: -0.8, textAlign: 'center' },
+  lightDesc: { fontSize: 15, color: colors.body, textAlign: 'center', lineHeight: 22 },
+  lightCard: { backgroundColor: colors.card, borderRadius: radius.card, padding: 20, ...shadow.card },
   hero: { paddingHorizontal: 22, paddingBottom: 56, overflow: 'hidden' },
   orb: { position: 'absolute', borderRadius: 999 },
   orbA: { width: 260, height: 260, top: -120, right: -90, backgroundColor: 'rgba(61,222,132,0.18)' },
@@ -185,7 +245,7 @@ export const a = StyleSheet.create({
   tagline: { color: 'rgba(255,255,255,0.78)', fontSize: 15, marginTop: 18, fontWeight: '600' },
   sheet: { flexGrow: 1, backgroundColor: colors.page, borderTopLeftRadius: 28, borderTopRightRadius: 28, marginTop: -28, padding: 16, gap: 12 },
   card: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: radius.card, padding: 20, ...shadow.card },
-  lang: { flexDirection: 'row', backgroundColor: '#eef2f0', borderRadius: 999, padding: 3, gap: 2 },
+  lang: { flexDirection: 'row', backgroundColor: tk('#eef2f0'), borderRadius: 999, padding: 3, gap: 2 },
   langDark: { backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
   langI: { paddingHorizontal: 12, minHeight: 32, minWidth: 40, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   langOn: { backgroundColor: colors.ink },

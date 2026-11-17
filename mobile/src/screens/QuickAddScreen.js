@@ -4,14 +4,17 @@
 //   people only    → POST /groups (auto-named, USD) → AddExpense
 //   people + group → GET /groups/:id members → NewGroup wizard prefilled (forExpense)
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from '../typography';
 import { api, groupIdOf } from '../api/client';
 import { publicHandle, useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
-import { colors, type } from '../theme';
+import { colors, type, tk } from '../theme';
 import { Avatar, Button, Card, CheckRow, ErrText, Field, Input, Screen, Skeleton } from '../ui';
 import { defaultGroupName, mergeMembers, resolveQuickAddFlow } from '../shared/quickAdd';
 import { DEFAULT_CURRENCY, asList, sortByName } from '../components/home/homeUtils';
+import { ThemedIcon } from '../components/ThemedIcon';
+import { IconTile } from '../themes/splitease/components/IconTile';
 
 export default function QuickAddScreen({ navigation }) {
   const t = useT();
@@ -81,7 +84,10 @@ export default function QuickAddScreen({ navigation }) {
       )}
     >
       <Card>
-        <Text style={type.h2}>{t('quickAdd.people')}</Text>
+        <View style={s.cardHead}>
+          <IconTile ms="group" size={36} />
+          <Text style={type.h2}>{t('quickAdd.people')}</Text>
+        </View>
         {people.length > 0 ? (
           <View style={s.chips}>
             {people.map((p) => (
@@ -94,7 +100,7 @@ export default function QuickAddScreen({ navigation }) {
               >
                 <Avatar name={p.display_name} size={22} />
                 <Text style={s.selT} numberOfLines={1}>{p.display_name}</Text>
-                <Text style={s.selX}>✕</Text>
+                <ThemedIcon ms="close" size={14} color={colors.primaryText}><Text style={s.selX}>✕</Text></ThemedIcon>
               </Pressable>
             ))}
           </View>
@@ -132,7 +138,10 @@ export default function QuickAddScreen({ navigation }) {
       </Card>
 
       <Card>
-        <Text style={type.h2}>{t('quickAdd.group')}</Text>
+        <View style={s.cardHead}>
+          <IconTile ms="groups" size={36} />
+          <Text style={type.h2}>{t('quickAdd.group')}</Text>
+        </View>
         <View accessibilityRole="radiogroup" style={{ marginTop: 6 }}>
           <RadioRow label={t('quickAdd.noGroup')} checked={!groupId} onPress={() => setGroupId(null)} />
           {loading ? <Skeleton h={18} style={{ marginVertical: 10 }} /> : null}
@@ -176,15 +185,16 @@ function RadioRow({ label, sub, checked, disabled, onPress }) {
 }
 
 const s = StyleSheet.create({
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
   sel: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: colors.primarySoft, borderRadius: 999, paddingLeft: 4, paddingRight: 10, paddingVertical: 4, minHeight: 32, maxWidth: '100%' },
   selT: { fontSize: 13, fontWeight: '700', color: colors.primaryText, flexShrink: 1 },
   selX: { fontSize: 11, color: colors.primaryText, fontWeight: '800' },
-  box: { borderWidth: 1, borderColor: '#e4ebe7', borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, marginTop: 12 },
+  box: { borderWidth: 1, borderColor: tk('#e4ebe7'), borderRadius: 16, paddingHorizontal: 12, paddingVertical: 8, marginTop: 12 },
   boxHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
   boxTitle: { fontSize: 13, fontWeight: '700', color: colors.secondary },
   boxCount: { fontSize: 12, fontWeight: '700', color: colors.primaryText },
-  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, minHeight: 48, borderBottomWidth: 1, borderBottomColor: '#f1f6f3' },
+  radioRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, minHeight: 48, borderBottomWidth: 1, borderBottomColor: tk('#f1f6f3') },
   radio: { width: 22, height: 22, borderRadius: 11, borderWidth: 1.5, borderColor: colors.inputBorder, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   radioOn: { borderColor: colors.primary },
   radioDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.primary },

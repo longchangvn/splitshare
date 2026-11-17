@@ -10,9 +10,11 @@ import { Report } from './pages/Report.jsx';
 import { SharePage } from './pages/SharePage.jsx';
 import { ExpenseDetail, JoinPage } from './pages/ExpenseDetail.jsx';
 import { InvitationPage } from './pages/InvitationPage.jsx';
+import { useAppTheme } from './themes/index.js';
 import './styles.css';
 
 export default function App() {
+  const appTheme = useAppTheme();
   return (
     <BrowserRouter>
       <AuthProvider>
@@ -41,6 +43,10 @@ export default function App() {
           <Route path="/groups/:id" element={<Guard><GroupDetail /></Guard>} />
           <Route path="/groups/:id/expenses/:eid" element={<Guard><ExpenseDetail /></Guard>} />
           <Route path="/" element={<Guard><Dashboard /></Guard>} />
+          {/* Theme-only screens (web/src/themes/<name>/screens). */}
+          {appTheme.routes.map((r) => (
+            <Route key={r.path} path={r.path} element={r.guard === false ? r.element : <Guard>{r.element}</Guard>} />
+          ))}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </AuthProvider>

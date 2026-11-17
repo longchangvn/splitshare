@@ -15,10 +15,12 @@ import { restoreSplit } from '../splitMemory.js';
 import { loadLastSplit, saveLastSplit } from '../splitMemoryStore.js';
 import { useSplitPreview } from '../useSplitPreview.js';
 import { ExpenseFields } from './ExpenseFields.jsx';
+import { ThemedIcon } from './ThemedIcon.jsx';
+import { useAppTheme } from '../themes/index.js';
 
 const STATUS_COLOR = {
   scanning: 'gray',
-  ready: 'teal',
+  ready: 'brand',
   manual: 'orange',
   scan_failed: 'red',
   creating: 'blue',
@@ -38,6 +40,7 @@ export function ScanReceipts({
   existingExpenses = [], onCreated,
 }) {
   const t = useT();
+  const msIcons = useAppTheme().icons === 'material';
   const fileRef = useRef(null);
   const libraryRef = useRef(null);
   const [cards, setCards] = useState([]);
@@ -151,7 +154,7 @@ export function ScanReceipts({
       notifications.show({
         title: created === 1 ? t('scan.createdOne') : t('scan.created', { count: created }),
         message: photoFailed ? t('scan.savedReceiptFailed') : undefined,
-        color: photoFailed ? 'orange' : 'teal',
+        color: photoFailed ? 'orange' : 'brand',
       });
       onCreated?.();
     }
@@ -180,9 +183,9 @@ export function ScanReceipts({
       padding={0}
       overlayProps={{ backgroundOpacity: 0.55, blur: 8 }}
     >
-      <Stack gap="md" className="wizard-form">
-        <Text size="xs" c="dimmed">{t('scan.hint')}</Text>
-        <Group gap="xs">
+      <Stack gap="md" className="wizard-form scan-batch">
+        <Text size="xs" c="dimmed" className="scan-batch-hint">{t('scan.hint')}</Text>
+        <Group gap="xs" className="scan-batch-pick">
           <input
             ref={fileRef}
             type="file"
@@ -202,6 +205,8 @@ export function ScanReceipts({
           />
           <Button
             variant="light"
+            className="scan-batch-camera"
+            leftSection={msIcons ? <ThemedIcon ms="photo_camera" size={18} /> : undefined}
             onClick={() => fileRef.current?.click()}
             disabled={busy || cards.length >= MAX_BATCH}
             loading={scanning > 0}
@@ -210,6 +215,8 @@ export function ScanReceipts({
           </Button>
           <Button
             variant="default"
+            className="scan-batch-library"
+            leftSection={msIcons ? <ThemedIcon ms="photo_library" size={18} /> : undefined}
             onClick={() => libraryRef.current?.click()}
             disabled={busy || cards.length >= MAX_BATCH || scanning > 0}
           >
@@ -220,9 +227,9 @@ export function ScanReceipts({
             <Text size="xs" c="dimmed">{t('scan.limit', { max: MAX_BATCH })}</Text>
           )}
         </Group>
-        <Text size="xs" c="dimmed">{t('scan.thirdParty')}</Text>
+        <Text size="xs" c="dimmed" className="scan-batch-note">{t('scan.thirdParty')}</Text>
 
-        {cards.length === 0 && <Text size="sm" c="dimmed">{t('scan.empty')}</Text>}
+        {cards.length === 0 && <Text size="sm" c="dimmed" className="scan-batch-empty">{t('scan.empty')}</Text>}
 
         {cards.map((card, index) => (
           <ScanCard
@@ -254,7 +261,7 @@ export function ScanReceipts({
         )}
 
         <Divider />
-        <Group justify="space-between">
+        <Group justify="space-between" className="scan-batch-footer">
           <Text size="xs" c="dimmed">
             {scanning > 0 ? t('scan.scanning') : (cards.length > 0 ? t('scan.limit', { max: MAX_BATCH }) : '')}
           </Text>
@@ -289,11 +296,14 @@ function ScanCard({
   );
   const errors = card.tried ? validateCard(card, members).errors : [];
   return (
-    <Card withBorder radius="md" padding="md">
-      <Group justify="space-between" gap="xs" mb="xs">
+    <Card withBorder radius="md" padding="md" className={`scan-card is-${card.status}`}>
+      <Group justify="space-between" gap="xs" mb="xs" className="scan-card-head">
         <Group gap="xs">
-          <Text size="sm" fw={600}>{t('scan.receiptOf', { index: index + 1, total })}</Text>
-          <Badge color={STATUS_COLOR[card.status] || 'gray'} variant="light">
+          {useAppTheme().icons === 'material' && (
+            <span className="scan-card-icon" aria-hidden><ThemedIcon ms="receipt_long" size={20} /></span>
+          )}
+          <Text size="sm" fw={600} className="scan-card-title">{t('scan.receiptOf', { index: index + 1, total })}</Text>
+          <Badge color={STATUS_COLOR[card.status] || 'gray'} variant="light" className="scan-card-status">
             {card.status === 'scanning' ? t('scan.scanning') : null}
             {card.status === 'ready' && t('scan.receiptTotal', { amount: fmt(Math.round(Number(amount || 0) * 100), currency) })}
             {card.status === 'manual' && t('scan.manual')}

@@ -24,12 +24,12 @@ export function InvitationBanner({ inviter, group, memberCount, email }) {
       role="note"
       aria-label={t('invitation.badge')}
       className="invitation-banner"
-      style={{ background: 'var(--mantine-color-teal-0)', borderColor: 'var(--mantine-color-teal-3)' }}
+      style={{ background: 'var(--mantine-color-brand-0)', borderColor: 'var(--mantine-color-brand-3)' }}
     >
       <Group gap="sm" wrap="nowrap" align="flex-start">
-        <ThemeIcon color="teal" variant="filled" radius="xl" size={36} aria-hidden>✉</ThemeIcon>
+        <ThemeIcon color="brand" variant="filled" radius="xl" size={36} aria-hidden>✉</ThemeIcon>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <Badge color="teal" variant="light" size="sm">{t('invitation.badge')}</Badge>
+          <Badge color="brand" variant="light" size="sm">{t('invitation.badge')}</Badge>
           <Text size="xs" c="dimmed" mt={6}>{t('invitation.groupLabel')}</Text>
           <Text fw={800} size="lg" c="dark" lh={1.25} style={{ wordBreak: 'break-word' }}>{group}</Text>
           {memberCount != null && (

@@ -36,7 +36,7 @@ export default {
     'm.group.kind.paymentOut': 'paid out',
     'm.group.kind.paymentIn': 'received',
     'm.group.statementFootnote': 'paid = you paid the bill · share = your part · paid out = you paid someone (reduces your debt) · received = someone paid you.',
-    'm.group.linkShareMsg': 'Join {name} on SplitShare: {url}',
+    'm.group.linkShareMsg': 'Join {name} on SplitEase: {url}',
     'm.group.copyViaShare': 'Opens the share sheet — choose Copy to copy the link.',
   },
   vi: {
@@ -74,7 +74,7 @@ export default {
     'm.group.kind.paymentOut': 'đã chuyển',
     'm.group.kind.paymentIn': 'đã nhận',
     'm.group.statementFootnote': 'đã trả = bạn trả hóa đơn · phần chia = phần của bạn · đã chuyển = bạn trả cho người khác (giảm nợ) · đã nhận = người khác trả cho bạn.',
-    'm.group.linkShareMsg': 'Tham gia {name} trên SplitShare: {url}',
+    'm.group.linkShareMsg': 'Tham gia {name} trên SplitEase: {url}',
     'm.group.copyViaShare': 'Mở bảng chia sẻ — chọn Sao chép để sao chép liên kết.',
   },
 };

@@ -3,7 +3,7 @@ import { notifications } from '@mantine/notifications';
 import { inviteRowMessage, inviteSummary, inviteSummaryMessage } from '../inviteResults.js';
 import { useT } from '../prefs.jsx';
 
-const TONE_COLOR = { success: 'teal', partial: 'yellow', error: 'red', empty: 'gray' };
+const TONE_COLOR = { success: 'brand', partial: 'yellow', error: 'red', empty: 'gray' };
 
 /** Toast summarizing which invitation emails were actually sent. */
 export function notifyInviteResults(t, rows) {
@@ -32,7 +32,7 @@ export function InviteResults({ rows }) {
         const detail = m.detailKey ? t(m.detailKey) : m.detail;
         return (
           <Group key={r.email} gap="xs" wrap="nowrap" align="flex-start">
-            <ThemeIcon size={20} radius="xl" variant="light" color={r.emailSent ? 'teal' : 'red'} aria-hidden>
+            <ThemeIcon size={20} radius="xl" variant="light" color={r.emailSent ? 'brand' : 'red'} aria-hidden>
               {r.emailSent ? '✓' : '!'}
             </ThemeIcon>
             <div style={{ minWidth: 0 }}>

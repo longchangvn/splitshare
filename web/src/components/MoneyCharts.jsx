@@ -119,6 +119,7 @@ export function MoneyDonut({
               r={r}
               fill="none"
               stroke={seg.color}
+              data-chart-color={seg.color}
               strokeWidth={stroke}
               strokeDasharray={dash}
               strokeDashoffset={-offset}
@@ -136,7 +137,7 @@ export function MoneyDonut({
         <ul className="money-donut-legend">
           {data.map((seg) => (
             <li key={seg.key}>
-              <span className="money-swatch" style={{ background: seg.color }} />
+              <span className="money-swatch" style={{ background: seg.color }} data-chart-color={seg.color} />
               <span className="money-leg-label">{seg.label}</span>
               <span className="money-leg-value">{fmt(seg.value, currency)}</span>
             </li>

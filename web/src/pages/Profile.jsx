@@ -56,7 +56,7 @@ export function Profile() {
     try {
       const d = await api.patch('/api/v1/me', { display_name: name, phone: phone || null });
       setMe(d); setUser(d);
-      notifications.show({ title: t('profile.updated'), color: 'teal' });
+      notifications.show({ title: t('profile.updated'), color: 'brand' });
       setE(null);
     } catch (err) { setE(err); } finally { setSaving(false); }
   };
@@ -68,7 +68,7 @@ export function Profile() {
       await api.patch('/api/v1/me/password', { current_password: cur || null, new_password: next });
       setCur(''); setNext('');
       if (!hasPw) { const d = { ...me, has_password: true }; setMe(d); setUser(d); }
-      notifications.show({ title: t('profile.passwordChanged'), color: 'teal' });
+      notifications.show({ title: t('profile.passwordChanged'), color: 'brand' });
       setE(null);
     } catch (err) { setE(err); } finally { setPwBusy(false); }
   };
@@ -282,7 +282,7 @@ function VerifyEmailPanel({ email, onVerified }) {
             request={() => api.post('/api/v1/me/verify-email/code')}
             onSignedIn={(d) => {
               onVerified(d);
-              notifications.show({ title: t('profile.emailVerifiedToast'), color: 'teal' });
+              notifications.show({ title: t('profile.emailVerifiedToast'), color: 'brand' });
             }}
           />
         ) : (

@@ -6,6 +6,7 @@ import {
 import { api } from '../api.js';
 import { Err, publicHandle, useAuth } from '../auth.jsx';
 import { useT } from '../prefs.jsx';
+import { ThemedIcon } from './ThemedIcon.jsx';
 import {
   ADD_EXPENSE_STATE, defaultGroupName, mergeMembers, resolveQuickAddFlow,
 } from '../quickAdd.js';
@@ -24,9 +25,11 @@ export function AddExpenseFab({ onClick, disabled = false }) {
       aria-label={t('quickAdd.fab')}
       title={t('quickAdd.fab')}
     >
-      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      </svg>
+      <ThemedIcon ms="add" size={22}>
+        <svg width={18} height={18} viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </ThemedIcon>
       <span className="qa-fab-label">{t('quickAdd.fab')}</span>
     </button>
   );

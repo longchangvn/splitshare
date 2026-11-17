@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "SplitShare",
+    "name": "SplitEase",
     "slug": "splitshare",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -16,7 +16,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Take receipt photos for expenses.",
         "NSPhotoLibraryUsageDescription": "Attach receipt photos to expenses.",
-        "NSFaceIDUsageDescription": "Unlock SplitShare with Face ID.",
+        "NSFaceIDUsageDescription": "Unlock SplitEase with Face ID.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -41,6 +41,7 @@
     ],
     "extra": {
       "apiUrl": "http://localhost:8081",
+      "theme": "splitease",
       "googleClientId": "629654657844-qa8bhnse10a2ppdmo678ir32vab63qns.apps.googleusercontent.com",
       "googleIosClientId": "",
       "googleAndroidClientId": "",

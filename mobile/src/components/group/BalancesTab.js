@@ -1,7 +1,8 @@
 // Balances tab — web BalancesPanel: debtors grouped with their transfers, Nudge + Pay,
 // plus the raw owe section (accumulated pairwise debts before optimization).
 import React, { useMemo } from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
+import { Text } from '../../typography';
 import { fmt, displayNameOf } from '../../api/client';
 import { colors, type } from '../../theme';
 import { useT } from '../../i18n';
