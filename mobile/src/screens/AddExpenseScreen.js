@@ -13,6 +13,7 @@ import {
   Screen, SkeletonCard, Empty, ErrText, Button,
 } from '../ui';
 import ExpenseForm from '../components/expense/ExpenseForm';
+import { canWriteGroup } from '../components/group/helpers';
 import { loadLastSplit, peekLastSplit } from '../splitMemoryStore';
 
 export default function AddExpenseScreen({ route, navigation }) {
@@ -73,6 +74,23 @@ export default function AddExpenseScreen({ route, navigation }) {
   const members = group.members || [];
   const currency = group.currency || '';
   const role = group.my_role;
+
+  // New / copied expense in a locked or closed group (e.g. bottom-bar "+" inside the group) — web GroupDetail
+  // only opens the form when canWriteGroup; the API rejects it with GROUP_READ_ONLY anyway.
+  if (!expenseId && !canWriteGroup(group)) {
+    const status = group.status || 'opening';
+    return (
+      <Screen>
+        <Empty
+          emoji="🔒"
+          title={t(`groupStatus.${status}`)}
+          sub={t(`groupStatus.${status}Hint`)}
+          action={t('common.back')}
+          onAction={() => navigation.goBack()}
+        />
+      </Screen>
+    );
+  }
 
   if (expenseId && existing) {
     // Same rule as web ExpenseDetail canModify (and the API GuardAsync).

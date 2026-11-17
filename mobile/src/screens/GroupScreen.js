@@ -30,7 +30,7 @@ import RecurringTab from '../components/group/RecurringTab';
 import GroupSettingsSheet from '../components/group/GroupSettingsSheet';
 import { Bar, MenuRow, useDateFmt } from '../components/group/parts';
 import {
-  DEFAULT_FILTERS, buildLedgerQuery, canWriteGroup as canWriteOf, canEditExpense, groupSettledOf,
+  DEFAULT_FILTERS, buildLedgerQuery, canWriteGroup as canWriteOf, canEditExpense, groupSettledOf, canRenameGroup,
   hasLedgerHistory, ledgerEmptyKind, groupByDebtor, mergeActivityFeed,
 } from '../components/group/helpers';
 
@@ -69,6 +69,9 @@ export default function GroupDetailScreen({ route, navigation }) {
   const [nudging, setNudging] = useState(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsStart, setSettingsStart] = useState('menu');
+  const openSettings = (start = 'menu') => { setSettingsStart(start); setSettingsOpen(true); };
+  const canRename = canRenameGroup(detail, groupSettledOf(plan, summary), summary);
   const [itemSheet, setItemSheet] = useState(null);
   const [itemBusy, setItemBusy] = useState(false);
   const [toggling, setToggling] = useState(null); // expense id whose enable/disable is in flight
@@ -176,23 +179,32 @@ export default function GroupDetailScreen({ route, navigation }) {
       const life = detail.status || 'opening';
       const [cbg, cfg] = groupTokens.lifecycle[life] || groupTokens.lifecycle.opening;
       const n = (detail.members || []).length;
+      const owner = canRename;
       navigation.setOptions({
         headerTitle: () => (
-          <View style={{ maxWidth: 230 }}>
+          <Pressable
+            disabled={!owner}
+            onPress={() => openSettings('rename')}
+            hitSlop={8}
+            accessibilityRole={owner ? 'button' : undefined}
+            accessibilityLabel={owner ? `${t('groupDetail.rename')}: ${detail.name}` : undefined}
+            style={({ pressed }) => [{ maxWidth: 230 }, pressed && { opacity: 0.7 }]}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={[type.h2, { flexShrink: 1 }]} numberOfLines={1}>{detail.name}</Text>
+              {owner ? <ThemedIcon ms="edit" size={16} color={colors.muted} /> : null}
               <Text style={[st.chip, { backgroundColor: cbg, color: cfg }]}>{t(`groupStatus.${life}`)}</Text>
             </View>
             <Text style={type.small} numberOfLines={1}>{t('groupDetail.membersCount', { count: n, unit: n === 1 ? t('common.person') : t('common.people') })}</Text>
-          </View>
+          </Pressable>
         ),
       });
     }
-  }, [detail?.name, detail?.status, detail?.members, navigation, features.groupHero, t]);
+  }, [detail?.name, detail?.status, detail?.members, canRename, navigation, features.groupHero, t]);
   useEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <Pressable onPress={() => setSettingsOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('m.group.settings')} style={{ paddingHorizontal: 6 }}>
+        <Pressable onPress={() => openSettings()} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('m.group.settings')} style={{ paddingHorizontal: 6 }}>
           <ThemedIcon ms="more_vert" size={24} color={colors.text}>
             <Text style={{ fontSize: 22, color: colors.text, fontWeight: '700' }}>⋯</Text>
           </ThemedIcon>
@@ -405,7 +417,7 @@ export default function GroupDetailScreen({ route, navigation }) {
       <Row>
         {ocr ? <Button small style={{ flex: 1 }} variant="ghost" title={t('scan.open')} disabled={!canWrite} onPress={() => navigation.navigate('ScanReceipts', { id })} /> : null}
         <Button small style={{ flex: 1 }} variant="ghost" title={t('groupDetail.inviteMembers')} onPress={() => navigation.navigate('Invite', { id })} />
-        <Button small style={{ flex: ocr ? 0 : 1, paddingHorizontal: 16 }} variant="ghost" title={ocr ? '⋯' : t('m.group.settings')} accessibilityLabel={t('m.group.settings')} onPress={() => setSettingsOpen(true)} />
+        <Button small style={{ flex: ocr ? 0 : 1, paddingHorizontal: 16 }} variant="ghost" title={ocr ? '⋯' : t('m.group.settings')} accessibilityLabel={t('m.group.settings')} onPress={() => openSettings()} />
       </Row>
 
       {/* Settlement summary */}
@@ -529,6 +541,8 @@ export default function GroupDetailScreen({ route, navigation }) {
 
       <GroupSettingsSheet
         visible={settingsOpen}
+        initialMode={settingsStart}
+        canRename={canRename}
         onClose={() => setSettingsOpen(false)}
         groupId={id}
         detail={detail}

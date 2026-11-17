@@ -11,43 +11,56 @@ import { useT } from '../../../i18n';
 const TAB_MS = { Home: 'home', Groups: 'groups', Activity: 'history', Settings: 'settings' };
 const TAB_LABEL = { Home: 'nav.home', Groups: 'nav.groups', Activity: 'nav.activity', Settings: 'nav.settings' };
 
+/** Tab-navigator adapter (Main's Home · Groups · Activity · Settings). */
 export default function TabBar({ state, navigation }) {
+  return (
+    <TabBarView
+      tabs={state.routes.map((r) => r.name)}
+      active={state.routes[state.index]?.name}
+      onTab={(name) => navigation.navigate(name)}
+      onAdd={() => navigation.navigate('QuickAdd')}
+    />
+  );
+}
+
+/** Presentational bar, also rendered under pushed stack screens (App.js StackTabLayout). */
+export function TabBarView({ tabs, active, onTab, onAdd }) {
   const t = useT();
   const insets = useSafeAreaInsets();
-  const half = Math.ceil(state.routes.length / 2);
+  const half = Math.ceil(tabs.length / 2);
 
-  const tab = (r, i) => {
-    const on = state.index === i;
+  const tab = (name) => {
+    const on = active === name;
     const color = on ? colors.primary : colors.navInactive;
     return (
       <Pressable
-        key={r.key}
+        key={name}
         style={({ pressed }) => [s.tab, pressed && { opacity: 0.7 }]}
-        onPress={() => { if (!on) navigation.navigate(r.name); }}
+        onPress={() => onTab(name, on)}
         accessibilityRole="tab"
         accessibilityState={{ selected: on }}
-        accessibilityLabel={t(TAB_LABEL[r.name])}
+        accessibilityLabel={t(TAB_LABEL[name])}
       >
-        <ThemedIcon ms={TAB_MS[r.name] || 'circle'} size={24} color={color} />
-        <Text style={[s.label, { color }, on && s.labelOn]} numberOfLines={1}>{t(TAB_LABEL[r.name])}</Text>
+        <ThemedIcon ms={TAB_MS[name] || 'circle'} size={24} color={color} />
+        <Text style={[s.label, { color }, on && s.labelOn]} numberOfLines={1}>{t(TAB_LABEL[name])}</Text>
       </Pressable>
     );
   };
 
   return (
     <View style={[s.bar, { paddingBottom: Math.max(insets.bottom, 8) }]} accessibilityRole="tablist">
-      {state.routes.slice(0, half).map((r, i) => tab(r, i))}
+      {tabs.slice(0, half).map(tab)}
       <View style={s.fabSlot}>
         <Pressable
           style={({ pressed }) => [s.fab, pressed && { opacity: 0.9 }]}
-          onPress={() => navigation.navigate('QuickAdd')}
+          onPress={onAdd}
           accessibilityRole="button"
           accessibilityLabel={t('m.fab.addExpense')}
         >
           <ThemedIcon ms="add" size={32} color="#fff" />
         </Pressable>
       </View>
-      {state.routes.slice(half).map((r, i) => tab(r, i + half))}
+      {tabs.slice(half).map(tab)}
     </View>
   );
 }

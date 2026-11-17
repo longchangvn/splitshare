@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_FILTERS, activeFilterCount, buildLedgerQuery, canWriteGroup, canEditExpense, canReversePayment,
+  DEFAULT_FILTERS, activeFilterCount, buildLedgerQuery, canWriteGroup, canEditExpense, canReversePayment, canRenameGroup,
   groupSettledOf, ledgerEmptyKind, hasLedgerHistory, groupByDebtor, mergeActivityFeed, paginate,
   chartColorsFor, categoryRowsOf, distributionOf, parseEmails, isValidDateInput, netTone,
 } from '../src/components/group/helpers.js';
@@ -103,4 +103,16 @@ test('misc', () => {
   assert.equal(netTone(0), 'settled');
   assert.equal(netTone(-1), 'owe');
   assert.equal(netTone(1), 'owed');
+});
+
+test('rename: owner + opening + not settled; empty group stays renamable', () => {
+  const owner = { my_role: 'owner', status: 'opening' };
+  const history = [{ total_paid_cents: 1000, total_share_cents: 1000, net_cents: 0 }];
+  assert.equal(canRenameGroup(owner, false, history), true);
+  assert.equal(canRenameGroup(owner, true, []), true);
+  assert.equal(canRenameGroup(owner, null, null), true);
+  assert.equal(canRenameGroup(owner, true, history), false);
+  assert.equal(canRenameGroup({ ...owner, status: 'locked' }, false, history), false);
+  assert.equal(canRenameGroup({ ...owner, status: 'closed' }, false, history), false);
+  assert.equal(canRenameGroup({ my_role: 'treasurer', status: 'opening' }, false, history), false);
 });

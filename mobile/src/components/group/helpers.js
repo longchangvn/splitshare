@@ -43,6 +43,12 @@ export function canWriteGroup(detail) {
   return st === 'opening' || (st === 'locked' && detail?.my_role === 'owner');
 }
 
+/** Rename (API GroupService.RenameAsync): owner, opening, and not settled — an empty group is renamable. */
+export function canRenameGroup(detail, settled, summary) {
+  if (detail?.my_role !== 'owner' || (detail?.status || 'opening') !== 'opening') return false;
+  return !(settled && hasLedgerHistory(summary));
+}
+
 /** Creator, owner or treasurer can edit OPEN expenses (API GuardAsync). */
 export function canEditExpense(item, detail, meId) {
   if (!item || item.kind !== 'expense') return false;

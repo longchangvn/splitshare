@@ -5,12 +5,12 @@
 // (POST /groups/join idempotent; 410 INVITE_ROTATED / 404).
 // splitshare://invite/<token> -> Invitation (emailed per-address invite: accept / join).
 import React from 'react';
-import { View, ActivityIndicator, Pressable, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Pressable, StyleSheet, Keyboard } from 'react-native';
 import { Text } from './src/typography';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import { AuthProvider, useAuth } from './src/auth/AuthContext';
 import { PrefsProvider, useT } from './src/i18n';
@@ -103,16 +103,58 @@ function Dock({ state, navigation }) {
   );
 }
 
+const TAB_NAMES = ['Home', 'Groups', 'Activity', 'Settings'];
+// Pushed (non-modal) screens keep the bottom bar when the theme has a StackTabBar; value = tab to highlight.
+const TAB_OF = {
+  GroupDetail: 'Groups', ExpenseDetail: 'Groups', Settlement: 'Groups', Statement: 'Groups', Report: 'Groups',
+  Profile: 'Settings', System: 'Settings',
+};
+
+function useKeyboardVisible() {
+  const [visible, setVisible] = React.useState(false);
+  React.useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => setVisible(true));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setVisible(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+  return visible;
+}
+
+function StackTabLayout({ children, route, navigation }) {
+  const Bar = activeTheme().StackTabBar;
+  const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardVisible();
+  // The bar owns the bottom safe area, so screen content must not pad for it again.
+  const contentInsets = React.useMemo(() => ({ ...insets, bottom: 0 }), [insets]);
+  // Inside a group (web addExpenseTarget): "+" opens that group's expense form, skipping the people/group picker.
+  const groupId = TAB_OF[route.name] === 'Groups' ? (route.params?.groupId ?? route.params?.id) : null;
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.screen }}>
+      <SafeAreaInsetsContext.Provider value={contentInsets}>
+        <View style={{ flex: 1 }}>{children}</View>
+      </SafeAreaInsetsContext.Provider>
+      {keyboard ? null : (
+        <Bar
+          tabs={TAB_NAMES}
+          active={TAB_OF[route.name]}
+          onTab={(name) => navigation.popTo('Main', { screen: name })}
+          onAdd={() => (groupId ? navigation.navigate('AddExpense', { id: groupId }) : navigation.navigate('QuickAdd'))}
+        />
+      )}
+    </View>
+  );
+}
+
 function Main() {
   // Themes may supply their own tab bar (splitease: flat bar + centre "+"); classic uses the Dock.
   const TabBar = activeTheme().TabBar || Dock;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.screen }} edges={['top']}>
       <Tab.Navigator screenOptions={{ headerShown: false }} tabBar={(p) => <TabBar {...p} />}>
-        <Tab.Screen name="Home" component={HomeScreen} />
-        <Tab.Screen name="Groups" component={GroupsScreen} />
-        <Tab.Screen name="Activity" component={ActivityScreen} />
-        <Tab.Screen name="Settings" component={SettingsScreen} />
+        <Tab.Screen name={TAB_NAMES[0]} component={HomeScreen} />
+        <Tab.Screen name={TAB_NAMES[1]} component={GroupsScreen} />
+        <Tab.Screen name={TAB_NAMES[2]} component={ActivityScreen} />
+        <Tab.Screen name={TAB_NAMES[3]} component={SettingsScreen} />
       </Tab.Navigator>
     </SafeAreaView>
   );
@@ -158,21 +200,27 @@ function Root({ navigationRef }) {
       ) : (
         <>
           <Stack.Screen name="Main" component={Main} options={{ headerShown: false }} />
-          <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ title: '' }} />
+          {/* Browse screens: bottom bar stays visible (themes with StackTabBar). */}
+          {/* screenLayout is called as a plain function by the navigator — return an element so the
+              layout's hooks run in their own component, not inside NativeStackNavigator. */}
+          <Stack.Group screenLayout={activeTheme().StackTabBar ? (p) => <StackTabLayout {...p} /> : undefined}>
+            <Stack.Screen name="GroupDetail" component={GroupDetailScreen} options={{ title: '' }} />
+            <Stack.Screen name="ExpenseDetail" component={ExpenseDetailScreen} options={{ title: '' }} />
+            <Stack.Screen name="Settlement" component={SettlementScreen} options={{ title: t('settlement.detailTitle') }} />
+            <Stack.Screen name="Statement" component={StatementScreen} options={{ title: t('statement.title') }} />
+            <Stack.Screen name="Report" component={ReportScreen} options={{ title: t('report.title') }} />
+            <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('m.nav.profile') }} />
+            <Stack.Screen name="System" component={SystemScreen} options={{ title: t('m.settings.offlinePush') }} />
+            <Stack.Screen name="Join" component={JoinScreen} options={{ title: '' }} />
+            <Stack.Screen name="Invitation" component={InvitationScreen} options={{ title: '' }} />
+          </Stack.Group>
+          {/* Task / form screens: modal, no bottom bar. */}
           <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: t('groupDetail.addExpense'), presentation: 'modal' }} />
           <Stack.Screen name="ScanReceipts" component={ScanReceiptsScreen} options={{ title: t('scan.title'), presentation: 'modal' }} />
-          <Stack.Screen name="ExpenseDetail" component={ExpenseDetailScreen} options={{ title: '' }} />
-          <Stack.Screen name="Settlement" component={SettlementScreen} options={{ title: t('settlement.detailTitle') }} />
           <Stack.Screen name="Pay" component={PayScreen} options={{ title: t('groupDetail.recordPayment'), presentation: 'modal' }} />
           <Stack.Screen name="NewGroup" component={NewGroupScreen} options={{ title: t('wizard.newGroup'), presentation: 'modal' }} />
           <Stack.Screen name="QuickAdd" component={QuickAddScreen} options={{ title: t('quickAdd.title'), presentation: 'modal' }} />
-          <Stack.Screen name="Statement" component={StatementScreen} options={{ title: t('statement.title') }} />
-          <Stack.Screen name="Report" component={ReportScreen} options={{ title: t('report.title') }} />
           <Stack.Screen name="Invite" component={InviteScreen} options={{ title: t('invite.title'), presentation: 'modal' }} />
-          <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: t('m.nav.profile') }} />
-          <Stack.Screen name="System" component={SystemScreen} options={{ title: t('m.settings.offlinePush') }} />
-          <Stack.Screen name="Join" component={JoinScreen} options={{ title: '' }} />
-          <Stack.Screen name="Invitation" component={InvitationScreen} options={{ title: '' }} />
           {/* Theme-only screens (src/themes/<name>/screens). */}
           {activeTheme().screens.map((sc) => (
             <Stack.Screen key={sc.name} name={sc.name} component={sc.component} options={typeof sc.options === 'function' ? sc.options(t) : sc.options} />

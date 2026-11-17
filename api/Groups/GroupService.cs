@@ -477,8 +477,14 @@ public sealed class GroupService(AppDbContext db, LedgerService ledger, IEmailSe
     {
         var guard = await GuardAsync(groupId, actorId, ownerOnly: true);
         if (!guard.Ok) return guard;
+        var g = (Group)guard.Data!;
+        // Rename only while the group is open and not settled (a group with no expenses yet is not "settled").
+        if (g.Status != "opening") return new(false, "GROUP_READ_ONLY", "Rename only while the group is open.");
+        if (await db.Expenses.AnyAsync(e => e.GroupId == groupId && e.DeletedAt == null && !e.Excluded)
+            && await ledger.ComputeNetsAsync(groupId) is { } snapshot && snapshot.Nets.Values.All(v => v == 0))
+            return new(false, "GROUP_SETTLED", "Settled groups cannot be renamed.");
         if (ValidateName(name) is { } ne) return new(false, "VALIDATION", ne);
-        ((Group)guard.Data!).Name = name.Trim();
+        g.Name = name.Trim();
         await db.SaveChangesAsync();
         return new(true, null, null, null);
     }

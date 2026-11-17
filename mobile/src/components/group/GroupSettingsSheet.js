@@ -21,6 +21,7 @@ const STATUS_MS = { opening: 'lock_open', locked: 'lock', closed: 'archive' };
 
 export default function GroupSettingsSheet({
   visible, onClose, groupId, detail, categories, onReloadCategories, onChanged, onLeft, onOpenStatement, onOpenReport,
+  initialMode = 'menu', canRename = false,
 }) {
   const t = useT();
   const cards = !!activeTheme().features.settingsCards;
@@ -34,7 +35,13 @@ export default function GroupSettingsSheet({
   const isOwner = detail?.my_role === 'owner';
   const lifecycle = detail?.status || 'opening';
 
-  useEffect(() => { if (visible) { setMode('menu'); setE(null); } }, [visible]);
+  useEffect(() => {
+    if (!visible) return;
+    const start = initialMode === 'rename' && canRename ? 'rename' : 'menu';
+    if (start === 'rename') setName(detail?.name || '');
+    setMode(start);
+    setE(null);
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const go = (m) => { setE(null); setMode(m); };
   const close = () => { if (!busy) onClose(); };
@@ -113,7 +120,7 @@ export default function GroupSettingsSheet({
   if (mode === 'menu') {
     body = (
       <View>
-        {isOwner ? <MenuRow ms="edit" label={t('groupDetail.rename')} onPress={() => { setName(detail?.name || ''); go('rename'); }} /> : null}
+        {canRename ? <MenuRow ms="edit" label={t('groupDetail.rename')} onPress={() => { setName(detail?.name || ''); go('rename'); }} /> : null}
         {isOwner ? (
           <MenuRow ms={STATUS_MS[lifecycle]} label={t('groupStatus.label')} sub={t(`groupStatus.${lifecycle}`)} onPress={() => go('status')} />
         ) : null}

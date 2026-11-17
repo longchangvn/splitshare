@@ -283,6 +283,68 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.ToTable("ExpenseImages", "splitshare");
                 });
 
+            modelBuilder.Entity("SplitShare.Api.Models.ExpenseItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ExpenseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("TotalCents")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("UnitCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpenseId");
+
+                    b.ToTable("ExpenseItems", "splitshare");
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.ExpenseItemAssignee", b =>
+                {
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ItemId", "UserId");
+
+                    b.ToTable("ExpenseItemAssignees", "splitshare");
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.ExpensePayer", b =>
+                {
+                    b.Property<Guid>("ExpenseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("PaidCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("ExpenseId", "UserId");
+
+                    b.ToTable("ExpensePayers", "splitshare");
+                });
+
             modelBuilder.Entity("SplitShare.Api.Models.ExpenseSplit", b =>
                 {
                     b.Property<Guid>("ExpenseId")
@@ -321,6 +383,19 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.Property<long?>("BudgetCents")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("CoverKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("CoverMime")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -335,8 +410,18 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Emoji")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<long?>("FlatFeeCents")
                         .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("InviteExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("InviteRequiresApproval")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("InviteToken")
                         .IsRequired()
@@ -452,6 +537,73 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.HasKey("Key", "Endpoint");
 
                     b.ToTable("IdempotencyKeys", "splitshare");
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.JoinRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DecidedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId", "Status");
+
+                    b.HasIndex("GroupId", "UserId");
+
+                    b.ToTable("JoinRequests", "splitshare");
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.MemberRemovalAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ActorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DetailJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RemovedUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("UncollectedCents")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.ToTable("MemberRemovalAudits", "splitshare");
                 });
 
             modelBuilder.Entity("SplitShare.Api.Models.MembershipArchive", b =>
@@ -585,6 +737,14 @@ namespace SplitShare.Api.Migrations.Postgres
                         .IsRequired()
                         .HasMaxLength(280)
                         .HasColumnType("character varying(280)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
 
                     b.Property<string>("Label")
                         .IsRequired()
@@ -839,8 +999,17 @@ namespace SplitShare.Api.Migrations.Postgres
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("AppleSub")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DefaultCurrency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
 
                     b.Property<string>("DisplayName")
                         .IsRequired()
@@ -855,6 +1024,10 @@ namespace SplitShare.Api.Migrations.Postgres
                     b.Property<DateTime?>("EmailVerifiedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("FacebookId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
                     b.Property<int>("FailedLoginAttempts")
                         .HasColumnType("integer");
 
@@ -863,6 +1036,15 @@ namespace SplitShare.Api.Migrations.Postgres
 
                     b.Property<DateTime?>("LockedUntilUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("NotifyExpenses")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("NotifyInvites")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("NotifyNudges")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("PasswordHash")
                         .HasColumnType("text");
@@ -877,8 +1059,12 @@ namespace SplitShare.Api.Migrations.Postgres
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AppleSub");
+
                     b.HasIndex("Email")
                         .IsUnique();
+
+                    b.HasIndex("FacebookId");
 
                     b.HasIndex("Username")
                         .IsUnique();
@@ -899,6 +1085,33 @@ namespace SplitShare.Api.Migrations.Postgres
                 {
                     b.HasOne("SplitShare.Api.Models.Expense", null)
                         .WithMany("Images")
+                        .HasForeignKey("ExpenseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.ExpenseItem", b =>
+                {
+                    b.HasOne("SplitShare.Api.Models.Expense", null)
+                        .WithMany("Items")
+                        .HasForeignKey("ExpenseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.ExpenseItemAssignee", b =>
+                {
+                    b.HasOne("SplitShare.Api.Models.ExpenseItem", null)
+                        .WithMany("Assignees")
+                        .HasForeignKey("ItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.ExpensePayer", b =>
+                {
+                    b.HasOne("SplitShare.Api.Models.Expense", null)
+                        .WithMany("Payers")
                         .HasForeignKey("ExpenseId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -928,7 +1141,16 @@ namespace SplitShare.Api.Migrations.Postgres
 
                     b.Navigation("Images");
 
+                    b.Navigation("Items");
+
+                    b.Navigation("Payers");
+
                     b.Navigation("Splits");
+                });
+
+            modelBuilder.Entity("SplitShare.Api.Models.ExpenseItem", b =>
+                {
+                    b.Navigation("Assignees");
                 });
 
             modelBuilder.Entity("SplitShare.Api.Models.Group", b =>

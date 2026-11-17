@@ -210,6 +210,8 @@ export default {
   // Flat bottom tab bar with a raised centre "+" (App.js falls back to its Dock when absent).
   // Lazy: this file loads before the theme is active, so screen/UI modules must not be imported here.
   get TabBar() { return require('./components/TabBar').default; },
+  // Same bar under pushed (non-modal) stack screens — App.js StackTabLayout.
+  get StackTabBar() { return require('./components/TabBar').TabBarView; },
   hex,
   screens,
   features,

@@ -107,6 +107,39 @@ public sealed class GroupTests
     }
 
     [Fact]
+    public async Task Rename_OnlyOwner_OpenGroup_NotSettled()
+    {
+        var (db, auth, groups) = Setup();
+        var a = await Reg(auth, "ren-owner");
+        var b = await Reg(auth, "ren-member");
+        var g = await groups.CreateAsync(a.Id, "Rename group", "USD", [b.Id], []);
+        Guid gid = ((GroupCreated)g.Data!).Group.Id;
+
+        // Empty group (no expenses) is renamable by the owner only.
+        Assert.Equal("FORBIDDEN", (await groups.RenameAsync(b.Id, gid, "Nope")).ErrorCode);
+        Assert.True((await groups.RenameAsync(a.Id, gid, "Renamed")).Ok);
+
+        db.Expenses.Add(new Expense
+        {
+            GroupId = gid, Title = "T", AmountCents = 2000, PayerId = a.Id, CreatedBy = a.Id,
+            Splits = [new ExpenseSplit { UserId = a.Id, ShareCents = 1000 },
+                      new ExpenseSplit { UserId = b.Id, ShareCents = 1000 }]
+        });
+        await db.SaveChangesAsync();
+        Assert.True((await groups.RenameAsync(a.Id, gid, "Open balance")).Ok);
+
+        Assert.True((await groups.UpdateStatusAsync(a.Id, gid, "locked")).Ok);
+        Assert.Equal("GROUP_READ_ONLY", (await groups.RenameAsync(a.Id, gid, "Locked")).ErrorCode);
+        Assert.True((await groups.UpdateStatusAsync(a.Id, gid, "opening")).Ok);
+
+        db.Payments.Add(new Payment
+            { GroupId = gid, FromUserId = b.Id, ToUserId = a.Id, AmountCents = 1000, CreatedBy = b.Id });
+        await db.SaveChangesAsync();
+        Assert.Equal("GROUP_SETTLED", (await groups.RenameAsync(a.Id, gid, "Settled")).ErrorCode);
+        Assert.Equal("Open balance", (await db.Groups.FindAsync(gid))!.Name);
+    }
+
+    [Fact]
     public async Task DefaultCategories_CannotBeRenamedOrDeleted()
     {
         var (db, auth, groups) = Setup();

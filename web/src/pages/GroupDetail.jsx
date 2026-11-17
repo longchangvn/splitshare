@@ -673,6 +673,9 @@ export function GroupDetail() {
   const hasLedgerHistory = (summary || []).some(
     (m) => (m.total_paid_cents || 0) > 0 || (m.total_share_cents || 0) > 0,
   );
+  // Rename (API GroupService.RenameAsync): owner, opening, and not settled — an empty group is renamable.
+  const canRename = detail?.my_role === 'owner' && groupLifecycle === 'opening'
+    && !(groupSettled && hasLedgerHistory);
 
   if (!detail) {
     return (
@@ -722,7 +725,7 @@ export function GroupDetail() {
           <div className="gd-hero-main">
             <div className="gd-title-row">
               <Title order={2} className="gd-title" lineClamp={1}>{detail.name}</Title>
-              {detail.my_role === 'owner' && (
+              {canRename && (
                 <ActionIcon
                   variant="subtle"
                   color="gray"

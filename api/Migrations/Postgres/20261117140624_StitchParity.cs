@@ -15,7 +15,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "AppleSub",
                 schema: "splitshare",
                 table: "Users",
-                type: "nvarchar(255)",
+                type: "character varying(255)",
                 maxLength: 255,
                 nullable: true);
 
@@ -23,7 +23,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "DefaultCurrency",
                 schema: "splitshare",
                 table: "Users",
-                type: "nvarchar(3)",
+                type: "character varying(3)",
                 maxLength: 3,
                 nullable: false,
                 defaultValue: "USD");
@@ -32,7 +32,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "FacebookId",
                 schema: "splitshare",
                 table: "Users",
-                type: "nvarchar(255)",
+                type: "character varying(255)",
                 maxLength: 255,
                 nullable: true);
 
@@ -40,7 +40,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "NotifyExpenses",
                 schema: "splitshare",
                 table: "Users",
-                type: "bit",
+                type: "boolean",
                 nullable: false,
                 defaultValue: true);
 
@@ -48,7 +48,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "NotifyInvites",
                 schema: "splitshare",
                 table: "Users",
-                type: "bit",
+                type: "boolean",
                 nullable: false,
                 defaultValue: true);
 
@@ -56,7 +56,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "NotifyNudges",
                 schema: "splitshare",
                 table: "Users",
-                type: "bit",
+                type: "boolean",
                 nullable: false,
                 defaultValue: true);
 
@@ -64,7 +64,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "IsDefault",
                 schema: "splitshare",
                 table: "PaymentHandles",
-                type: "bit",
+                type: "boolean",
                 nullable: false,
                 defaultValue: false);
 
@@ -72,7 +72,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "Kind",
                 schema: "splitshare",
                 table: "PaymentHandles",
-                type: "nvarchar(16)",
+                type: "character varying(16)",
                 maxLength: 16,
                 nullable: false,
                 defaultValue: "other");
@@ -81,7 +81,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "Category",
                 schema: "splitshare",
                 table: "Groups",
-                type: "nvarchar(16)",
+                type: "character varying(16)",
                 maxLength: 16,
                 nullable: false,
                 defaultValue: "other");
@@ -90,7 +90,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "CoverKey",
                 schema: "splitshare",
                 table: "Groups",
-                type: "nvarchar(512)",
+                type: "character varying(512)",
                 maxLength: 512,
                 nullable: true);
 
@@ -98,7 +98,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "CoverMime",
                 schema: "splitshare",
                 table: "Groups",
-                type: "nvarchar(64)",
+                type: "character varying(64)",
                 maxLength: 64,
                 nullable: true);
 
@@ -106,7 +106,7 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "Emoji",
                 schema: "splitshare",
                 table: "Groups",
-                type: "nvarchar(16)",
+                type: "character varying(16)",
                 maxLength: 16,
                 nullable: true);
 
@@ -114,14 +114,14 @@ namespace SplitShare.Api.Migrations.Postgres
                 name: "InviteExpiresAt",
                 schema: "splitshare",
                 table: "Groups",
-                type: "datetime2",
+                type: "timestamp with time zone",
                 nullable: true);
 
             migrationBuilder.AddColumn<bool>(
                 name: "InviteRequiresApproval",
                 schema: "splitshare",
                 table: "Groups",
-                type: "bit",
+                type: "boolean",
                 nullable: false,
                 defaultValue: false);
 
@@ -130,13 +130,13 @@ namespace SplitShare.Api.Migrations.Postgres
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ExpenseId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
-                    Quantity = table.Column<int>(type: "int", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    ExpenseId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Name = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    Quantity = table.Column<int>(type: "integer", nullable: false),
                     UnitCents = table.Column<long>(type: "bigint", nullable: false),
                     TotalCents = table.Column<long>(type: "bigint", nullable: false),
-                    SortOrder = table.Column<int>(type: "int", nullable: false)
+                    SortOrder = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -155,8 +155,8 @@ namespace SplitShare.Api.Migrations.Postgres
                 schema: "splitshare",
                 columns: table => new
                 {
-                    ExpenseId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    ExpenseId = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
                     PaidCents = table.Column<long>(type: "bigint", nullable: false)
                 },
                 constraints: table =>
@@ -176,13 +176,13 @@ namespace SplitShare.Api.Migrations.Postgres
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    GroupId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Status = table.Column<string>(type: "nvarchar(16)", maxLength: 16, nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
-                    DecidedAt = table.Column<DateTime>(type: "datetime2", nullable: true),
-                    DecidedBy = table.Column<Guid>(type: "uniqueidentifier", nullable: true)
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    Status = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    DecidedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
+                    DecidedBy = table.Column<Guid>(type: "uuid", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -194,13 +194,13 @@ namespace SplitShare.Api.Migrations.Postgres
                 schema: "splitshare",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    GroupId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    RemovedUserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    ActorId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    CreatedAt = table.Column<DateTime>(type: "datetime2", nullable: false),
+                    Id = table.Column<Guid>(type: "uuid", nullable: false),
+                    GroupId = table.Column<Guid>(type: "uuid", nullable: false),
+                    RemovedUserId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ActorId = table.Column<Guid>(type: "uuid", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     UncollectedCents = table.Column<long>(type: "bigint", nullable: false),
-                    DetailJson = table.Column<string>(type: "nvarchar(max)", nullable: false)
+                    DetailJson = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -212,8 +212,8 @@ namespace SplitShare.Api.Migrations.Postgres
                 schema: "splitshare",
                 columns: table => new
                 {
-                    ItemId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    UserId = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
+                    ItemId = table.Column<Guid>(type: "uuid", nullable: false),
+                    UserId = table.Column<Guid>(type: "uuid", nullable: false)
                 },
                 constraints: table =>
                 {
