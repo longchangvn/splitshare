@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {
-  ADD_EXPENSE_STATE, defaultGroupName, mergeMembers, resolveQuickAddFlow,
+  ADD_EXPENSE_STATE, QUICK_ADD_STATE, addExpenseTarget, defaultGroupName, mergeMembers, resolveQuickAddFlow,
 } from '../src/quickAdd.js';
 
 const read = (p) => readFile(new URL(p, import.meta.url), 'utf8');
@@ -17,6 +17,14 @@ test('flow routing: people+group → 1, group only → 2, people only → 3', ()
   assert.equal(resolveQuickAddFlow(0, 'g1'), 'group');
   assert.equal(resolveQuickAddFlow(1, null), 'people');
   assert.equal(resolveQuickAddFlow(0, null), null);
+});
+
+test('bottom-nav add: group pages open the group form, others open the picker', () => {
+  assert.deepEqual(addExpenseTarget('/groups/g1'), { to: '/groups/g1', state: ADD_EXPENSE_STATE });
+  assert.deepEqual(addExpenseTarget('/groups/g1/expenses/e9'), { to: '/groups/g1', state: ADD_EXPENSE_STATE });
+  assert.deepEqual(addExpenseTarget('/balances'), { to: '/balances', state: QUICK_ADD_STATE });
+  assert.deepEqual(addExpenseTarget('/groups'), { to: '/groups', state: QUICK_ADD_STATE });
+  assert.deepEqual(addExpenseTarget('/profile'), { to: '/', state: QUICK_ADD_STATE });
 });
 
 test('mergeMembers unions by user_id and drops the current user', () => {

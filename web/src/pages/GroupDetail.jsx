@@ -165,7 +165,7 @@ export function GroupDetail() {
       nav(location.pathname, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [location.state]);
 
   const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id || '');
 
@@ -1582,7 +1582,7 @@ export function GroupDetail() {
       <AddExpenseFab onClick={() => setShowExp(true)} disabled={!canWriteGroup} />
 
       <Modal
-        opened={showExp}
+        opened={showExp && canWriteGroup}
         onClose={() => { setShowExp(false); setCopyFrom(null); }}
         closeOnClickOutside={false}
         title={(

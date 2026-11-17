@@ -10,6 +10,8 @@ const en = {
   'nav.home': 'Home',
   'nav.groups': 'Groups',
   'nav.activity': 'Activity',
+  'nav.balances': 'Balances',
+  'nav.archived': 'Archived',
   'nav.settings': 'Settings',
 
   'shell.brand': 'SplitShare',
@@ -212,6 +214,12 @@ const en = {
   'groups.shownOf': '{shown} of {total} groups',
   'groups.filterEmpty': 'No groups match the selected status.',
   'groups.filterNone': 'Select at least one status to see groups.',
+
+  'balances.title': 'Balances',
+  'balances.subtitle': 'What you owe and are owed, per group',
+  'archived.title': 'Archived',
+  'archived.subtitle': 'Locked and closed groups',
+  'archived.empty': 'No archived groups yet.',
 
   'groupStatus.label': 'Group access',
   'groupStatus.opening': 'Opening',
@@ -812,6 +820,8 @@ const vi = {
   'nav.home': 'Trang chủ',
   'nav.groups': 'Nhóm',
   'nav.activity': 'Hoạt động',
+  'nav.balances': 'Số dư',
+  'nav.archived': 'Lưu trữ',
   'nav.settings': 'Cài đặt',
 
   'shell.brand': 'SplitShare',
@@ -1014,6 +1024,12 @@ const vi = {
   'groups.shownOf': '{shown}/{total} nhóm',
   'groups.filterEmpty': 'Không có nhóm nào khớp trạng thái đã chọn.',
   'groups.filterNone': 'Chọn ít nhất một trạng thái để xem nhóm.',
+
+  'balances.title': 'Số dư',
+  'balances.subtitle': 'Khoản bạn nợ và được nợ theo từng nhóm',
+  'archived.title': 'Lưu trữ',
+  'archived.subtitle': 'Các nhóm tạm khóa và đã đóng',
+  'archived.empty': 'Chưa có nhóm lưu trữ nào.',
 
   'groupStatus.label': 'Quyền truy cập nhóm',
   'groupStatus.opening': 'Đang mở',

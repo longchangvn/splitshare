@@ -3,6 +3,21 @@
 /** Router state that makes GroupDetail open the New expense form once. */
 export const ADD_EXPENSE_STATE = { addExpense: true };
 
+/** Router state that makes the dashboard open the quick-add picker once. */
+export const QUICK_ADD_STATE = { quickAdd: true };
+
+/**
+ * Where the nav "Add expense" button goes: inside a group → that group's
+ * expense form; anywhere else → the quick-add picker (dashboard views keep
+ * their current path, other pages fall back to home).
+ */
+export function addExpenseTarget(pathname = '/') {
+  const m = /^\/groups\/([^/]+)/.exec(pathname);
+  if (m) return { to: `/groups/${m[1]}`, state: ADD_EXPENSE_STATE };
+  const dash = ['/', '/groups', '/activity', '/balances', '/archived'];
+  return { to: dash.includes(pathname) ? pathname : '/', state: QUICK_ADD_STATE };
+}
+
 export const GROUP_NAME_MAX = 50;
 
 /**

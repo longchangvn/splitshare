@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Button, Checkbox, Loader, Modal, MultiSelect, Radio, Stack, Text,
 } from '@mantine/core';
@@ -64,6 +64,15 @@ export function QuickAddExpense({ onCreateGroup }) {
         .sort((a, b) => String(a.name).localeCompare(String(b.name))));
     } catch (err) { setE(err); } finally { setLoading(false); }
   };
+
+  // Bottom-nav "Add expense" handoff: open the picker once, then consume the state.
+  const location = useLocation();
+  useEffect(() => {
+    if (!location.state?.quickAdd) return;
+    nav(location.pathname, { replace: true });
+    openPicker();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
 
   const toggle = (uid) => setSelected((cur) => (
     cur.includes(uid) ? cur.filter((x) => x !== uid) : [...cur, uid]));

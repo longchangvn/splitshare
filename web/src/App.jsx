@@ -38,6 +38,8 @@ export default function App() {
           <Route path="/groups" element={<Guard><Dashboard /></Guard>} />
           <Route path="/add" element={<Navigate to="/" replace />} />
           <Route path="/activity" element={<Guard><Dashboard /></Guard>} />
+          <Route path="/balances" element={<Guard><Dashboard /></Guard>} />
+          <Route path="/archived" element={<Guard><Dashboard /></Guard>} />
           <Route path="/groups/:id" element={<Guard><GroupDetail /></Guard>} />
           <Route path="/groups/:id/expenses/:eid" element={<Guard><ExpenseDetail /></Guard>} />
           <Route path="/" element={<Guard><Dashboard /></Guard>} />

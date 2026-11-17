@@ -40,8 +40,7 @@ export function Dashboard() {
   useEffect(() => { load(); }, []);
 
   const location = useLocation();
-  const view = location.pathname === '/groups' ? 'groups'
-    : location.pathname === '/activity' ? 'activity' : 'home';
+  const view = { '/groups': 'groups', '/activity': 'activity', '/balances': 'balances', '/archived': 'archived' }[location.pathname] || 'home';
   useEffect(() => {
     document.querySelector('.app-stage-scroll')?.scrollTo({ top: 0 });
   }, [view]);
@@ -310,6 +309,22 @@ export function Dashboard() {
       {view === 'activity' && (
         <ActivityFeed groups={data?.groups || []} ready={!!data} />
       )}
+      {view === 'archived' && (
+        <GroupsPage groups={groups} ready={!!data} error={e} nav={nav} archived />
+      )}
+      {view === 'balances' && (
+        <>
+          <div className="dash-head">
+            <div>
+              <Title order={2}>{t('balances.title')}</Title>
+              <Text size="sm" c="dimmed">{t('balances.subtitle')}</Text>
+            </div>
+          </div>
+          <Err e={e} />
+          {!data && !e && <Skeleton height={120} radius="lg" />}
+          {data && <BalancePanel groups={balance.groups} />}
+        </>
+      )}
 
       <Modal
         opened={open}
@@ -348,11 +363,15 @@ function NewGroupIcon() {
 }
 
 const GROUP_STATUSES = ['opening', 'locked', 'closed'];
+const ARCHIVED_STATUSES = ['locked', 'closed'];
 
-function GroupsPage({ groups, ready, error, onCreate, nav }) {
+/** Groups board; `archived` narrows it to locked/closed groups (Archived tab). */
+function GroupsPage({ groups: all, ready, error, onCreate, nav, archived = false }) {
   const t = useT();
-  const [statuses, setStatuses] = useState(['opening']);
+  const options = archived ? ARCHIVED_STATUSES : GROUP_STATUSES;
+  const [statuses, setStatuses] = useState(archived ? ARCHIVED_STATUSES : ['opening']);
   const statusOf = (g) => g.status || 'opening';
+  const groups = archived ? all.filter((g) => ARCHIVED_STATUSES.includes(statusOf(g))) : all;
   const shown = groups.filter((g) => statuses.includes(statusOf(g)));
   const toggleStatus = (s) => setStatuses((cur) => (
     cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s]
@@ -361,17 +380,21 @@ function GroupsPage({ groups, ready, error, onCreate, nav }) {
     <>
       <div className="dash-head">
         <div>
-          <Title order={2}>{t('groups.title')}</Title>
+          <Title order={2}>{t(archived ? 'archived.title' : 'groups.title')}</Title>
           <Text size="sm" c="dimmed">
-            {ready ? t('groups.shownOf', { shown: shown.length, total: groups.length }) : '…'}
+            {!ready ? '…' : archived && groups.length === 0
+              ? t('archived.subtitle')
+              : t('groups.shownOf', { shown: shown.length, total: groups.length })}
           </Text>
         </div>
-        <Button className="dash-cta" onClick={onCreate} leftSection={<NewGroupIcon />}>{t('dashboard.newGroup')}</Button>
+        {!archived && (
+          <Button className="dash-cta" onClick={onCreate} leftSection={<NewGroupIcon />}>{t('dashboard.newGroup')}</Button>
+        )}
       </div>
       <Err e={error} />
       {ready && groups.length > 0 && (
         <div className="groups-filter" role="group" aria-label={t('groups.filterLabel')}>
-          {GROUP_STATUSES.map((s) => {
+          {options.map((s) => {
             const on = statuses.includes(s);
             const count = groups.filter((g) => statusOf(g) === s).length;
             return (
@@ -400,8 +423,8 @@ function GroupsPage({ groups, ready, error, onCreate, nav }) {
       )}
       {ready && groups.length === 0 && (
         <div className="groups-empty">
-          <Text c="dimmed">{t('dashboard.noGroups')}</Text>
-          <Button variant="light" onClick={onCreate}>{t('dashboard.createGroup')}</Button>
+          <Text c="dimmed">{t(archived ? 'archived.empty' : 'dashboard.noGroups')}</Text>
+          {!archived && <Button variant="light" onClick={onCreate}>{t('dashboard.createGroup')}</Button>}
         </div>
       )}
       {ready && groups.length > 0 && shown.length === 0 && (
@@ -711,9 +734,11 @@ function BalancePanel({ groups, onClose }) {
     <section id="dash-breakdown" className="dash-card dash-breakdown" aria-live="polite">
       <div className="dash-breakdown-head">
         <div className="dash-kicker">{t('dashboard.balanceByGroup')}</div>
-        <button type="button" className="dash-breakdown-close" onClick={onClose}>
-          {t('dashboard.collapseBreakdown')}
-        </button>
+        {onClose && (
+          <button type="button" className="dash-breakdown-close" onClick={onClose}>
+            {t('dashboard.collapseBreakdown')}
+          </button>
+        )}
       </div>
       {isEmpty && <Text c="dimmed" size="sm">{t('net.allSettled')}</Text>}
       {!isEmpty && groups.map((g) => (

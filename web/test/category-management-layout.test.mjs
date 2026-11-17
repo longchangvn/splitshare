@@ -279,7 +279,7 @@ test('mobile new group dialog wraps its content instead of filling the viewport'
   assert.match(styles, /@media \(max-width: 36em\)\s*\{[\s\S]*?\.new-group-modal-content\s*\{[\s\S]*?height:\s*auto !important;[\s\S]*?border-radius:\s*20px;/);
 });
 
-test('mobile bottom navigation shows a brand pill and menu name only for the active tab', async () => {
+test('mobile bottom navigation shows a brand pill on the active tab and every menu name', async () => {
   const [bottomNav, styles] = await Promise.all([
     readFile(new URL('../src/components/BottomNav.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/styles.css', import.meta.url), 'utf8'),
@@ -287,17 +287,19 @@ test('mobile bottom navigation shows a brand pill and menu name only for the act
 
   assert.match(bottomNav, /bottom-nav-tab\$\{active \? ' is-active' : ''\}/);
   assert.match(bottomNav, /className="bottom-nav-dock"/);
-  assert.match(bottomNav, /active && <span className="bottom-nav-label">\{label\}<\/span>/);
+  assert.match(bottomNav, /<span className="bottom-nav-label">\{label\}<\/span>/);
+  assert.doesNotMatch(bottomNav, /active && <span className="bottom-nav-label">/);
   assert.match(styles, /\.bottom-nav-dock\s*\{[\s\S]*background:\s*rgba\(255, 255, 255, 0\.9\);/);
   assert.match(styles, /\.bottom-nav-tab\.is-active\s*\{[\s\S]*background:\s*#16a34a;/);
   assert.doesNotMatch(styles, /\.bottom-nav-tab\.is-active \.bottom-nav-icon\s*\{/);
 });
 
-test('mobile bottom navigation keeps the active pill compact inside a roomier animated dock', async () => {
+test('mobile bottom navigation splits the dock into equal labelled tabs', async () => {
   const styles = await readFile(new URL('../src/styles.css', import.meta.url), 'utf8');
 
-  assert.match(styles, /\.bottom-nav-dock\s*\{[\s\S]*padding:\s*5px 12px;/);
-  assert.match(styles, /\.bottom-nav-tab\.is-active\s*\{[\s\S]*padding:\s*0px 20px 0 12px;/);
+  assert.match(styles, /\.bottom-nav-dock\s*\{[\s\S]*padding:\s*5px 6px;/);
+  assert.match(styles, /\.bottom-nav-tab\s*\{[\s\S]*?flex:\s*1 1 0;[\s\S]*?flex-direction:\s*column;/);
+  assert.match(styles, /\.bottom-nav-label\s*\{[\s\S]*?white-space:\s*nowrap;/);
   assert.match(styles, /\.bottom-nav-tab\s*\{[\s\S]*transition:\s*[^;]*padding[^;]*background[^;]*color/);
 });
 
