@@ -29,6 +29,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PaymentHandle> PaymentHandles => Set<PaymentHandle>();
     public DbSet<PaymentProof> PaymentProofs => Set<PaymentProof>();
     public DbSet<PushDevice> PushDevices => Set<PushDevice>();
+    public DbSet<ExpensePayer> ExpensePayers => Set<ExpensePayer>();
+    public DbSet<ExpenseItem> ExpenseItems => Set<ExpenseItem>();
+    public DbSet<ExpenseItemAssignee> ExpenseItemAssignees => Set<ExpenseItemAssignee>();
+    public DbSet<JoinRequest> JoinRequests => Set<JoinRequest>();
+    public DbSet<MemberRemovalAudit> MemberRemovalAudits => Set<MemberRemovalAudit>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -43,6 +48,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Username).HasMaxLength(320);
             e.Property(x => x.Email).HasMaxLength(320);
             e.Property(x => x.DisplayName).HasMaxLength(50);
+            e.Property(x => x.AppleSub).HasMaxLength(255);
+            e.Property(x => x.FacebookId).HasMaxLength(255);
+            e.HasIndex(x => x.AppleSub);
+            e.HasIndex(x => x.FacebookId);
+            e.Property(x => x.DefaultCurrency).HasMaxLength(3);
         });
         b.Entity<Group>(e =>
         {
@@ -52,7 +62,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(x => x.Currency).HasMaxLength(3);
             e.Property(x => x.Mode).HasMaxLength(16);
             e.Property(x => x.Status).HasMaxLength(16).HasDefaultValue("opening");
+            e.Property(x => x.Emoji).HasMaxLength(16);
+            e.Property(x => x.Category).HasMaxLength(16);
+            e.Property(x => x.CoverKey).HasMaxLength(512);
+            e.Property(x => x.CoverMime).HasMaxLength(64);
             e.HasMany(x => x.Members).WithOne().HasForeignKey(m => m.GroupId);
+        });
+        b.Entity<JoinRequest>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => new { x.GroupId, x.Status });
+            e.HasIndex(x => new { x.GroupId, x.UserId });
+            e.Property(x => x.Status).HasMaxLength(16);
+        });
+        b.Entity<MemberRemovalAudit>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.GroupId);
         });
         b.Entity<GroupMember>(e =>
         {
@@ -78,6 +104,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasMany(x => x.Splits).WithOne().HasForeignKey(s => s.ExpenseId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(x => x.Images).WithOne().HasForeignKey(i => i.ExpenseId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(x => x.Guests).WithOne().HasForeignKey(g => g.ExpenseId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Payers).WithOne().HasForeignKey(p => p.ExpenseId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Items).WithOne().HasForeignKey(i => i.ExpenseId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ExpensePayer>(e =>
+        {
+            e.HasKey(x => new { x.ExpenseId, x.UserId });
+        });
+        b.Entity<ExpenseItem>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.ExpenseId);
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.HasMany(x => x.Assignees).WithOne().HasForeignKey(a => a.ItemId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ExpenseItemAssignee>(e =>
+        {
+            e.HasKey(x => new { x.ItemId, x.UserId });
         });
         b.Entity<ExpenseSplit>(e =>
         {
@@ -178,6 +221,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(x => x.UserId);
             e.Property(x => x.Label).HasMaxLength(64);
             e.Property(x => x.Details).HasMaxLength(280);
+            e.Property(x => x.Kind).HasMaxLength(16);
         });
         b.Entity<PaymentProof>(e =>
         {

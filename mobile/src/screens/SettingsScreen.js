@@ -1,7 +1,8 @@
 // Settings tab: web Shell account block + language picker, a link to Offline & notifications,
 // and logout. (Group templates were removed from the product.)
 import React, { useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Pressable } from 'react-native';
+import { Text } from '../typography';
 import { useAuth, userLabel } from '../auth/AuthContext';
 import { colors, type } from '../theme';
 import {
@@ -9,6 +10,8 @@ import {
 } from '../ui';
 import { usePrefs, useT } from '../i18n';
 import { AccountErr, LinkRow, a } from '../components/account/AccountKit';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
 
 export default function SettingsScreen({ navigation }) {
   const t = useT();
@@ -26,9 +29,10 @@ export default function SettingsScreen({ navigation }) {
   };
 
   const name = userLabel(user);
+  const features = activeTheme().features || {};
 
   return (
-    <Screen contentStyle={{ paddingBottom: 150 }}>
+    <Screen contentStyle={{ paddingBottom: features.flatTabBar ? 40 : 150 }}>
       <View style={{ marginTop: 4 }}>
         <Text style={type.title} accessibilityRole="header">{t('settings.title')}</Text>
         <Text style={type.small}>{t('settings.subtitle')}</Text>
@@ -36,6 +40,7 @@ export default function SettingsScreen({ navigation }) {
       <AccountErr e={e} style={{ marginTop: 0 }} />
 
       {/* Account block (web Shell sidebar account) */}
+      {features.iconTiles ? <SectionHeader title={t('se.settings.account')} ms="person" /> : null}
       <Card onPress={() => navigation.navigate('Profile')} accessibilityLabel={t('shell.accountNamed', { name })}>
         <Row gap={12}>
           <Avatar name={name} size={48} />
@@ -51,12 +56,12 @@ export default function SettingsScreen({ navigation }) {
               </View>
             ) : null}
           </View>
-          <Text style={a.chev}>›</Text>
+          <ThemedIcon ms="chevron_right" size={22} color={colors.muted}><Text style={a.chev}>›</Text></ThemedIcon>
         </Row>
       </Card>
 
       {/* Language */}
-      <SectionHeader title={t('shell.language')} />
+      <SectionHeader title={t('shell.language')} ms="translate" />
       <Card style={{ paddingVertical: 4 }}>
         <View accessibilityRole="radiogroup" accessibilityLabel={t('shell.chooseLanguage')}>
           {locales.map((l, i) => {
@@ -76,7 +81,7 @@ export default function SettingsScreen({ navigation }) {
                     <Text style={{ fontSize: 12, fontWeight: '800', color: on ? '#fff' : colors.secondary }}>{meta.code || l.toUpperCase()}</Text>
                   </View>
                   <Text style={[type.h3, { flex: 1 }]}>{meta.native || meta.label || l}</Text>
-                  {on ? <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 16 }}>✓</Text> : null}
+                  {on ? <ThemedIcon ms="check_circle" size={22} color={colors.primary}><Text style={{ color: colors.primary, fontWeight: '800', fontSize: 16 }}>✓</Text></ThemedIcon> : null}
                 </Pressable>
               </View>
             );
@@ -85,13 +90,20 @@ export default function SettingsScreen({ navigation }) {
       </Card>
 
       {/* System */}
+      {features.iconTiles ? <SectionHeader title={t('se.settings.app')} ms="tune" /> : null}
       <Card style={{ paddingVertical: 4 }}>
-        <LinkRow title={t('m.settings.offlinePush')} sub={t('m.account.offlinePushSub')} onPress={() => navigation.navigate('System')} />
+        <LinkRow ms="cloud_sync" title={t('m.settings.offlinePush')} sub={t('m.account.offlinePushSub')} onPress={() => navigation.navigate('System')} />
         <View style={a.sep} />
-        <LinkRow title={t('m.account.viewProfile')} onPress={() => navigation.navigate('Profile')} />
+        <LinkRow ms="manage_accounts" title={t('m.account.viewProfile')} onPress={() => navigation.navigate('Profile')} />
+        {features.archivedGroups ? (
+          <>
+            <View style={a.sep} />
+            <LinkRow ms="inventory_2" title={t('se.archived.title')} sub={t('se.settings.archivedSub')} onPress={() => navigation.navigate('Archived')} />
+          </>
+        ) : null}
       </Card>
 
-      <Button variant="ghost" title={`⎋  ${t('profile.logOut')}`} onPress={() => setLogoutOpen(true)} style={{ borderColor: colors.dangerCardBorder }} />
+      <Button variant="ghost" icon="⎋" title={t('profile.logOut')} onPress={() => setLogoutOpen(true)} style={{ borderColor: colors.dangerCardBorder }} />
       <DevApiUrlCard />
 
       <ConfirmSheet

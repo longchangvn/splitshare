@@ -5,7 +5,8 @@
 //   step 'login'     shared LoginForm for an existing account (small link on the choice screen)
 // Signed in → POST /invitations/:token/join and open the group.
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
+import { Text } from '../typography';
 import { api, setTokens } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';

@@ -17,6 +17,18 @@ for (const f of fs.readdirSync(mobileDir).filter((x) => x.endsWith('.js'))) {
   Object.assign(dicts.vi, mod.vi);
 }
 
+// Theme-only strings (src/themes/<name>/messages/*.js, default export { en, vi }).
+const themesDir = path.join(root, 'src', 'themes');
+for (const th of fs.readdirSync(themesDir, { withFileTypes: true }).filter((d) => d.isDirectory())) {
+  const md = path.join(themesDir, th.name, 'messages');
+  if (!fs.existsSync(md)) continue;
+  for (const f of fs.readdirSync(md).filter((x) => x.endsWith('.js') && x !== 'index.js')) {
+    const mod = (await import(path.join(md, f))).default;
+    Object.assign(dicts.en, mod.en);
+    Object.assign(dicts.vi, mod.vi);
+  }
+}
+
 function sources(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);

@@ -2,7 +2,9 @@
 // By email (POST /invites {emails}) · From contacts (GET /contacts, POST /members {user_ids})
 // · Link (invite_link, copy/share via the native share sheet, owner can rotate).
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Share, Platform, StyleSheet } from 'react-native';
+import { View, Share, Platform, StyleSheet } from 'react-native';
+import { Text } from '../typography';
+import * as Clipboard from 'expo-clipboard';
 import { api } from '../api/client';
 import { useT } from '../i18n';
 import { colors, type, radius } from '../theme';
@@ -12,12 +14,17 @@ import { parseEmails } from '../components/group/helpers';
 import { InviteResultList, toastInviteResults } from '../components/group/InviteResultList';
 import { inviteRows } from '../shared/inviteResults';
 import { publicHandle } from '../auth/AuthContext';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
+import InviteQr from '../themes/splitease/components/group/InviteQr';
 
 export default function InviteScreen({ route, navigation }) {
   const { id } = route.params || {};
   const t = useT();
+  const { features } = activeTheme();
   const [detail, setDetail] = useState(null);
-  const [tab, setTab] = useState('email');
+  // SplitEase opens on the link + QR card (Stitch M33); classic on email.
+  const [tab, setTab] = useState(features.inviteQr ? 'link' : 'email');
   const [emails, setEmails] = useState('');
   const [inviteResult, setInviteResult] = useState([]);
   const [cq, setCq] = useState('');
@@ -96,6 +103,15 @@ export default function InviteScreen({ route, navigation }) {
     } catch { /* dismissed */ }
   };
 
+  // SplitEase: copy the link straight to the clipboard (Share stays available next to it).
+  const copy = async () => {
+    if (!link) return;
+    try {
+      await Clipboard.setStringAsync(link);
+      toast({ title: t('se.invite.copied'), color: 'teal' });
+    } catch { share(); }
+  };
+
   const isOwner = detail?.my_role === 'owner';
   const visibleContacts = contacts.filter((c) => !added.includes(c.user_id));
 
@@ -157,7 +173,37 @@ export default function InviteScreen({ route, navigation }) {
         </Card>
       ) : null}
 
-      {tab === 'link' ? (
+      {tab === 'link' && features.inviteQr ? (
+        <>
+          <Card>
+            <View style={s.head}>
+              <View style={s.icon}><ThemedIcon ms="link" size={20} color={colors.primary} /></View>
+              <Text style={[type.h3, { flex: 1 }]}>{t('invite.inviteLink')}</Text>
+            </View>
+            {link ? (
+              <>
+                <Text style={[type.small, { marginTop: 8 }]}>{t('invite.linkBody')}</Text>
+                <Text selectable numberOfLines={1} style={s.link}>{link}</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                  <Button style={{ flex: 1 }} title={t('invite.copyLink')} onPress={copy} />
+                  <Button variant="ghost" title={t('invite.share')} onPress={share} />
+                </View>
+                {isOwner ? (
+                  <Button style={{ marginTop: 10 }} small variant="ghost" title={t('invite.rotate')} busy={busy === 'rotate'} onPress={() => setRotateOpen(true)} />
+                ) : null}
+              </>
+            ) : (
+              <>
+                <Text style={[type.body, { marginTop: 8 }]}>{t('invite.ownerOnlyLink')}</Text>
+                {isOwner ? <Button style={{ marginTop: 12 }} variant="soft" title={t('invite.newLinkRotates')} busy={busy === 'rotate'} onPress={rotate} /> : null}
+              </>
+            )}
+          </Card>
+          <InviteQr link={link} />
+        </>
+      ) : null}
+
+      {tab === 'link' && !features.inviteQr ? (
         <Card>
           {link ? (
             <>
@@ -194,5 +240,7 @@ export default function InviteScreen({ route, navigation }) {
 }
 
 const s = StyleSheet.create({
+  head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  icon: { width: 36, height: 36, borderRadius: radius.tile, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' },
   link: { marginTop: 10, padding: 12, borderRadius: radius.inp, backgroundColor: colors.chipBg, borderWidth: 1, borderColor: colors.line, fontSize: 13, color: colors.darkTealText, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
 });

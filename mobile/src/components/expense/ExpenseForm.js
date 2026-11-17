@@ -4,12 +4,15 @@
 // receipt scan (OCR, shared applyScan). Edit: PATCH /expenses/:id with expected_version, live
 // preview-edit, un-settle confirm. initialSplit = remembered split (create only).
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, Pressable, Image, StyleSheet } from 'react-native';
+import { View, Pressable, Image, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import {
   api, fmt, displayNameOf, getCapabilities, newIdempotencyKey,
 } from '../../api/client';
 import { queueOrSend } from '../../offline/queue';
 import { colors, radius, type } from '../../theme';
+import { activeTheme } from '../../themes';
+import { ThemedIcon } from '../ThemedIcon';
 import {
   Screen, Card, Row, Button, ConfirmSheet, toast, ErrText,
 } from '../../ui';
@@ -36,6 +39,7 @@ export default function ExpenseForm({
   onDone, onSaveNew, onCancel, onReload,
 }) {
   const t = useT();
+  const cards = !!activeTheme().features.expenseCards;
   const source = existing ?? copyFrom ?? null;
   const isCopy = !!copyFrom && !existing;
   const nameOf = (id) => displayNameOf(members, id);
@@ -341,15 +345,8 @@ export default function ExpenseForm({
     />
   );
 
-  return (
-    <Screen footer={footer}>
-      {isCopy && dropped.length > 0 && (
-        <Card tone="open">
-          <Text style={[type.h3, { color: colors.tones.open.ink }]}>{t('forms.expense.formerExcluded')}</Text>
-          <Text style={type.small}>{dropped.map((id) => id.slice(0, 8)).join(', ')}</Text>
-        </Card>
-      )}
-
+  const receiptsBlock = (
+    <>
       {/* Receipts strip */}
       <Card>
         <Row>
@@ -360,9 +357,9 @@ export default function ExpenseForm({
               ))}
             </Row>
           ) : receiptCount > 0 ? (
-            <Text style={s.slot}>🧾</Text>
+            <ThemedIcon ms="receipt_long" size={22} color={colors.secondary}><Text style={s.slot}>🧾</Text></ThemedIcon>
           ) : (
-            <Text style={s.slot}>＋</Text>
+            <ThemedIcon ms="add_a_photo" size={22} color={colors.secondary}><Text style={s.slot}>＋</Text></ThemedIcon>
           )}
           <View style={{ flex: 1 }}>
             <Text style={type.h3}>{t('forms.expense.receiptsCount', { count: receiptCount })}</Text>
@@ -406,6 +403,19 @@ export default function ExpenseForm({
           <Text style={[type.small, { marginTop: 4 }]}>{t('forms.expense.scanHint')}</Text>
         </View>
       )}
+    </>
+  );
+
+  return (
+    <Screen footer={footer}>
+      {isCopy && dropped.length > 0 && (
+        <Card tone="open">
+          <Text style={[type.h3, { color: colors.tones.open.ink }]}>{t('forms.expense.formerExcluded')}</Text>
+          <Text style={type.small}>{dropped.map((id) => id.slice(0, 8)).join(', ')}</Text>
+        </Card>
+      )}
+
+      {cards ? null : receiptsBlock}
 
       <ExpenseFields
         draft={draft}
@@ -420,6 +430,9 @@ export default function ExpenseForm({
         splitHint={splitHint}
         receiptCurrency={receiptCurrency}
       />
+
+      {/* SplitEase: receipts + scan sit below the split (Stitch M50 "Documentation"). */}
+      {cards ? receiptsBlock : null}
 
       {imgErrs.length > 0 && (
         <Card tone="open">

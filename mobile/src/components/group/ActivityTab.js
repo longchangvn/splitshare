@@ -1,13 +1,21 @@
 // Activity tab — web GroupDetail "activity" panel: payments + activity entries, newest first,
 // paginated (10/page), reverse payment (owner/treasurer, within 24h) with confirm.
 import React, { useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import { fmt, displayNameOf } from '../../api/client';
 import { colors, type } from '../../theme';
 import { useT } from '../../i18n';
 import { Card, Button, Row, ConfirmSheet, Skeleton } from '../../ui';
 import { ListRow, TextAction, useDateFmt, p as parts } from './parts';
 import { paginate, canReversePayment } from './helpers';
+import { ThemedIcon } from '../ThemedIcon';
+
+// Material icon per activity kind (themes with icons: 'material').
+const KIND_MS = {
+  payment: 'payments', expense: 'receipt_long', join: 'person_add', comment: 'chat_bubble_outline',
+  nudge: 'notifications_active', paid: 'task_alt', share: 'call_split', settled: 'done_all',
+};
 
 export default function ActivityTab({ feed, loading, detail, members, currency, onRefresh, onReverse }) {
   const t = useT();
@@ -21,7 +29,13 @@ export default function ActivityTab({ feed, loading, detail, members, currency, 
     const [bg, fg] = colors.kind[kind] || colors.kind.comment;
     const k = `activity.kindShort.${kind}`;
     const label = t(k) === k ? String(kind || '').toUpperCase().slice(0, 5) : t(k);
-    return <View style={[s.thumb, { backgroundColor: bg }]}><Text style={[s.thumbT, { color: fg }]}>{label}</Text></View>;
+    return (
+      <View style={[s.thumb, { backgroundColor: bg }]}>
+        <ThemedIcon ms={KIND_MS[kind] || 'history'} size={20} color={fg}>
+          <Text style={[s.thumbT, { color: fg }]}>{label}</Text>
+        </ThemedIcon>
+      </View>
+    );
   };
 
   return (

@@ -1,7 +1,10 @@
 // Small presentational pieces shared by the group screens (ledger tiles, net chips, bars).
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors, radius, type, CATEGORY_META } from '../../theme';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
+import { colors, radius, type, CATEGORY_META, groupTokens } from '../../theme';
+import { activeTheme } from '../../themes';
+import { ThemedIcon } from '../ThemedIcon';
 import { usePrefs } from '../../i18n';
 import { netTone } from './helpers';
 
@@ -25,16 +28,32 @@ export function useDateFmt() {
 export function tileFor(item) {
   if (item?.kind === 'payment') return CATEGORY_META.payment;
   const hit = CATEGORY_META[item?.category] || CATEGORY_META.other;
-  return item?.has_image ? { emoji: '🧾', color: hit.color } : hit;
+  return item?.has_image ? { emoji: '🧾', color: hit.color, ms: hit.ms } : hit;
 }
 
-export function Tile({ item, emoji, color, size = 40 }) {
-  const m = item ? tileFor(item) : { emoji, color };
+export function Tile({ item, emoji, color, ms, size = 40 }) {
+  const m = item ? tileFor(item) : { emoji, color, ms };
+  // Material themes: tinted rounded square holding the category icon (Stitch icon tiles).
+  if (activeTheme().icons === 'material' && m.ms) return <IconTile ms={m.ms} color={m.color} size={size} />;
   return (
     <View style={[p.tile, { width: size, height: size, backgroundColor: m.color }]} accessibilityElementsHidden importantForAccessibility="no">
       <Text style={{ fontSize: Math.round(size * 0.45) }}>{m.emoji}</Text>
     </View>
   );
+}
+
+/** Rounded square tinted with `color`, holding a Material icon (glyph `children` in classic). */
+export function IconTile({ ms, color = colors.primary, size = 40, children }) {
+  return (
+    <View style={[p.tile, { width: size, height: size, backgroundColor: `${color}1f` }]} accessibilityElementsHidden importantForAccessibility="no">
+      <ThemedIcon ms={ms} size={Math.round(size * 0.5)} color={color}>{children}</ThemedIcon>
+    </View>
+  );
+}
+
+/** Chevron used by tappable rows (› in classic). */
+export function Chevron({ size = 18, color = colors.muted }) {
+  return <ThemedIcon ms="chevron_right" size={size + 4} color={color}><Text style={{ color, fontSize: size }}>›</Text></ThemedIcon>;
 }
 
 /** Net amount chip (web .report-net / .net-chip is-owe|owed|settled). */
@@ -44,7 +63,7 @@ export function NetChip({ cents, label }) {
 }
 
 /** Horizontal track + fill (budget, category %, distribution rows). */
-export function Bar({ value, color = colors.primary, height = 8, track = '#eef2f0' }) {
+export function Bar({ value, color = colors.primary, height = 8, track = groupTokens.barTrack }) {
   const w = Math.max(0, Math.min(100, Number(value) || 0));
   return (
     <View style={{ height, borderRadius: height / 2, backgroundColor: track, overflow: 'hidden' }}>
@@ -84,7 +103,10 @@ export function TextAction({ label, onPress, danger, disabled, style }) {
 }
 
 /** Settings-style row used in sheets (label + optional sub + chevron). */
-export function MenuRow({ label, sub, onPress, danger, disabled, right, last }) {
+export function MenuRow({ label, sub, onPress, danger, disabled, right, last, ms }) {
+  const icon = ms && activeTheme().icons === 'material'
+    ? <IconTile ms={ms} size={36} color={danger ? colors.danger : colors.primary} />
+    : null;
   return (
     <Pressable
       style={({ pressed }) => [p.menu, !last && p.rowLine, pressed && { opacity: 0.7 }, disabled && { opacity: 0.4 }]}
@@ -93,11 +115,12 @@ export function MenuRow({ label, sub, onPress, danger, disabled, right, last }) 
       accessibilityRole="button"
       accessibilityLabel={label}
     >
+      {icon}
       <View style={{ flex: 1 }}>
         <Text style={[type.h3, danger && { color: colors.danger }]}>{label}</Text>
         {sub ? <Text style={type.small} numberOfLines={2}>{sub}</Text> : null}
       </View>
-      {right !== undefined ? right : <Text style={{ color: colors.muted, fontSize: 18 }}>›</Text>}
+      {right !== undefined ? right : <Chevron />}
     </Pressable>
   );
 }

@@ -3,7 +3,8 @@
 // 410 INVITE_ROTATED). Anonymous → invitation banner + Continue with Google |
 // Register new account (+ small Log in link); each path comes back here and joins.
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator } from 'react-native';
+import { Text } from '../typography';
 import { api, groupIdOf, setTokens } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';

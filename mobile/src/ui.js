@@ -1,22 +1,24 @@
 // Shared UI primitives — native take on the web design system (web/src/styles.css):
 // pill buttons, soft cards, chips, pastel avatars, bottom sheets, toasts, skeletons.
 import React from 'react';
-import {
-  View, Text, TextInput, Pressable, ActivityIndicator, StyleSheet, Alert, Modal, ScrollView,
-  Image, KeyboardAvoidingView, Platform, Animated,
-} from 'react-native';
+import { View, Pressable, ActivityIndicator, StyleSheet, Alert, Modal, ScrollView, Image, KeyboardAvoidingView, Platform, Animated } from 'react-native';
+import { Text, TextInput } from './typography';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radius, shadow, type } from './theme';
+import { colors, radius, shadow, type, tk } from './theme';
 import {
   isDevBuild, configuredApiUrl, baseUrl, setApiUrlOverride, resetApiUrlOverride, DEV_DEFAULT_API_URL,
   authHeaders, api,
 } from './api/client';
 import { useT } from './i18n';
+import { ThemedIcon } from './components/ThemedIcon';
+import { activeTheme } from './themes';
+
+const materialIcons = activeTheme().icons === 'material';
 
 // ---------- Avatars (web components/Net.jsx pastelFor / initialsOf) ----------
 const GROUP_PASTELS = [
-  ['#dcefe6', '#b7d9c8'], ['#e3eef5', '#c2d6e6'], ['#efe8dc', '#ddd0bc'], ['#e7f0ea', '#c5d8ce'],
-  ['#efe6e4', '#dfcbc7'], ['#e6ebe8', '#cdd6d1'], ['#e8edf2', '#c8d2dc'], ['#ebe8e2', '#d4cfc4'],
+  [tk('#dcefe6'), tk('#b7d9c8')], [tk('#e3eef5'), tk('#c2d6e6')], [tk('#efe8dc'), tk('#ddd0bc')], [tk('#e7f0ea'), tk('#c5d8ce')],
+  [tk('#efe6e4'), tk('#dfcbc7')], [tk('#e6ebe8'), tk('#cdd6d1')], [tk('#e8edf2'), tk('#c8d2dc')], [tk('#ebe8e2'), tk('#d4cfc4')],
 ];
 
 export function pastelFor(name) {
@@ -45,7 +47,7 @@ export function Avatar({ name, size = 36, rounded = true }) {
       accessibilityElementsHidden
       importantForAccessibility="no"
     >
-      <Text style={{ fontWeight: '800', color: '#2f3b36', fontSize: Math.max(11, Math.round(size * 0.34)) }}>{initialsOf(name)}</Text>
+      <Text style={{ fontWeight: '800', color: tk('#2f3b36'), fontSize: Math.max(11, Math.round(size * 0.34)) }}>{initialsOf(name)}</Text>
     </View>
   );
 }
@@ -90,10 +92,16 @@ export function Card({ children, style, onPress, tone, accessibilityLabel }) {
   );
 }
 
-export function SectionHeader({ title, action, onAction, style }) {
+/** `ms` (optional) prefixes a Material icon in icon themes; ignored by glyph themes. */
+export function SectionHeader({ title, action, onAction, style, ms }) {
   return (
     <View style={[u.sectionRow, style]}>
-      <Text style={type.h2}>{title}</Text>
+      {ms && materialIcons ? (
+        <View style={u.sectionTitle}>
+          <ThemedIcon ms={ms} size={20} color={colors.primary} />
+          <Text style={type.h2}>{title}</Text>
+        </View>
+      ) : <Text style={type.h2}>{title}</Text>}
       {action ? <Text style={u.link} onPress={onAction} accessibilityRole="button">{action}</Text> : null}
     </View>
   );
@@ -104,6 +112,9 @@ export function Row({ children, style, gap = 8 }) {
 }
 
 // ---------- Buttons ----------
+// Glyph `icon`s → Material icon names for icon themes (classic renders the glyph text).
+const ICON_MS = { '✉': 'mail', '🔒': 'lock', '＋': 'add', '✓': 'check', '🗑': 'delete', '📷': 'photo_camera', '⎋': 'logout' };
+
 const BTN = {
   primary: { bg: colors.ink, fg: '#fff' },
   brand: { bg: colors.primary, fg: '#fff' },
@@ -129,7 +140,12 @@ export function Button({ title, busy, onPress, variant = 'primary', disabled, ic
       accessibilityState={{ disabled: !!off, busy: !!busy }}
       accessibilityLabel={accessibilityLabel || title}
     >
-      {busy ? <ActivityIndicator color={v.fg} /> : (
+      {busy ? <ActivityIndicator color={v.fg} /> : materialIcons && ICON_MS[icon] ? (
+        <View style={u.btnRow}>
+          <ThemedIcon ms={ICON_MS[icon]} size={small ? 16 : 18} color={v.fg} />
+          <Text style={[u.btnT, small && { fontSize: 13 }, { color: v.fg, flexShrink: 1 }]} numberOfLines={1}>{title}</Text>
+        </View>
+      ) : (
         <Text style={[u.btnT, small && { fontSize: 13 }, { color: v.fg }]} numberOfLines={1}>{icon ? `${icon}  ` : ''}{title}</Text>
       )}
     </Pressable>
@@ -185,7 +201,7 @@ export function Segmented({ options, value, onChange }) {
           accessibilityRole="tab"
           accessibilityState={{ selected: value === o.value }}
         >
-          <Text style={[u.segT, value === o.value && { color: colors.text }]} numberOfLines={1}>{o.label}</Text>
+          <Text style={[u.segT, value === o.value && { color: colors.segOnText }]} numberOfLines={1}>{o.label}</Text>
         </Pressable>
       ))}
     </View>
@@ -201,7 +217,7 @@ export function CheckRow({ label, sub, checked, onPress, right, disabled }) {
       accessibilityRole="checkbox"
       accessibilityState={{ checked: !!checked, disabled: !!disabled }}
     >
-      <View style={[u.box, checked && u.boxOn]}>{checked ? <Text style={u.boxTick}>✓</Text> : null}</View>
+      <View style={[u.box, checked && u.boxOn]}>{checked ? <ThemedIcon ms="check" size={16} color="#fff"><Text style={u.boxTick}>✓</Text></ThemedIcon> : null}</View>
       <View style={{ flex: 1 }}>
         <Text style={type.h3} numberOfLines={1}>{label}</Text>
         {sub ? <Text style={type.small} numberOfLines={1}>{sub}</Text> : null}
@@ -248,7 +264,7 @@ export function SelectField({ label, value, options, onChange, placeholder, erro
         accessibilityValue={{ text: current?.label || '' }}
       >
         <Text style={{ color: current ? colors.text : colors.muted, flex: 1 }} numberOfLines={1}>{current?.label || placeholder || '—'}</Text>
-        <Text style={{ color: colors.muted }}>⌄</Text>
+        <ThemedIcon ms="expand_more" size={22} color={colors.muted}><Text style={{ color: colors.muted }}>⌄</Text></ThemedIcon>
       </Pressable>
       <Sheet visible={open} onClose={() => setOpen(false)} title={label}>
         {options.map((o) => (
@@ -261,7 +277,7 @@ export function SelectField({ label, value, options, onChange, placeholder, erro
             accessibilityState={{ checked: o.value === value }}
           >
             <Text style={[type.body, o.disabled && { opacity: 0.4 }, o.value === value && { fontWeight: '700', color: colors.text }]}>{o.label}</Text>
-            {o.value === value ? <Text style={{ color: colors.primary, fontWeight: '800' }}>✓</Text> : null}
+            {o.value === value ? <ThemedIcon ms="check" size={20} color={colors.primary}><Text style={{ color: colors.primary, fontWeight: '800' }}>✓</Text></ThemedIcon> : null}
           </Pressable>
         ))}
       </Sheet>
@@ -281,7 +297,7 @@ export function Sheet({ visible, onClose, title, children, footer, scroll = true
           {title ? (
             <View style={u.sheetHead}>
               <Text style={[type.h1, { flex: 1 }]}>{title}</Text>
-              <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close"><Text style={u.close}>✕</Text></Pressable>
+              <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close"><ThemedIcon ms="close" size={22} color={colors.secondary}><Text style={u.close}>✕</Text></ThemedIcon></Pressable>
             </View>
           ) : null}
           {scroll ? <ScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>{children}</ScrollView> : children}
@@ -327,7 +343,7 @@ export function ToastHost() {
   return (
     <View pointerEvents="box-none" style={[u.toastWrap, { top: insets.top + 8 }]}>
       {items.map((n) => {
-        const bar = n.color === 'red' ? colors.danger : n.color === 'orange' ? '#f59e0b' : colors.primary;
+        const bar = n.color === 'red' ? colors.danger : n.color === 'orange' ? tk('#f59e0b') : colors.primary;
         return (
           <Pressable key={n.id} style={[u.toast, { borderLeftColor: bar }]} onPress={() => setItems((p) => p.filter((x) => x.id !== n.id))} accessibilityLiveRegion="polite">
             {n.title ? <Text style={type.h3}>{n.title}</Text> : null}
@@ -358,7 +374,7 @@ export function Skeleton({ w = '100%', h = 14, style }) {
     loop.start();
     return () => loop.stop();
   }, [o]);
-  return <Animated.View style={[{ width: w, height: h, backgroundColor: '#e6ebe8', borderRadius: 8, opacity: o }, style]} />;
+  return <Animated.View style={[{ width: w, height: h, backgroundColor: tk('#e6ebe8'), borderRadius: 8, opacity: o }, style]} />;
 }
 
 export function SkeletonCard() {
@@ -437,24 +453,26 @@ export const u = StyleSheet.create({
   footer: { paddingHorizontal: 16, paddingTop: 10, backgroundColor: colors.screen, borderTopWidth: 1, borderTopColor: colors.line },
   card: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: radius.card, padding: 16, ...shadow.card },
   sectionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  sectionTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   link: { color: colors.primaryText, fontWeight: '700', fontSize: 13 },
   btn: { borderRadius: radius.btn, minHeight: 46, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
   btnSmall: { minHeight: 36, paddingHorizontal: 14 },
   btnT: { fontWeight: '700', fontSize: 15 },
+  btnRow: { flexDirection: 'row', alignItems: 'center', gap: 8, maxWidth: '100%' },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { borderWidth: 1, borderColor: colors.line, backgroundColor: colors.chipBg, borderRadius: radius.chip, paddingHorizontal: 14, paddingVertical: 8, minHeight: 36, justifyContent: 'center' },
   chipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   chipT: { fontSize: 14, fontWeight: '600', color: colors.body },
   badge: { fontSize: 11, fontWeight: '800', paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, overflow: 'hidden', alignSelf: 'flex-start' },
-  seg: { flexDirection: 'row', backgroundColor: '#eef2f0', borderRadius: radius.seg, padding: 3, gap: 3 },
-  segI: { flex: 1, paddingVertical: 8, paddingHorizontal: 6, borderRadius: 10, alignItems: 'center', justifyContent: 'center', minHeight: 40 },
+  seg: { flexDirection: 'row', backgroundColor: tk('#eef2f0'), borderRadius: radius.seg, padding: 3, gap: 3 },
+  segI: { flex: 1, paddingVertical: 8, paddingHorizontal: 6, borderRadius: radius.seg - 2, alignItems: 'center', justifyContent: 'center', minHeight: 40 },
   segOn: { backgroundColor: '#fff', ...shadow.card },
   segT: { fontSize: 13, fontWeight: '700', color: colors.secondary },
   checkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, minHeight: 44 },
   box: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, borderColor: colors.inputBorder, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   boxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   boxTick: { color: '#fff', fontWeight: '900', fontSize: 13 },
-  label: { fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 6 },
+  label: type.label,
   inp: { backgroundColor: colors.inputBg, borderColor: colors.inputBorder, borderWidth: 1, borderRadius: radius.inp, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: colors.text, minHeight: 46 },
   selectBox: { flexDirection: 'row', alignItems: 'center' },
   option: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.line, minHeight: 48 },

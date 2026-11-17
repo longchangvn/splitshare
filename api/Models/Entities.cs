@@ -16,6 +16,13 @@ public sealed class User
     public DateTime? EmailVerifiedAt { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTime? LockedUntilUtc { get; set; }
+    public string? AppleSub { get; set; }
+    public string? FacebookId { get; set; }
+    public string DefaultCurrency { get; set; } = "USD"; // pre-fills new groups; chosen at sign-up
+    // Push preferences per notification type (per-group mutes live on PushDevice).
+    public bool NotifyExpenses { get; set; } = true;
+    public bool NotifyNudges { get; set; } = true;
+    public bool NotifyInvites { get; set; } = true;
 
     /// <summary>Name to show: the chosen display name, or the email when none was set.</summary>
     [System.ComponentModel.DataAnnotations.Schema.NotMapped]
@@ -39,6 +46,13 @@ public sealed class Group
     public string Status { get; set; } = "opening"; // opening|locked|closed
     public long? FlatFeeCents { get; set; } // event mode per-head fee
     public string? ShareToken { get; set; } // public read-only page, rotated on demand
+    public string? Emoji { get; set; } // group badge, e.g. "✈️"
+    public string Category { get; set; } = "other"; // trip|home|couple|other
+    public string? CoverKey { get; set; } // cover photo in IFileStore
+    public string? CoverMime { get; set; }
+    // Invite-link policy: join requests wait for an owner/treasurer; links stop working after expiry.
+    public bool InviteRequiresApproval { get; set; }
+    public DateTime? InviteExpiresAt { get; set; }
 }
 
 public sealed class GroupMember

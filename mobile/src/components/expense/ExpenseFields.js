@@ -3,9 +3,13 @@
 // entry points look and behave the same. Controlled: the parent owns `draft`.
 // `bare` renders the sections without their own Card (a scan card is already a Card).
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import { api, fmt, displayNameOf } from '../../api/client';
 import { colors, type } from '../../theme';
+import { activeTheme } from '../../themes';
+import { ThemedIcon } from '../ThemedIcon';
+import ExpenseTop from '../../themes/splitease/components/expense/ExpenseTop';
 import {
   Card, Row, Button, ChipRow, Chip, CheckRow, Input, Field, SelectField, Sheet, toast, Badge, ErrText,
 } from '../../ui';
@@ -33,6 +37,9 @@ export default function ExpenseFields({
   preview = null, errors = [], disabled = false, splitHint = null, receiptCurrency = '', bare = false,
 }) {
   const t = useT();
+  // SplitEase (features.expenseCards, Stitch M50/M34/M8): amount hero + one card per topic.
+  // Scan cards (bare) keep the compact layout.
+  const cards = !!activeTheme().features.expenseCards && !bare;
   const Section = bare ? View : Card;
   const err = (code) => (errors.includes(code) ? t(ERR_KEY[code]) : null);
   const nameOf = (id) => displayNameOf(members, id);
@@ -93,80 +100,117 @@ export default function ExpenseFields({
   const yesterday = todayIso(new Date(Date.now() - 864e5));
   const off = disabled ? { pointerEvents: 'none', opacity: 0.5 } : null;
 
+  const titleField = (
+    <Field label={t('forms.expense.title')} error={err('title')} style={{ marginTop: 0 }}>
+      <Input
+        value={draft.title}
+        editable={!disabled}
+        error={!!err('title')}
+        onChangeText={(v) => onChange({ title: v })}
+        placeholder={t('forms.expense.titlePh')}
+        maxLength={TITLE_MAX}
+        accessibilityLabel={t('forms.expense.title')}
+      />
+    </Field>
+  );
+  const amountField = (
+    <Field
+      label={t('forms.expense.amount')}
+      error={amountMsg || err('amount')}
+      hint={fx ? t('forms.expense.amountFromFx') : null}
+    >
+      <Input
+        value={shownAmount}
+        editable={!disabled && !fx}
+        error={!!(amountMsg || err('amount'))}
+        onChangeText={(v) => onChange({ amount: sanitizeMoneyInput(v) })}
+        placeholder="0.00"
+        keyboardType="decimal-pad"
+        accessibilityLabel={t('forms.expense.amount')}
+      />
+    </Field>
+  );
+  const categoryField = (
+    <Row style={{ alignItems: 'flex-end' }}>
+      <View style={{ flex: 1 }}>
+        <SelectField
+          label={t('forms.expense.category')}
+          value={draft.category}
+          options={catData}
+          disabled={disabled}
+          onChange={(v) => { if (v) onChange({ category: v }); }}
+        />
+      </View>
+      <Button
+        small
+        variant="soft"
+        style={{ minHeight: 46 }}
+        disabled={disabled}
+        title={t('forms.expense.addCategoryBtn')}
+        accessibilityLabel={t('forms.expense.addCategory')}
+        onPress={() => { setNewCatName(''); setCatModalErr(null); setCatModalOpen(true); }}
+      />
+    </Row>
+  );
+  const dateField = (
+    <Field label={t('forms.expense.spentOn')} error={err('date')} hint={t('m.expense.dateHint')}>
+      <Input
+        value={draft.spentAt}
+        editable={!disabled}
+        error={!!err('date')}
+        onChangeText={(v) => onChange({ spentAt: v.replace(/[^\d-]/g, '').slice(0, 10) })}
+        placeholder="YYYY-MM-DD"
+        keyboardType="numbers-and-punctuation"
+        autoCorrect={false}
+        accessibilityLabel={t('forms.expense.spentOn')}
+      />
+      <Row style={{ marginTop: 8 }}>
+        <Chip label={t('m.expense.today')} disabled={disabled} on={draft.spentAt === todayIso()} onPress={() => onChange({ spentAt: todayIso() })} />
+        <Chip label={t('m.expense.yesterday')} disabled={disabled} on={draft.spentAt === yesterday} onPress={() => onChange({ spentAt: yesterday })} />
+      </Row>
+    </Field>
+  );
+  const payerField = (
+    <SelectField
+      label={t('forms.expense.payer')}
+      value={draft.payerId}
+      options={memberOptions}
+      disabled={disabled}
+      error={err('payer')}
+      onChange={(v) => onChange({ payerId: v || '' })}
+    />
+  );
+
   return (
     <>
-      <Section>
-        <Field label={t('forms.expense.title')} error={err('title')} style={{ marginTop: 0 }}>
-          <Input
-            value={draft.title}
-            editable={!disabled}
-            error={!!err('title')}
-            onChangeText={(v) => onChange({ title: v })}
-            placeholder={t('forms.expense.titlePh')}
-            maxLength={TITLE_MAX}
-            accessibilityLabel={t('forms.expense.title')}
-          />
-        </Field>
-        <Field
-          label={t('forms.expense.amount')}
-          error={amountMsg || err('amount')}
-          hint={fx ? t('forms.expense.amountFromFx') : null}
-        >
-          <Input
-            value={shownAmount}
-            editable={!disabled && !fx}
-            error={!!(amountMsg || err('amount'))}
-            onChangeText={(v) => onChange({ amount: sanitizeMoneyInput(v) })}
-            placeholder="0.00"
-            keyboardType="decimal-pad"
-            accessibilityLabel={t('forms.expense.amount')}
-          />
-        </Field>
-        <Row style={{ alignItems: 'flex-end' }}>
-          <View style={{ flex: 1 }}>
-            <SelectField
-              label={t('forms.expense.category')}
-              value={draft.category}
-              options={catData}
-              disabled={disabled}
-              onChange={(v) => { if (v) onChange({ category: v }); }}
-            />
-          </View>
-          <Button
-            small
-            variant="soft"
-            style={{ minHeight: 46 }}
-            disabled={disabled}
-            title={t('forms.expense.addCategoryBtn')}
-            accessibilityLabel={t('forms.expense.addCategory')}
-            onPress={() => { setNewCatName(''); setCatModalErr(null); setCatModalOpen(true); }}
-          />
-        </Row>
-        <Field label={t('forms.expense.spentOn')} error={err('date')} hint={t('m.expense.dateHint')}>
-          <Input
-            value={draft.spentAt}
-            editable={!disabled}
-            error={!!err('date')}
-            onChangeText={(v) => onChange({ spentAt: v.replace(/[^\d-]/g, '').slice(0, 10) })}
-            placeholder="YYYY-MM-DD"
-            keyboardType="numbers-and-punctuation"
-            autoCorrect={false}
-            accessibilityLabel={t('forms.expense.spentOn')}
-          />
-          <Row style={{ marginTop: 8 }}>
-            <Chip label={t('m.expense.today')} disabled={disabled} on={draft.spentAt === todayIso()} onPress={() => onChange({ spentAt: todayIso() })} />
-            <Chip label={t('m.expense.yesterday')} disabled={disabled} on={draft.spentAt === yesterday} onPress={() => onChange({ spentAt: yesterday })} />
-          </Row>
-        </Field>
-        <SelectField
-          label={t('forms.expense.payer')}
-          value={draft.payerId}
-          options={memberOptions}
+      {cards ? (
+        <ExpenseTop
+          t={t}
+          draft={draft}
+          currency={currency}
           disabled={disabled}
-          error={err('payer')}
-          onChange={(v) => onChange({ payerId: v || '' })}
+          fx={fx}
+          shownAmount={shownAmount}
+          amountErr={amountMsg || err('amount')}
+          payerErr={err('payer')}
+          members={members}
+          memberOptions={memberOptions}
+          onChange={onChange}
+          titleField={titleField}
+          categoryField={categoryField}
+          dateField={dateField}
+          money={money}
+          effectiveCents={shownAmount !== '' && Number.isFinite(Number(shownAmount)) ? Math.round(Number(shownAmount) * 100) : null}
         />
-      </Section>
+      ) : (
+        <Section>
+          {titleField}
+          {amountField}
+          {categoryField}
+          {dateField}
+          {payerField}
+        </Section>
+      )}
 
       {/* Bill details (collapsible, like web <details>); opens itself when FX is filled. */}
       <Section style={bare ? { marginTop: 12 } : undefined}>
@@ -176,8 +220,11 @@ export default function ExpenseFields({
           accessibilityRole="button"
           accessibilityState={{ expanded: detailsOpen }}
         >
-          <Text style={[type.h3, { flex: 1 }]}>{t('forms.expense.billDetails')}</Text>
-          <Text style={{ color: colors.secondary }}>{detailsOpen ? '▴' : '▾'}</Text>
+          {cards ? <ThemedIcon ms="receipt_long" size={20} color={colors.secondary} style={{ marginRight: 8 }} /> : null}
+          <Text style={[type.h3, { flex: 1 }]}>{cards ? t('se.expense.taxTipFees') : t('forms.expense.billDetails')}</Text>
+          <ThemedIcon ms={detailsOpen ? 'expand_less' : 'expand_more'} size={22} color={colors.secondary}>
+            <Text style={{ color: colors.secondary }}>{detailsOpen ? '▴' : '▾'}</Text>
+          </ThemedIcon>
         </Pressable>
         {detailsOpen && (
           <View>
@@ -283,6 +330,13 @@ export default function ExpenseFields({
       </Section>
 
       <Section style={bare ? { marginTop: 12 } : undefined}>
+        {cards ? (
+          <Row style={{ marginBottom: 10 }}>
+            <ThemedIcon ms="call_split" size={20} color={colors.primary} />
+            <Text style={[type.h2, { flex: 1 }]}>{t('se.expense.split')}</Text>
+            <Badge kind="payment" label={t('se.expense.participants', { count: sel.length })} />
+          </Row>
+        ) : null}
         <Text style={s.label}>{t('forms.expense.method')}</Text>
         {splitHint}
         <View style={off}>

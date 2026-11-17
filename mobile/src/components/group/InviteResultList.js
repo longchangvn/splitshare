@@ -1,7 +1,8 @@
 // Per-address email-invite outcome — web parity with components/InviteResults.jsx.
 // Rows come from shared/inviteResults.js (email_sent=true only when the provider accepted).
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import { colors, type } from '../../theme';
 import { toast } from '../../ui';
 import { useT } from '../../i18n';

@@ -1,9 +1,10 @@
 // Recurring tab — web RecurringForm + RecurringRuleList: add rule (EQUAL across all members),
 // pause/resume, delete (confirm).
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
 import { api, fmt } from '../../api/client';
-import { colors, type } from '../../theme';
+import { colors, type, groupTokens } from '../../theme';
 import { useT } from '../../i18n';
 import { sanitizeMoneyInput, isValidMoneyAmount, moneyAmountError } from '../../money';
 import { Card, Input, Field, SelectField, Segmented, Button, Row, ErrText, ConfirmSheet, toast } from '../../ui';
@@ -131,6 +132,6 @@ export default function RecurringTab({ groupId, members, currency, rules, canWri
 const s = StyleSheet.create({
   freq: { fontSize: 11, fontWeight: '700', color: colors.secondary, backgroundColor: colors.chipBg, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: 'hidden' },
   st: { fontSize: 11, fontWeight: '800', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, overflow: 'hidden' },
-  on: { backgroundColor: '#e8f7ef', color: '#0c7a4b' },
-  off: { backgroundColor: '#f1f5f9', color: '#64748b' },
+  on: { backgroundColor: groupTokens.tagOn[0], color: groupTokens.tagOn[1] },
+  off: { backgroundColor: groupTokens.tagOff[0], color: groupTokens.tagOff[1] },
 });

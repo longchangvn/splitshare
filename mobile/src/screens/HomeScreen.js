@@ -2,22 +2,25 @@
 // GET /api/v1/me/balances drives everything; balances are netted per currency only,
 // never summed across currencies (buildBalance). Badge count kept via setOwedBadge.
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import { View, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import { Text } from '../typography';
 import { fmt } from '../api/client';
 import { useAuth, userLabel } from '../auth/AuthContext';
 import { useT } from '../i18n';
-import { colors, radius, shadow, type } from '../theme';
+import { colors, radius, shadow, type, tk } from '../theme';
 import { Avatar, Button, Card, ErrText, Screen, Skeleton, SkeletonCard } from '../ui';
 import { setOwedBadge } from '../push/notifications';
 import { buildBalance, signPrefix, toneForNet } from '../shared/balance';
 import { useBalances, fetchActivity } from '../components/home/data';
 import { ActivityRow, ActivitySkeleton, Pill, TabHeader } from '../components/home/parts';
 import { DEFAULT_CURRENCY, recentGroups, settleStats, statusOf } from '../components/home/homeUtils';
+import { activeTheme } from '../themes';
+import HomeDashboard from '../themes/splitease/components/HomeDashboard';
 
 const NET_CHIP = {
-  open: { bg: '#fff7ed', fg: '#c2410c' },
-  owed: { bg: '#e0f2fe', fg: '#0369a1' },
-  settled: { bg: 'rgba(100,116,139,0.1)', fg: '#475569' },
+  open: { bg: tk('#fff7ed'), fg: tk('#c2410c') },
+  owed: { bg: tk('#e0f2fe'), fg: tk('#0369a1') },
+  settled: { bg: 'rgba(100,116,139,0.1)', fg: tk('#475569') },
 };
 
 export default function HomeScreen({ navigation }) {
@@ -42,6 +45,18 @@ export default function HomeScreen({ navigation }) {
   const name = userLabel(user);
 
   const onRefresh = () => { reload({ pull: true }); setNonce((n) => n + 1); };
+
+  // SplitEase: net-balance summary + active-group cards (same data, same destinations).
+  if (activeTheme().features?.homeDashboard) {
+    return (
+      <Screen
+        contentStyle={{ paddingTop: 12, paddingBottom: 40 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+      >
+        <HomeDashboard {...{ navigation, data, error, ready, loading, groups, balance, reload, nonce, name }} />
+      </Screen>
+    );
+  }
 
   return (
     <Screen
@@ -154,7 +169,7 @@ export default function HomeScreen({ navigation }) {
               <Avatar name={g.name} size={40} rounded={false} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={type.h3} numberOfLines={1}>{g.name}</Text>
-                <Text style={[type.small, g.net_cents < 0 && { color: '#be123c' }, g.net_cents > 0 && { color: '#0369a1' }]} numberOfLines={1}>{detail}</Text>
+                <Text style={[type.small, g.net_cents < 0 && { color: tk('#be123c') }, g.net_cents > 0 && { color: tk('#0369a1') }]} numberOfLines={1}>{detail}</Text>
               </View>
               {g.delinquent ? <Pill label="30d+" bg="#fff4e8" fg="#c2410c" accessibilityLabel={t('m.home.overdue')} /> : null}
               <Text style={s.cur}>{g.currency}</Text>
@@ -237,12 +252,12 @@ function BalancePanel({ groups, onClose, navigation }) {
             {g.transfers.map((x, i) => {
               const other = x.from_me ? x.to_name : x.from_name;
               return (
-                <View key={`${x.from_user_id}-${x.to_user_id}`} style={[s.person, i > 0 && { borderTopWidth: 1, borderTopColor: '#f1f6f3' }]}>
+                <View key={`${x.from_user_id}-${x.to_user_id}`} style={[s.person, i > 0 && { borderTopWidth: 1, borderTopColor: tk('#f1f6f3') }]}>
                   <Avatar name={other} size={34} />
                   <Text style={[type.body, { flex: 1 }]} numberOfLines={1}>
                     {x.from_me ? t('dashboard.transferPay', { name: other }) : t('dashboard.transferReceive', { name: other })}
                   </Text>
-                  <Text style={[s.amt, { color: x.from_me ? '#c2410c' : '#0369a1' }]}>{fmt(x.amount_cents, g.currency)}</Text>
+                  <Text style={[s.amt, { color: x.from_me ? tk('#c2410c') : tk('#0369a1') }]}>{fmt(x.amount_cents, g.currency)}</Text>
                 </View>
               );
             })}
@@ -296,27 +311,27 @@ const s = StyleSheet.create({
   icon: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   chevron: { position: 'absolute', right: 16, bottom: 12, fontSize: 22, color: colors.muted, fontWeight: '700' },
   pair: { flexDirection: 'row', gap: 12 },
-  track: { height: 8, borderRadius: 4, backgroundColor: '#e7eeea', overflow: 'hidden', marginTop: 8 },
-  fill: { height: 8, borderRadius: 4, backgroundColor: '#22c55e' },
+  track: { height: 8, borderRadius: 4, backgroundColor: tk('#e7eeea'), overflow: 'hidden', marginTop: 8 },
+  fill: { height: 8, borderRadius: 4, backgroundColor: tk('#22c55e') },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   link: { color: colors.primaryText, fontWeight: '700', fontSize: 13, paddingVertical: 6, paddingLeft: 8 },
   close: { color: colors.secondary, fontSize: 13, paddingVertical: 6, paddingLeft: 8 },
   gRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, minHeight: 56 },
-  divider: { borderBottomWidth: 1, borderBottomColor: '#f1f6f3' },
+  divider: { borderBottomWidth: 1, borderBottomColor: tk('#f1f6f3') },
   cur: { fontSize: 12, fontWeight: '700', color: colors.muted },
-  bdGroup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: '#eef4f1', marginBottom: 4 },
+  bdGroup: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: tk('#eef4f1'), marginBottom: 4 },
   person: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
   amt: { fontWeight: '700', fontVariant: ['tabular-nums'] },
   note: { marginTop: 10, fontSize: 12, color: colors.muted },
-  banner: { backgroundColor: '#102924', borderRadius: 28, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 16 },
-  bannerIdx: { width: 74, height: 74, borderRadius: 37, borderWidth: 6, borderColor: '#1fa36a', backgroundColor: '#0c211c', alignItems: 'center', justifyContent: 'center' },
-  bannerIdxT: { color: '#f4fbf7', fontWeight: '800', fontSize: 18 },
-  bannerH: { color: '#f4fbf7', fontWeight: '800', fontSize: 15 },
-  bannerSub: { color: '#c3fae8', fontSize: 13, marginTop: 4 },
-  promo: { backgroundColor: '#1f8f62', borderRadius: 28, padding: 20, gap: 6, ...shadow.card },
+  banner: { backgroundColor: tk('#102924'), borderRadius: 28, padding: 18, flexDirection: 'row', alignItems: 'center', gap: 16 },
+  bannerIdx: { width: 74, height: 74, borderRadius: 37, borderWidth: 6, borderColor: tk('#1fa36a'), backgroundColor: tk('#0c211c'), alignItems: 'center', justifyContent: 'center' },
+  bannerIdxT: { color: tk('#f4fbf7'), fontWeight: '800', fontSize: 18 },
+  bannerH: { color: tk('#f4fbf7'), fontWeight: '800', fontSize: 15 },
+  bannerSub: { color: tk('#c3fae8'), fontSize: 13, marginTop: 4 },
+  promo: { backgroundColor: tk('#1f8f62'), borderRadius: 28, padding: 20, gap: 6, ...shadow.card },
   promoK: { color: '#fff', opacity: 0.8, fontSize: 11, fontWeight: '700', letterSpacing: 0.7 },
   promoH: { color: '#fff', fontSize: 20, fontWeight: '700', marginTop: 4 },
-  promoSub: { color: '#e6fcf5', fontSize: 13 },
+  promoSub: { color: tk('#e6fcf5'), fontSize: 13 },
   promoBtn: { backgroundColor: '#fff', borderRadius: radius.btn, minHeight: 44, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-start', marginTop: 10 },
   promoBtnT: { color: colors.ink, fontWeight: '700', fontSize: 14 },
 });

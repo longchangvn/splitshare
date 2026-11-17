@@ -54,6 +54,8 @@ public sealed class PaymentHandle
     public Guid UserId { get; set; }
     public string Label { get; set; } = ""; // e.g. "Vietcombank"
     public string Details { get; set; } = ""; // account number / QR text
+    public string Kind { get; set; } = "other"; // venmo|zelle|paypal|cashapp|bank|other
+    public bool IsDefault { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

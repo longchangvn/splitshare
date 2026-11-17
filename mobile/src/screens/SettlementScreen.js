@@ -3,12 +3,15 @@
 // raw-debts collapsibles, read-only history versions, refresh, version footer.
 // Refreshes on focus so returning from Pay shows the new plan + completed list.
 import React, { useCallback, useState } from 'react';
-import { View, Text, Pressable, RefreshControl, StyleSheet } from 'react-native';
+import { View, Pressable, RefreshControl, StyleSheet } from 'react-native';
+import { Text } from '../typography';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, fmt, displayNameOf } from '../api/client';
 import { useT } from '../i18n';
-import { colors, type } from '../theme';
-import { Screen, Card, Button, Row, Chip, SkeletonCard, ErrText, Badge } from '../ui';
+import { colors, type, groupTokens } from '../theme';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
+import { Screen, Card, Button, Row, Chip, SkeletonCard, ErrText, Badge, Avatar } from '../ui';
 import { ListRow, useDateFmt, NetChip, p as parts } from '../components/group/parts';
 import { canWriteGroup } from '../components/group/helpers';
 
@@ -78,7 +81,7 @@ export default function SettlementScreen({ route, navigation }) {
   return (
     <Screen refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} tintColor={colors.primary} />}>
       {historical ? (
-        <Card style={{ backgroundColor: colors.warnBg, borderColor: '#fdba74' }}>
+        <Card style={{ backgroundColor: colors.warnBg, borderColor: groupTokens.historicalBorder }}>
           <Text style={[type.h3, { color: colors.warnText }]}>{t('settlement.historical', { version: viewV })}</Text>
         </Card>
       ) : null}
@@ -86,7 +89,9 @@ export default function SettlementScreen({ route, navigation }) {
       <Card tone={settled ? 'settled' : 'open'}>
         <Row gap={12}>
           <View style={[s.glyph, { borderColor: settled ? colors.kind.settled[1] : colors.openText }]}>
-            <Text style={{ color: settled ? colors.kind.settled[1] : colors.openText, fontWeight: '900', fontSize: 16 }}>{settled ? '✓' : '!'}</Text>
+            <ThemedIcon ms={settled ? 'check' : 'priority_high'} size={20} color={settled ? colors.kind.settled[1] : colors.openText}>
+              <Text style={{ color: settled ? colors.kind.settled[1] : colors.openText, fontWeight: '900', fontSize: 16 }}>{settled ? '✓' : '!'}</Text>
+            </ThemedIcon>
           </View>
           <View style={{ flex: 1 }}>
             <Badge kind={settled ? 'settled' : 'owe'} label={settled ? t('net.settledUp') : t('settlement.needsAction')} />
@@ -116,6 +121,30 @@ export default function SettlementScreen({ route, navigation }) {
           const from = x.from_user_id || x.from;
           const to = x.to_user_id || x.to;
           const cents = x.amount_cents ?? x.amount ?? 0;
+          if (activeTheme().features.payCards) {
+            // SplitEase (Stitch M29): numbered payer → recipient transfer card.
+            const fromN = displayNameOf(members, from);
+            const toN = displayNameOf(members, to);
+            return (
+              <View key={`${from}-${to}-${i}`} style={s.transfer}>
+                <View>
+                  <Avatar name={fromN} size={38} />
+                  <View style={s.num}><Text style={s.numT}>{i + 1}</Text></View>
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Row gap={4}>
+                    <Text style={[type.h3, { flexShrink: 1 }]} numberOfLines={1}>{fromN}</Text>
+                    <ThemedIcon ms="arrow_forward" size={14} color={colors.primary} />
+                    <Text style={[type.h3, { flexShrink: 1, color: colors.primaryText }]} numberOfLines={1}>{toN}</Text>
+                  </Row>
+                  <Text style={[parts.amount, { fontSize: 17 }]}>{fmt(cents, currency)}</Text>
+                </View>
+                {canPay ? (
+                  <Button small variant="brand" title={t('groupDetail.pay')} onPress={() => navigation.navigate('Pay', { id, from, to, amount: cents })} />
+                ) : null}
+              </View>
+            );
+          }
           return (
             <ListRow key={`${from}-${to}-${i}`} last={i === transfers.length - 1}>
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -188,12 +217,17 @@ function Collapser({ label, hideLabel, open, onToggle }) {
   return (
     <Pressable onPress={onToggle} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: 'row', alignItems: 'center', minHeight: 32 }}>
       <Text style={[parts.textAction, { flex: 1 }]}>{open ? hideLabel : label}</Text>
-      <Text style={{ color: colors.muted }}>{open ? '⌃' : '⌄'}</Text>
+      <ThemedIcon ms={open ? 'expand_less' : 'expand_more'} size={22} color={colors.muted}>
+        <Text style={{ color: colors.muted }}>{open ? '⌃' : '⌄'}</Text>
+      </ThemedIcon>
     </Pressable>
   );
 }
 
 const s = StyleSheet.create({
-  glyph: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  glyph: { width: 36, height: 36, borderRadius: 18, borderWidth: 2, alignItems: 'center', justifyContent: 'center', backgroundColor: groupTokens.glyphBg },
+  transfer: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 10, padding: 12, borderRadius: 12, backgroundColor: colors.paleTealBg },
+  num: { position: 'absolute', right: -4, bottom: -4, width: 18, height: 18, borderRadius: 9, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.card },
+  numT: { color: '#fff', fontSize: 9, fontWeight: '800' },
   step: { backgroundColor: colors.paleTealBg, borderRadius: 10, padding: 10, fontSize: 13, color: colors.darkTealText, marginTop: 8 },
 });

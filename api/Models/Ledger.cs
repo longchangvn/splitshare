@@ -7,7 +7,8 @@ public enum SplitType
     Equal,
     Exact,
     Percent,
-    Shares
+    Shares,
+    Items // per-line receipt items, tax/tip/fee allocated proportionally
 }
 
 public enum ExpenseStatus
@@ -44,6 +45,36 @@ public sealed class Expense
     public long? OrigAmountCents { get; set; }
     public decimal? FxRate { get; set; }
     public List<ExpenseGuest> Guests { get; set; } = [];
+    // Multiple payers: empty = PayerId paid AmountCents. When set, rows sum to AmountCents and
+    // PayerId is the largest contributor (kept for older clients).
+    public List<ExpensePayer> Payers { get; set; } = [];
+    public List<ExpenseItem> Items { get; set; } = [];
+}
+
+public sealed class ExpensePayer
+{
+    public Guid ExpenseId { get; set; }
+    public Guid UserId { get; set; }
+    public long PaidCents { get; set; }
+}
+
+/// <summary>Itemised receipt line (SplitType.Items). Assignees share TotalCents equally.</summary>
+public sealed class ExpenseItem
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ExpenseId { get; set; }
+    public string Name { get; set; } = "";
+    public int Quantity { get; set; } = 1;
+    public long UnitCents { get; set; }
+    public long TotalCents { get; set; }
+    public int SortOrder { get; set; }
+    public List<ExpenseItemAssignee> Assignees { get; set; } = [];
+}
+
+public sealed class ExpenseItemAssignee
+{
+    public Guid ItemId { get; set; }
+    public Guid UserId { get; set; }
 }
 
 public sealed class ExpenseSplit

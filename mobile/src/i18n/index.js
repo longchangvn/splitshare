@@ -5,10 +5,11 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MESSAGES, LOCALES, LOCALE_META } from '../shared/messages';
 import { MOBILE_MESSAGES } from './mobileMessages';
+import { activeTheme } from '../themes';
 
 const LOCALE_KEY = 'ss-locale';
 
-const DICTS = Object.fromEntries(LOCALES.map((l) => [l, { ...MESSAGES[l], ...MOBILE_MESSAGES[l] }]));
+const DICTS = Object.fromEntries(LOCALES.map((l) => [l, { ...MESSAGES[l], ...MOBILE_MESSAGES[l], ...activeTheme().messages[l] }]));
 
 export function formatMessage(template, vars) {
   if (!vars) return template;

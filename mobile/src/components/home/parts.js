@@ -2,26 +2,36 @@
 // versions of web Dashboard.jsx GroupTile, ActivityKindThumb, activity rows,
 // groups filter chips and the wizard pick/unpick row.
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors, radius, shadow, type } from '../../theme';
+import { View, Pressable, StyleSheet } from 'react-native';
+import { Text } from '../../typography';
+import { colors, radius, shadow, type, tk } from '../../theme';
 import { GroupThumb, Skeleton } from '../../ui';
 import { fmt } from '../../api/client';
 import { useT } from '../../i18n';
 import { groupNeedsSettlement, kindKey, statusOf } from './homeUtils';
+import { activeTheme } from '../../themes';
+import { ThemedIcon } from '../ThemedIcon';
+import { GroupRow } from '../../themes/splitease/components/GroupRow';
+
+const materialIcons = activeTheme().icons === 'material';
+// Material icon per activity kind (icon themes; classic shows the short kind label).
+export const KIND_MS = {
+  join: 'person_add', expense: 'receipt_long', payment: 'payments', comment: 'chat_bubble_outline', nudge: 'notifications_active', other: 'history',
+};
 
 const KIND_THUMB = {
-  join: ['#e8faf0', '#0c7a4b'],
-  expense: ['#fff6e8', '#b45309'],
-  payment: ['#eaf5fc', '#0369a1'],
-  comment: ['#f2f5f3', '#3d4a45'],
-  nudge: ['#fff3ed', '#c2410c'],
-  other: ['#f2f5f3', '#4a5651'],
+  join: [tk('#e8faf0'), tk('#0c7a4b')],
+  expense: [tk('#fff6e8'), tk('#b45309')],
+  payment: [tk('#eaf5fc'), tk('#0369a1')],
+  comment: [tk('#f2f5f3'), tk('#3d4a45')],
+  nudge: [tk('#fff3ed'), tk('#c2410c')],
+  other: [tk('#f2f5f3'), tk('#4a5651')],
 };
 
 export const LIFECYCLE = {
-  opening: { dot: '#12b886', ink: '#087f5b' },
-  locked: { dot: '#eab308', ink: '#a16207' },
-  closed: { dot: '#ef4444', ink: '#b42318' },
+  opening: { dot: tk('#12b886'), ink: tk('#087f5b') },
+  locked: { dot: tk('#eab308'), ink: tk('#a16207') },
+  closed: { dot: tk('#ef4444'), ink: tk('#b42318') },
 };
 
 /** Big tab-screen header: optional kicker, title, sub line and an ink pill action. */
@@ -40,7 +50,12 @@ export function TabHeader({ kicker, title, sub, action, onAction }) {
           accessibilityRole="button"
           accessibilityLabel={action}
         >
-          <Text style={p.ctaT}>＋ {action}</Text>
+          {materialIcons ? (
+            <View style={p.ctaRow}>
+              <ThemedIcon ms="add" size={18} color="#fff" />
+              <Text style={p.ctaT}>{action}</Text>
+            </View>
+          ) : <Text style={p.ctaT}>＋ {action}</Text>}
         </Pressable>
       ) : null}
     </View>
@@ -57,7 +72,9 @@ export function KindThumb({ kind, size = 46 }) {
   const full = key === 'other' ? raw : t(`activity.kind.${key}`);
   return (
     <View style={[p.thumb, { width: size, height: size, backgroundColor: bg }]} accessibilityLabel={full}>
-      <Text style={[p.thumbT, { color: fg }]} numberOfLines={1}>{label}</Text>
+      <ThemedIcon ms={KIND_MS[key]} size={Math.round(size * 0.48)} color={fg}>
+        <Text style={[p.thumbT, { color: fg }]} numberOfLines={1}>{label}</Text>
+      </ThemedIcon>
     </View>
   );
 }
@@ -89,7 +106,7 @@ export function ActivityRow({ item, onPress, long = false, last = false }) {
         <Text style={p.actText} numberOfLines={2}>{item.text}</Text>
         <Text style={p.actMeta} numberOfLines={1}>{meta}</Text>
       </View>
-      <Text style={p.chev}>›</Text>
+      <ThemedIcon ms="chevron_right" size={20} color={colors.muted}><Text style={p.chev}>›</Text></ThemedIcon>
     </Pressable>
   );
 }
@@ -118,6 +135,7 @@ export function Pill({ label, bg, fg, style, accessibilityLabel }) {
 /** Groups board tile (web GroupTile): cover band + meta pills, name, status, personal net, total spend. */
 export function GroupTile({ group, onPress }) {
   const t = useT();
+  if (activeTheme().features?.groupRows) return <GroupRow group={group} onPress={onPress} status={statusOf(group)} />;
   const needs = groupNeedsSettlement(group);
   const tone = needs ? colors.tones.open : colors.tones.settled;
   const personalTone = group.net_cents < 0 ? 'owe' : group.net_cents > 0 ? 'owed' : null;
@@ -160,7 +178,7 @@ export function GroupTile({ group, onPress }) {
       <View style={p.metaRow}>
         <Pill label={needs ? t('settlement.statusOpen') : t('settlement.statusSettled')} bg={tone.bg} fg={tone.ink} />
         {personalLabel ? (
-          <Text style={[p.personal, { color: personalTone === 'owe' ? '#be123c' : '#0369a1' }]} numberOfLines={1}>{personalLabel}</Text>
+          <Text style={[p.personal, { color: personalTone === 'owe' ? tk('#be123c') : tk('#0369a1') }]} numberOfLines={1}>{personalLabel}</Text>
         ) : null}
       </View>
       <View style={p.tileFoot}>
@@ -168,7 +186,7 @@ export function GroupTile({ group, onPress }) {
           <Text style={p.footK}>{t('groups.totalSpend')}</Text>
           <Text style={p.footV}>{fmt(Number(group.spent_cents) || 0, group.currency)}</Text>
         </View>
-        <View style={p.go}><Text style={p.goT}>›</Text></View>
+        <View style={p.go}><ThemedIcon ms="chevron_right" size={20} color={colors.body}><Text style={p.goT}>›</Text></ThemedIcon></View>
       </View>
     </Pressable>
   );
@@ -236,12 +254,13 @@ export const p = StyleSheet.create({
   kicker: { fontSize: 13, fontWeight: '600', color: colors.secondary, marginBottom: 2 },
   cta: { backgroundColor: colors.ink, borderRadius: radius.btn, paddingHorizontal: 16, minHeight: 40, justifyContent: 'center' },
   ctaT: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  ctaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   thumb: { borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.55)' },
   thumbT: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   actRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, minHeight: 56 },
-  actDivider: { borderBottomWidth: 1, borderBottomColor: '#f1f6f3' },
+  actDivider: { borderBottomWidth: 1, borderBottomColor: tk('#f1f6f3') },
   actText: { fontSize: 14, fontWeight: '600', color: colors.text },
-  actMeta: { fontSize: 12, color: '#8a938f', marginTop: 2 },
+  actMeta: { fontSize: 12, color: tk('#8a938f'), marginTop: 2 },
   chev: { fontSize: 20, color: colors.muted, fontWeight: '600' },
   pill: { fontSize: 11, fontWeight: '800', paddingHorizontal: 9, paddingVertical: 3, borderRadius: 999, overflow: 'hidden' },
   tile: { backgroundColor: colors.card, borderColor: colors.cardBorder, borderWidth: 1, borderRadius: radius.card, padding: 16, gap: 12, ...shadow.card },
@@ -252,17 +271,17 @@ export const p = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4 },
   tileName: { fontSize: 18, fontWeight: '700', color: colors.text, letterSpacing: -0.2 },
   personal: { fontSize: 13, fontWeight: '700', flexShrink: 1 },
-  tileFoot: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#eef4f1', paddingTop: 10 },
+  tileFoot: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: tk('#eef4f1'), paddingTop: 10 },
   footK: { fontSize: 12, color: colors.secondary, fontWeight: '600' },
   footV: { fontSize: 18, fontWeight: '800', color: colors.text, marginTop: 2 },
   go: { width: 32, height: 32, borderRadius: 16, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' },
   goT: { fontSize: 18, color: colors.body, fontWeight: '700', marginTop: -2 },
-  fChip: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 12, borderWidth: 1, borderColor: '#e0e8e4', borderRadius: 999, backgroundColor: '#fff' },
+  fChip: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36, paddingHorizontal: 12, borderWidth: 1, borderColor: tk('#e0e8e4'), borderRadius: 999, backgroundColor: '#fff' },
   fChipOn: { backgroundColor: colors.ink, borderColor: colors.ink },
   fChipT: { fontSize: 13, fontWeight: '600', color: colors.body },
-  fCount: { fontSize: 11, fontWeight: '800', color: colors.secondary, backgroundColor: '#eef2f0', borderRadius: 999, paddingHorizontal: 6, paddingVertical: 1, overflow: 'hidden' },
+  fCount: { fontSize: 11, fontWeight: '800', color: colors.secondary, backgroundColor: tk('#eef2f0'), borderRadius: 999, paddingHorizontal: 6, paddingVertical: 1, overflow: 'hidden' },
   person: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8, minHeight: 48 },
-  pick: { borderWidth: 1, borderColor: '#e4ebe7', backgroundColor: '#f7f8f7', borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, minHeight: 36, justifyContent: 'center' },
+  pick: { borderWidth: 1, borderColor: tk('#e4ebe7'), backgroundColor: tk('#f7f8f7'), borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8, minHeight: 36, justifyContent: 'center' },
   pickOn: { backgroundColor: colors.ink, borderColor: colors.ink },
-  pickT: { fontSize: 14, fontWeight: '600', color: '#3a3a3c' },
+  pickT: { fontSize: 14, fontWeight: '600', color: tk('#3a3a3c') },
 });

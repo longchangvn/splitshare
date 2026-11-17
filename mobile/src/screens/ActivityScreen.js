@@ -2,13 +2,16 @@
 // web/src/pages/Dashboard.jsx): merged feed across my groups (limit=50 each),
 // newest first, 10 per page with Prev / Next and numbered pages.
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import { View, Pressable, StyleSheet, RefreshControl } from 'react-native';
+import { Text } from '../typography';
 import { useT } from '../i18n';
 import { colors, type } from '../theme';
 import { Button, Card, ErrText, Screen } from '../ui';
 import { useBalances, fetchActivity } from '../components/home/data';
 import { ActivityRow, ActivitySkeleton, TabHeader } from '../components/home/parts';
 import { ACTIVITY_PAGE_SIZE, activityPageTokens, pageSlice } from '../components/home/homeUtils';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
 
 export default function ActivityScreen({ navigation }) {
   const t = useT();
@@ -44,7 +47,7 @@ export default function ActivityScreen({ navigation }) {
 
   return (
     <Screen
-      contentStyle={{ paddingTop: 12, paddingBottom: 150 }}
+      contentStyle={{ paddingTop: 12, paddingBottom: activeTheme().features?.flatTabBar ? 40 : 150 }}
       refreshControl={<RefreshControl refreshing={pulling} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
       <TabHeader
@@ -64,7 +67,7 @@ export default function ActivityScreen({ navigation }) {
         {!items && !error ? <ActivitySkeleton rows={5} /> : null}
         {items && items.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 16 }}>
-            <Text style={{ fontSize: 30, marginBottom: 6 }}>🗒️</Text>
+            <ThemedIcon ms="history" size={36} color={colors.muted} style={{ marginBottom: 6 }}><Text style={{ fontSize: 30, marginBottom: 6 }}>🗒️</Text></ThemedIcon>
             <Text style={[type.body, { textAlign: 'center', color: colors.secondary }]}>{t('activity.empty')}</Text>
           </View>
         ) : null}

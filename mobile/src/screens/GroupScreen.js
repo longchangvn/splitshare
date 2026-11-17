@@ -5,14 +5,20 @@
 // tabs: Ledger · Balances · People · Activity · Recurring. Refreshes on focus (returning from
 // Pay / AddExpense re-fetches plan + ledger — web settleTick behaviour) and after mutations.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, FlatList, RefreshControl, StyleSheet, Switch } from 'react-native';
+import { View, Pressable, FlatList, RefreshControl, StyleSheet, Switch } from 'react-native';
+import { Text } from '../typography';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, fmt, getCapabilities } from '../api/client';
 import { fetchRemovalPreview, isStaleRemoval, removalPath } from '../shared/memberRemoval';
 import { canToggleExpense } from '../shared/expenseToggle';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
-import { colors, type } from '../theme';
+import { colors, type, groupTokens } from '../theme';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
+import GroupHero from '../themes/splitease/components/group/GroupHero';
+import MemberBalances from '../themes/splitease/components/group/MemberBalances';
+import ClosedBanner from '../themes/splitease/components/group/ClosedBanner';
 import {
   Screen, Card, Button, ChipRow, Row, GroupThumb, SkeletonCard, ErrText, Sheet, toast,
 } from '../ui';
@@ -28,16 +34,13 @@ import {
   hasLedgerHistory, ledgerEmptyKind, groupByDebtor, mergeActivityFeed,
 } from '../components/group/helpers';
 
-const LIFECYCLE_TONE = {
-  opening: ['#e8f7ef', '#0c7a4b'],
-  locked: ['#fff7ed', '#c2410c'],
-  closed: ['#eef2f0', '#4a5651'],
-};
+const LIFECYCLE_TONE = groupTokens.lifecycle;
 
 export default function GroupDetailScreen({ route, navigation }) {
   const { id } = route.params || {};
   const t = useT();
   const d = useDateFmt();
+  const { features } = activeTheme();
   const { user } = useAuth();
   const meId = user?.user_id;
 
@@ -168,12 +171,31 @@ export default function GroupDetailScreen({ route, navigation }) {
 
   useEffect(() => {
     if (detail?.name) navigation.setOptions({ title: detail.name });
-  }, [detail?.name, navigation]);
+    // SplitEase: group name + lifecycle chip + member count in the header (Stitch M22).
+    if (detail?.name && features.groupHero) {
+      const life = detail.status || 'opening';
+      const [cbg, cfg] = groupTokens.lifecycle[life] || groupTokens.lifecycle.opening;
+      const n = (detail.members || []).length;
+      navigation.setOptions({
+        headerTitle: () => (
+          <View style={{ maxWidth: 230 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={[type.h2, { flexShrink: 1 }]} numberOfLines={1}>{detail.name}</Text>
+              <Text style={[st.chip, { backgroundColor: cbg, color: cfg }]}>{t(`groupStatus.${life}`)}</Text>
+            </View>
+            <Text style={type.small} numberOfLines={1}>{t('groupDetail.membersCount', { count: n, unit: n === 1 ? t('common.person') : t('common.people') })}</Text>
+          </View>
+        ),
+      });
+    }
+  }, [detail?.name, detail?.status, detail?.members, navigation, features.groupHero, t]);
   useEffect(() => {
     navigation.setOptions({
       headerRight: () => (
         <Pressable onPress={() => setSettingsOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={t('m.group.settings')} style={{ paddingHorizontal: 6 }}>
-          <Text style={{ fontSize: 22, color: colors.text, fontWeight: '700' }}>⋯</Text>
+          <ThemedIcon ms="more_vert" size={24} color={colors.text}>
+            <Text style={{ fontSize: 22, color: colors.text, fontWeight: '700' }}>⋯</Text>
+          </ThemedIcon>
         </Pressable>
       ),
     });
@@ -304,54 +326,74 @@ export default function GroupDetailScreen({ route, navigation }) {
         />
       )}
     >
-      {/* Hero */}
-      <Card>
-        <Row gap={12}>
-          <GroupThumb name={detail.name} size={52} />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={type.h1} numberOfLines={2}>{detail.name}</Text>
-            <Text style={type.small} numberOfLines={1}>
-              {[
-                t('groupDetail.membersCount', { count: members.length, unit: members.length === 1 ? t('common.person') : t('common.people') }),
-                detail.currency,
-                detail.my_role === 'owner' ? t('common.owner') : detail.my_role === 'treasurer' ? t('common.treasurer') : null,
-                detail.mode && detail.mode !== 'shared' ? detail.mode : null,
-              ].filter(Boolean).join(' · ')}
-            </Text>
-            {detail.created_at ? <Text style={[type.small, { color: colors.muted }]}>{t('report.createdOn')} · {d.dateTime(detail.created_at)}</Text> : null}
-          </View>
-        </Row>
-        <Row gap={6} style={{ marginTop: 12, flexWrap: 'wrap' }}>
-          {settled != null ? (
-            <Text style={[st.chip, settled ? { backgroundColor: colors.kind.settled[0], color: colors.kind.settled[1] } : { backgroundColor: colors.openBg, color: colors.openText }]}>
-              {settled ? t('settlement.statusSettled') : t('settlement.statusOpen')}
-            </Text>
-          ) : null}
-          <Text style={[st.chip, { backgroundColor: lbg, color: lfg }]}>{t(`groupStatus.${lifecycle}`)}</Text>
-          {plan?.version != null ? <Text style={[st.chip, { backgroundColor: colors.chipBg, color: colors.secondary }]}>{t('report.settlementVer', { version: plan.version })}</Text> : null}
-        </Row>
-        {detail.budget ? (
-          <View style={{ marginTop: 12, gap: 4 }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Text style={type.small}>
-                {t('groupDetail.budget')} {fmt(detail.budget.spent_cents, currency)} / {fmt(detail.budget.budget_cents, currency)} · {detail.budget.over ? t('groupDetail.budgetOver') : detail.budget.alert ? t('groupDetail.budgetNear') : t('groupDetail.budgetOnTrack')}
-              </Text>
-              <Text style={type.small}>{detail.budget.pct}%</Text>
-            </Row>
-            <Bar value={detail.budget.pct} color={detail.budget.over ? colors.danger : detail.budget.alert ? '#f59e0b' : colors.primary} />
-          </View>
-        ) : null}
-      </Card>
-
-      {/* My net */}
-      {net != null ? (
-        <Card tone={netTone} onPress={() => navigation.navigate('Settlement', { id })} accessibilityLabel={t('settlement.viewDetails')}>
-          <Text style={type.kicker}>{net === 0 ? t('net.allClear') : net < 0 ? t('net.youOweShort') : t('net.youreOwed')}</Text>
-          <Text style={[type.title, { color: colors.tones[netTone].value, marginTop: 2 }]}>
-            {net === 0 ? t('net.settledUp') : fmt(Math.abs(net), currency)}
-          </Text>
-        </Card>
+      {features.closedBanner && lifecycle === 'closed' ? (
+        <ClosedBanner members={members} summary={summary} currency={currency} settled={settled} />
       ) : null}
+
+      {features.groupHero ? (
+        <GroupHero
+          detail={detail}
+          members={members}
+          net={net}
+          currency={currency}
+          lifecycle={lifecycle}
+          settled={settled}
+          expenseCount={ledger?.total}
+          version={plan?.version}
+          onOpenSettlement={() => navigation.navigate('Settlement', { id })}
+        />
+      ) : (
+        <>
+          {/* Hero */}
+          <Card>
+            <Row gap={12}>
+              <GroupThumb name={detail.name} size={52} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={type.h1} numberOfLines={2}>{detail.name}</Text>
+                <Text style={type.small} numberOfLines={1}>
+                  {[
+                    t('groupDetail.membersCount', { count: members.length, unit: members.length === 1 ? t('common.person') : t('common.people') }),
+                    detail.currency,
+                    detail.my_role === 'owner' ? t('common.owner') : detail.my_role === 'treasurer' ? t('common.treasurer') : null,
+                    detail.mode && detail.mode !== 'shared' ? detail.mode : null,
+                  ].filter(Boolean).join(' · ')}
+                </Text>
+                {detail.created_at ? <Text style={[type.small, { color: colors.muted }]}>{t('report.createdOn')} · {d.dateTime(detail.created_at)}</Text> : null}
+              </View>
+            </Row>
+            <Row gap={6} style={{ marginTop: 12, flexWrap: 'wrap' }}>
+              {settled != null ? (
+                <Text style={[st.chip, settled ? { backgroundColor: colors.kind.settled[0], color: colors.kind.settled[1] } : { backgroundColor: colors.openBg, color: colors.openText }]}>
+                  {settled ? t('settlement.statusSettled') : t('settlement.statusOpen')}
+                </Text>
+              ) : null}
+              <Text style={[st.chip, { backgroundColor: lbg, color: lfg }]}>{t(`groupStatus.${lifecycle}`)}</Text>
+              {plan?.version != null ? <Text style={[st.chip, { backgroundColor: colors.chipBg, color: colors.secondary }]}>{t('report.settlementVer', { version: plan.version })}</Text> : null}
+            </Row>
+            {detail.budget ? (
+              <View style={{ marginTop: 12, gap: 4 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={type.small}>
+                    {t('groupDetail.budget')} {fmt(detail.budget.spent_cents, currency)} / {fmt(detail.budget.budget_cents, currency)} · {detail.budget.over ? t('groupDetail.budgetOver') : detail.budget.alert ? t('groupDetail.budgetNear') : t('groupDetail.budgetOnTrack')}
+                  </Text>
+                  <Text style={type.small}>{detail.budget.pct}%</Text>
+                </Row>
+                <Bar value={detail.budget.pct} color={detail.budget.over ? colors.danger : detail.budget.alert ? groupTokens.warnDot : colors.primary} />
+              </View>
+            ) : null}
+          </Card>
+
+          {/* My net */}
+          {net != null ? (
+            <Card tone={netTone} onPress={() => navigation.navigate('Settlement', { id })} accessibilityLabel={t('settlement.viewDetails')}>
+              <Text style={type.kicker}>{net === 0 ? t('net.allClear') : net < 0 ? t('net.youOweShort') : t('net.youreOwed')}</Text>
+              <Text style={[type.title, { color: colors.tones[netTone].value, marginTop: 2 }]}>
+                {net === 0 ? t('net.settledUp') : fmt(Math.abs(net), currency)}
+              </Text>
+            </Card>
+          ) : null}
+        </>
+      )}
 
       <ErrText e={e} />
 
@@ -370,7 +412,9 @@ export default function GroupDetailScreen({ route, navigation }) {
       <Card onPress={() => navigation.navigate('Settlement', { id })} accessibilityLabel={t('settlement.viewDetails')}>
         <Row>
           <View style={[st.glyph, { backgroundColor: settled ? colors.kind.settled[0] : colors.openBg }]}>
-            <Text style={{ fontSize: 16, color: settled ? colors.kind.settled[1] : colors.openText, fontWeight: '900' }}>{settled ? '✓' : '!'}</Text>
+            <ThemedIcon ms={settled ? 'task_alt' : 'priority_high'} size={20} color={settled ? colors.kind.settled[1] : colors.openText}>
+              <Text style={{ fontSize: 16, color: settled ? colors.kind.settled[1] : colors.openText, fontWeight: '900' }}>{settled ? '✓' : '!'}</Text>
+            </ThemedIcon>
           </View>
           <View style={{ flex: 1 }}>
             <Text style={type.h3}>{settled ? t('settlement.statusSettled') : t('settlement.statusOpen')}</Text>
@@ -378,13 +422,29 @@ export default function GroupDetailScreen({ route, navigation }) {
               {settled ? t('settlement.statusSettledHint') : t('settlement.statusOpenHint', { n: transfers.length || debtors.length || 0 })}
             </Text>
           </View>
-          <Text style={{ color: colors.muted, fontSize: 20 }}>›</Text>
+          <ThemedIcon ms="chevron_right" size={24} color={colors.muted}>
+            <Text style={{ color: colors.muted, fontSize: 20 }}>›</Text>
+          </ThemedIcon>
         </Row>
       </Card>
       <Row>
         <Button small style={{ flex: 1 }} variant="soft" title={t('report.title')} onPress={() => navigation.navigate('Report', { id })} />
         <Button small style={{ flex: 1 }} variant="soft" title={t('groupDetail.tabStatement')} onPress={() => navigation.navigate('Statement', { id, userId: meId })} />
       </Row>
+
+      {features.memberCarousel ? (
+        <MemberBalances
+          members={members}
+          transfers={transfers}
+          meId={meId}
+          currency={currency}
+          canWrite={canWrite}
+          nudging={nudging}
+          onNudge={nudge}
+          onPay={pay}
+          onInvite={() => navigation.navigate('Invite', { id })}
+        />
+      ) : null}
 
       {/* Tabs */}
       <View style={{ marginTop: 4 }}>
@@ -408,6 +468,7 @@ export default function GroupDetailScreen({ route, navigation }) {
           emptyKind={ledgerEmptyKind(filters.status, settled, hasLedgerHistory(summary))}
           onOpen={(it) => navigation.navigate('ExpenseDetail', { groupId: id, expenseId: it.id })}
           onItemActions={(it) => setItemSheet(it)}
+          meId={meId}
         />
       ) : null}
       {tab === 'balances' ? (

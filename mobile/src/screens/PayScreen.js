@@ -3,13 +3,16 @@
 // offline → queued with the SAME key (offline/queue.js) and auto-synced later.
 // paymentId param → reverse (owner/treasurer, within 24h; otherwise record a counter-payment).
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, Pressable, Share, StyleSheet } from 'react-native';
+import { View, Pressable, Share, StyleSheet } from 'react-native';
+import { Text } from '../typography';
 import { api, newIdempotencyKey, fmt } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
-import { colors, type, radius } from '../theme';
+import { colors, type, radius, groupTokens } from '../theme';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
 import { sanitizeMoneyInput, isValidMoneyAmount, moneyAmountError } from '../money';
-import { Screen, Card, Field, Input, SelectField, ChipRow, Button, ErrText, ConfirmSheet, toast } from '../ui';
+import { Screen, Card, Field, Input, SelectField, ChipRow, Button, ErrText, ConfirmSheet, Avatar, toast } from '../ui';
 import { queueOrSend } from '../offline/queue';
 
 const NOTE_MAX = 280;
@@ -17,6 +20,7 @@ const NOTE_MAX = 280;
 export default function PayScreen({ route, navigation }) {
   const { id, to, from, amount, paymentId } = route.params || {};
   const t = useT();
+  const { features } = activeTheme();
   const { user } = useAuth();
   const [members, setMembers] = useState([]);
   const [currency, setCurrency] = useState('USD');
@@ -69,6 +73,21 @@ export default function PayScreen({ route, navigation }) {
     return out;
   }, [members, from, to, t]);
   const toName = options.find((o) => o.value === toId)?.label;
+  const fromName = options.find((o) => o.value === fromId)?.label;
+
+  // SplitEase: confirmation screen instead of a toast once the API accepted the payment.
+  const showRecorded = (res) => {
+    navigation.replace('PaymentRecorded', {
+      amount: res?.payment?.amount_cents ?? Math.round(Number(amt) * 100),
+      currency,
+      fromName: fromName || '',
+      toName: toName || '',
+      method,
+      date: res?.payment?.created_at || new Date().toISOString(),
+      groupId: id,
+      fullySettled: !!res?.fully_settled,
+    });
+  };
 
   const onAmount = (raw) => {
     const next = sanitizeMoneyInput(raw);
@@ -99,6 +118,9 @@ export default function PayScreen({ route, navigation }) {
           const q = await queueOrSend('payment', id, send, body, key);
           if (q?.queued) {
             toast({ title: t('m.group.payQueuedTitle'), message: t('m.group.payQueued'), color: 'orange' });
+          } else if (features.paymentRecorded) {
+            showRecorded(q);
+            return;
           } else {
             toast({ title: q?.fully_settled ? t('groupDetail.fullySettled') : t('groupDetail.paymentRecorded'), color: 'teal' });
           }
@@ -107,6 +129,7 @@ export default function PayScreen({ route, navigation }) {
         }
         throw err2;
       }
+      if (features.paymentRecorded) { showRecorded(res); return; }
       toast({ title: res?.fully_settled ? t('groupDetail.fullySettled') : t('groupDetail.paymentRecorded'), color: 'teal' });
       navigation.goBack();
     } catch (err) {
@@ -147,10 +170,39 @@ export default function PayScreen({ route, navigation }) {
         </View>
       )}
     >
-      <Card style={{ alignItems: 'center' }}>
-        <Text style={type.kicker}>{toName ? t('forms.payment.payNamed', { name: toName }) : t('groupDetail.recordPayment')}</Text>
-        <Text style={s.big}>{fmt(cents, currency)}</Text>
-      </Card>
+      {features.payCards ? (
+        // SplitEase (Stitch M29/M36): payer → recipient card above a big settlement amount.
+        <Card>
+          <Text style={type.kicker}>{t('groupDetail.recordPayment')}</Text>
+          <View style={s.parties}>
+            <View style={s.party}>
+              <Avatar name={fromName || '?'} size={40} />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={type.small}>{t('forms.payment.from')}</Text>
+                <Text style={type.h3} numberOfLines={1}>{fromName || '—'}</Text>
+              </View>
+            </View>
+            <ThemedIcon ms="arrow_forward" size={20} color={colors.primary} />
+            <View style={s.party}>
+              <View style={{ flex: 1, minWidth: 0, alignItems: 'flex-end' }}>
+                <Text style={type.small}>{t('forms.payment.to')}</Text>
+                <Text style={type.h3} numberOfLines={1}>{toName || '—'}</Text>
+              </View>
+              <Avatar name={toName || '?'} size={40} />
+            </View>
+          </View>
+          <Text style={[type.kicker, { marginTop: 14 }]}>{t('forms.expense.amount')}</Text>
+          <View style={s.bigBox}>
+            <Text style={[s.big, { marginTop: 0, fontSize: 38, letterSpacing: -1.2 }]}>{fmt(cents, currency)}</Text>
+            <Text style={type.small}>{currency}</Text>
+          </View>
+        </Card>
+      ) : (
+        <Card style={{ alignItems: 'center' }}>
+          <Text style={type.kicker}>{toName ? t('forms.payment.payNamed', { name: toName }) : t('groupDetail.recordPayment')}</Text>
+          <Text style={s.big}>{fmt(cents, currency)}</Text>
+        </Card>
+      )}
 
       <Card>
         <SelectField label={t('forms.payment.from')} value={fromId} onChange={setFromId} options={options} placeholder={t('m.group.selectMember')} />
@@ -170,6 +222,8 @@ export default function PayScreen({ route, navigation }) {
         {toId ? (
           <View style={s.hint}>
             <Text style={type.h3}>
+              {features.payCards ? <ThemedIcon ms="account_balance_wallet" size={18} color={colors.primary} /> : null}
+              {features.payCards ? ' ' : null}
               {isValidMoneyAmount(amt) ? t('forms.payment.payNamedAmount', { name: toName, amount: fmt(cents, currency) }) : t('forms.payment.payNamed', { name: toName })}
             </Text>
             {handles.length === 0 ? (
@@ -219,6 +273,9 @@ export default function PayScreen({ route, navigation }) {
 
 const s = StyleSheet.create({
   big: { fontSize: 34, fontWeight: '800', color: colors.text, marginTop: 4, letterSpacing: -0.5 },
-  hint: { marginTop: 14, padding: 12, borderRadius: radius.tile, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
-  handle: { marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: '#fff', borderWidth: 1, borderColor: '#dbeafe' },
+  hint: { marginTop: 14, padding: 12, borderRadius: radius.tile, backgroundColor: groupTokens.payHintBg, borderWidth: 1, borderColor: groupTokens.payHintBorder },
+  handle: { marginTop: 8, padding: 10, borderRadius: 12, backgroundColor: groupTokens.payHandleBg, borderWidth: 1, borderColor: groupTokens.payHandleBorder },
+  parties: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10, padding: 12, borderRadius: radius.tile, backgroundColor: colors.paleTealBg },
+  party: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+  bigBox: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 6, padding: 14, borderRadius: radius.tile, backgroundColor: colors.inputBg },
 });

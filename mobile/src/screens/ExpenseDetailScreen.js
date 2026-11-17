@@ -5,15 +5,17 @@
 // expected_version after a live preview-edit (STALE_VERSION / EXPENSE_LOCKED handled there and
 // on delete here). Archived (LOCKED) expenses offer a prefilled copy as the correction path.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View, Text, Pressable, Modal, Image, StyleSheet, RefreshControl, ActivityIndicator,
-} from 'react-native';
+import { View, Pressable, Modal, Image, StyleSheet, RefreshControl, ActivityIndicator } from 'react-native';
+import { Text } from '../typography';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, fmt, displayNameOf, authHeaders } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useT } from '../i18n';
 import { colors, radius, type, CATEGORY_META } from '../theme';
+import { activeTheme } from '../themes';
+import { ThemedIcon } from '../components/ThemedIcon';
+import { IconTile } from '../components/group/parts';
 import {
   Screen, Card, Row, Button, Badge, Avatar, AuthImage, ConfirmSheet, Input, SkeletonCard,
   ErrText, toast,
@@ -182,9 +184,11 @@ export default function ExpenseDetailScreen({ route, navigation }) {
     <Screen refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
       <Card>
         <Row style={{ alignItems: 'flex-start' }} gap={12}>
-          <View style={[s.tile, { backgroundColor: meta.color }]} accessibilityElementsHidden importantForAccessibility="no">
-            <Text style={{ fontSize: 24 }}>{tileEmoji}</Text>
-          </View>
+          {activeTheme().icons === 'material' && meta.ms ? <IconTile ms={meta.ms} color={meta.color} size={52} /> : (
+            <View style={[s.tile, { backgroundColor: meta.color }]} accessibilityElementsHidden importantForAccessibility="no">
+              <Text style={{ fontSize: 24 }}>{tileEmoji}</Text>
+            </View>
+          )}
           <View style={{ flex: 1, gap: 4 }}>
             <Text style={type.h1}>{x.title}</Text>
             <Badge
@@ -198,7 +202,7 @@ export default function ExpenseDetailScreen({ route, navigation }) {
           {t('expense.paidBy')} <Text style={s.b}>{nameOf(x.payer_id)}</Text> · <Text style={s.b}>{money(x.amount_cents)}</Text>
         </Text>
         <Row style={{ marginTop: 8, flexWrap: 'wrap' }} gap={6}>
-          {x.category ? <Badge kind="join" label={`${meta.emoji} ${categoryLabelForKey(x.category, categories, t)}`} /> : null}
+          {x.category ? <Badge kind="join" label={activeTheme().icons === 'material' ? categoryLabelForKey(x.category, categories, t) : `${meta.emoji} ${categoryLabelForKey(x.category, categories, t)}`} /> : null}
           {x.spent_at ? <Badge kind="comment" label={String(x.spent_at).slice(0, 10)} /> : null}
         </Row>
         {extras.length > 0 ? <Text style={[type.small, { marginTop: 8 }]}>{extras.join(' · ')}</Text> : null}
@@ -283,7 +287,9 @@ export default function ExpenseDetailScreen({ route, navigation }) {
           accessibilityState={{ expanded: historyOpen }}
         >
           <Text style={[type.h2, { flex: 1 }]}>{t('expense.history', { count: audit.length })}</Text>
-          <Text style={{ color: colors.secondary }}>{historyOpen ? '▴' : '▾'}</Text>
+          <ThemedIcon ms={historyOpen ? 'expand_less' : 'expand_more'} size={22} color={colors.secondary}>
+            <Text style={{ color: colors.secondary }}>{historyOpen ? '▴' : '▾'}</Text>
+          </ThemedIcon>
         </Pressable>
         {historyOpen && audit.length === 0 ? <Text style={[type.small, { marginTop: 6 }]}>{t('expense.noHistory')}</Text> : null}
         {historyOpen && audit.map((a, i) => {
