@@ -2147,6 +2147,7 @@ a {
   cursor: pointer;
 }
 .wizard-chip.is-on { background: #161618; color: #fff; border-color: #161618; }
+.wizard-chip.is-remove { background: #fff5f5; color: #c92a2a; border-color: #ffc9c9; }
 .wizard-person {
   display: flex;
   align-items: center;
@@ -6951,6 +6952,11 @@ button.dash-stat.dash-stat-btn[aria-expanded="true"] {
   background: #222627;
   border-color: #3a4341;
   color: #d7e0dc;
+}
+[data-ss-theme="dark"] .wizard-chip.is-remove {
+  background: #2a1a1a;
+  border-color: #6b2f2f;
+  color: #ffa8a8;
 }
 [data-ss-theme="dark"] .wizard-chip.is-on,
 [data-ss-theme="dark"] .wizard-chip[aria-checked="true"] {

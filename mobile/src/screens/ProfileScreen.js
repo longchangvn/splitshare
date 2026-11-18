@@ -211,27 +211,33 @@ function AccountTab({ user, setUser, onError }) {
 // Email-code accounts have no password yet: no "current password", and "Set password".
 function PasswordTab({ hasPw, onDone, onError }) {
   const t = useT();
+  const { changePassword } = useAuth();
   const [cur, setCur] = useState('');
   const [next, setNext] = useState('');
   const [busy, setBusy] = useState(false);
+  const [curErr, setCurErr] = useState(null);
+  const ready = !!next && (!hasPw || !!cur);
   const change = async () => {
-    if (busy || !next) return;
-    onError(null);
+    if (busy || !ready) return;
+    onError(null); setCurErr(null);
     setBusy(true);
     try {
-      // current_password may be blank for Google-only accounts (web sends null).
-      await api.patch('/api/v1/me/password', { current_password: cur || null, new_password: next });
+      // No current password only for accounts without one (Google / email code): server accepts null.
+      await changePassword(hasPw ? cur : null, next);
       setCur(''); setNext('');
       toast({ title: t('profile.passwordChanged'), color: 'teal' });
       if (!hasPw) onDone?.();
-    } catch (err) { onError(err); } finally { setBusy(false); }
+    } catch (err) {
+      if (err?.code === 'INVALID_CREDENTIALS') setCurErr(t('m.account.currentPasswordWrong'));
+      else onError(err);
+    } finally { setBusy(false); }
   };
   return (
     <Card>
       <Text style={[type.small, { marginBottom: 4 }]}>{t(hasPw ? 'profile.passwordHint' : 'profile.setPasswordHint')}</Text>
       {hasPw ? (
-        <Field label={t('profile.currentPassword')}>
-          <PasswordInput value={cur} onChangeText={setCur} autoComplete="current-password" />
+        <Field label={t('profile.currentPassword')} error={curErr}>
+          <PasswordInput value={cur} onChangeText={(v) => { setCur(v); setCurErr(null); }} autoComplete="current-password" error={!!curErr} />
         </Field>
       ) : null}
       <Field label={t('profile.newPassword')} hint={t('m.account.passwordRule')}>
@@ -242,7 +248,7 @@ function PasswordTab({ hasPw, onDone, onError }) {
         icon="🔒"
         title={busy ? t('profile.saving') : t(hasPw ? 'profile.changePassword' : 'auth.setPassword')}
         busy={busy}
-        disabled={!next}
+        disabled={!ready}
         onPress={change}
       />
     </Card>

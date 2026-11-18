@@ -3,11 +3,24 @@
   "tasks": [
     {
       "label": "build-api",
-      "type": "process",
+      "type": "shell",
       "command": "dotnet",
       "args": [
         "build",
         "${workspaceFolder}/api/SplitShare.Api.csproj",
+        "/property:GenerateFullPaths=true",
+        "/consoleloggerparameters:NoSummary"
+      ],
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "build-apphost",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/apphost/SplitShare.AppHost.csproj",
         "/property:GenerateFullPaths=true",
         "/consoleloggerparameters:NoSummary"
       ],

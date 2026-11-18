@@ -162,9 +162,14 @@ public static class AuthEndpoints
             var id = CurrentUserId(p);
             if (id is null) return ApiResults.Error("UNAUTH", "Not authenticated.", 401);
             var r = await svc.ChangePasswordAsync(id.Value, d.CurrentPassword, d.NewPassword);
+            // Wrong current password is 403, not 401: clients treat 401 as an expired session.
             return r.Ok ? Results.Ok(new { status = "ok" })
-                : ApiResults.Error(r.ErrorCode!, r.Error!,
-                    r.ErrorCode == "VALIDATION" ? 422 : StatusCodes.Status401Unauthorized);
+                : ApiResults.Error(r.ErrorCode!, r.Error!, r.ErrorCode switch
+                {
+                    "VALIDATION" => 422,
+                    "INVALID_CREDENTIALS" => StatusCodes.Status403Forbidden,
+                    _ => StatusCodes.Status401Unauthorized
+                });
         });
 
         // Email verification from Profile: a 6-digit code (in-app) or a fresh /verify/{token} link.
@@ -208,11 +213,13 @@ public static class AuthEndpoints
             return Results.Ok(new { status = "ok" });
         });
 
-        api.MapGet("/contacts", async (string? q, int? limit, ClaimsPrincipal p, AuthService svc) =>
+        // group_id: inviting to that group — rows carry in_group / group_role (Add vs Remove).
+        api.MapGet("/contacts", async (string? q, int? limit, [Microsoft.AspNetCore.Mvc.FromQuery(Name = "group_id")] Guid? groupId,
+            ClaimsPrincipal p, AuthService svc) =>
         {
             var id = CurrentUserId(p);
             if (id is null) return ApiResults.Error("UNAUTH", "Not authenticated.", 401);
-            return Results.Ok(await svc.SearchContactsAsync(id.Value, q, limit ?? 20));
+            return Results.Ok(await svc.SearchContactsAsync(id.Value, q, limit ?? 20, groupId));
         });
     }
 

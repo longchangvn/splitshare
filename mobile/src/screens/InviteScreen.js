@@ -13,6 +13,8 @@ import { ListRow, p as parts } from '../components/group/parts';
 import { parseEmails } from '../components/group/helpers';
 import { InviteResultList, toastInviteResults } from '../components/group/InviteResultList';
 import { inviteRows } from '../shared/inviteResults';
+import { fetchRemovalPreview, isStaleRemoval, removalPath } from '../shared/memberRemoval';
+import RemoveMemberFlow from '../components/group/RemoveMemberFlow';
 import { publicHandle } from '../auth/AuthContext';
 import { activeTheme } from '../themes';
 import { ThemedIcon } from '../components/ThemedIcon';
@@ -30,40 +32,41 @@ export default function InviteScreen({ route, navigation }) {
   const [cq, setCq] = useState('');
   const [contacts, setContacts] = useState([]);
   const [searched, setSearched] = useState(false);
-  const [added, setAdded] = useState([]);
+  const [removeTarget, setRemoveTarget] = useState(null);
   const [link, setLink] = useState('');
   const [busy, setBusy] = useState(null);
   const [rotateOpen, setRotateOpen] = useState(false);
   const [e, setE] = useState(null);
   const searchReq = useRef(0);
 
+  const loadDetail = () => api.get(`/api/v1/groups/${id}`).then((g) => {
+    const det = g?.group || g;
+    setDetail(det);
+    if (det?.invite_link) setLink(det.invite_link);
+    if (det?.name) navigation.setOptions({ title: t('invite.toGroup', { name: det.name }) });
+  });
   useEffect(() => {
     let live = true;
-    api.get(`/api/v1/groups/${id}`).then((g) => {
-      if (!live) return;
-      const det = g?.group || g;
-      setDetail(det);
-      if (det?.invite_link) setLink(det.invite_link);
-      if (det?.name) navigation.setOptions({ title: t('invite.toGroup', { name: det.name }) });
-    }).catch((err) => { if (live) setE(err); });
+    loadDetail().catch((err) => { if (live) setE(err); });
     return () => { live = false; };
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced contact search; request counter drops stale responses.
+  // Empty box: first 10 contacts (A–Z); typing: debounced "contains" search on name / username / email.
+  // Rows flag who is already in this group (Remove vs Add); request counter drops stale responses.
   useEffect(() => {
     if (tab !== 'contacts') return undefined;
     const q = cq.trim();
-    if (!q) { setContacts([]); setSearched(false); return undefined; }
+    const url = `/api/v1/contacts?group_id=${id}&${q ? `q=${encodeURIComponent(q)}&limit=20` : 'limit=10'}`;
     const h = setTimeout(async () => {
       const r = ++searchReq.current;
       setBusy('search');
       try {
-        const rows = await api.get(`/api/v1/contacts?q=${encodeURIComponent(q)}&limit=20`);
+        const rows = await api.get(url);
         if (r === searchReq.current) { setContacts(Array.isArray(rows) ? rows : []); setSearched(true); setE(null); }
       } catch (err) { if (r === searchReq.current) setE(err); } finally { if (r === searchReq.current) setBusy(null); }
-    }, 350);
+    }, q ? 350 : 0);
     return () => clearTimeout(h);
-  }, [cq, tab]);
+  }, [cq, tab, id]);
 
   const sendEmails = async () => {
     const list = parseEmails(emails);
@@ -78,13 +81,30 @@ export default function InviteScreen({ route, navigation }) {
     } catch (err) { setE(err); } finally { setBusy(null); }
   };
 
+  const setInGroup = (uid, inGroup) =>
+    setContacts((prev) => prev.map((c) => (c.user_id === uid ? { ...c, in_group: inGroup, group_role: inGroup ? 'member' : null } : c)));
+
   const addContact = async (c) => {
     setBusy(c.user_id); setE(null);
     try {
       await api.post(`/api/v1/groups/${id}/members`, { user_ids: [c.user_id] });
       toast({ title: t('invite.memberAdded', { name: c.display_name }), color: 'teal' });
-      setAdded((prev) => [...prev, c.user_id]);
+      setInGroup(c.user_id, true);
+      loadDetail().catch(() => {});
     } catch (err) { setE(err); } finally { setBusy(null); }
+  };
+
+  // Same removal flow as the People tab: server preview (re-split), confirm with its hash.
+  const removeContact = async (c, preview) => {
+    try {
+      await api.del(removalPath(id, c.user_id, preview));
+      toast({ title: t('invite.memberRemoved', { name: c.display_name }), color: 'teal' });
+      setInGroup(c.user_id, false);
+      loadDetail().catch(() => {});
+    } catch (err) {
+      if (isStaleRemoval(err)) throw err; // RemoveMemberFlow keeps the sheet open and reloads the preview
+      setE(err);
+    }
   };
 
   const rotate = async () => {
@@ -113,7 +133,8 @@ export default function InviteScreen({ route, navigation }) {
   };
 
   const isOwner = detail?.my_role === 'owner';
-  const visibleContacts = contacts.filter((c) => !added.includes(c.user_id));
+  // Only the owner removes, and never the owner (server rules: GroupService.RemoveMemberAsync).
+  const canRemove = (c) => isOwner && c.group_role !== 'owner';
 
   return (
     <Screen>
@@ -153,19 +174,28 @@ export default function InviteScreen({ route, navigation }) {
             <Input value={cq} onChangeText={setCq} placeholder={t('wizard.searchPh')} autoCapitalize="none" autoCorrect={false} returnKeyType="search" />
           </Field>
           <View style={{ marginTop: 6 }}>
-            {visibleContacts.map((c, i) => (
-              <ListRow key={c.user_id} last={i === visibleContacts.length - 1}>
+            {!cq.trim() && contacts.length > 0 ? (
+              <Text style={[type.small, { paddingTop: 6 }]}>{t('wizard.yourContacts')}</Text>
+            ) : null}
+            {contacts.map((c, i) => (
+              <ListRow key={c.user_id} last={i === contacts.length - 1}>
                 <Avatar name={c.display_name} size={36} />
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={type.h3} numberOfLines={1}>{c.display_name}</Text>
                   {publicHandle(c.username) ? <Text style={parts.meta} numberOfLines={1}>@{c.username}</Text> : null}
                 </View>
-                <Button small variant="soft" title={t('common.add')} busy={busy === c.user_id} accessibilityLabel={t('invite.addNamed', { name: c.display_name })} onPress={() => addContact(c)} />
+                {!c.in_group ? (
+                  <Button small variant="soft" title={t('common.add')} busy={busy === c.user_id} accessibilityLabel={t('invite.addNamed', { name: c.display_name })} onPress={() => addContact(c)} />
+                ) : canRemove(c) ? (
+                  <Button small variant="ghost" title={t('common.remove')} accessibilityLabel={t('groupDetail.removeNamed', { name: c.display_name })} onPress={() => { setE(null); setRemoveTarget(c); }} />
+                ) : (
+                  <Text style={s.memberTag}>{t('common.member')}</Text>
+                )}
               </ListRow>
             ))}
-            {busy !== 'search' && visibleContacts.length === 0 ? (
+            {busy !== 'search' && searched && contacts.length === 0 ? (
               <Text style={[type.small, { paddingVertical: 12 }]}>
-                {cq.trim() && searched ? t('invite.noContacts') : t('invite.searchYourContacts')}
+                {cq.trim() ? t('invite.noContacts') : t('wizard.noContacts')}
               </Text>
             ) : null}
             {busy === 'search' ? <Text style={[type.small, { paddingVertical: 12 }]}>{t('common.loading')}</Text> : null}
@@ -226,6 +256,15 @@ export default function InviteScreen({ route, navigation }) {
 
       <ErrText e={e} />
 
+      <RemoveMemberFlow
+        target={removeTarget}
+        detail={detail}
+        members={detail?.members || []}
+        onRemovalPreview={(m) => fetchRemovalPreview(api.get, id, m.user_id)}
+        onRemove={removeContact}
+        onClose={() => setRemoveTarget(null)}
+      />
+
       <ConfirmSheet
         visible={rotateOpen}
         title={t('invite.rotate')}
@@ -240,6 +279,7 @@ export default function InviteScreen({ route, navigation }) {
 }
 
 const s = StyleSheet.create({
+  memberTag: { fontSize: 12, fontWeight: '700', color: colors.secondary, paddingHorizontal: 8 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   icon: { width: 36, height: 36, borderRadius: radius.tile, backgroundColor: colors.chipBg, alignItems: 'center', justifyContent: 'center' },
   link: { marginTop: 10, padding: 12, borderRadius: radius.inp, backgroundColor: colors.chipBg, borderWidth: 1, borderColor: colors.line, fontSize: 13, color: colors.darkTealText, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },

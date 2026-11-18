@@ -482,7 +482,13 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
         await db.SaveChangesAsync();
     }
 
-    public async Task<List<object>> SearchContactsAsync(Guid userId, string? q, int limit)
+    /// <summary>
+    /// People who share a group with <paramref name="userId"/>, alphabetical by shown name. A query
+    /// keeps those whose username, email or display name contains it (any case); empty lists the first
+    /// <paramref name="limit"/>. With <paramref name="groupId"/> (a group the caller belongs to) each
+    /// row says whether that person is already in it (<c>in_group</c>, <c>group_role</c>), for inviting.
+    /// </summary>
+    public async Task<List<object>> SearchContactsAsync(Guid userId, string? q, int limit, Guid? groupId = null)
     {
         limit = Math.Clamp(limit, 1, 50);
         var myGroups = db.GroupMembers.Where(m => m.UserId == userId).Select(m => m.GroupId);
@@ -490,14 +496,24 @@ public sealed class AuthService(AppDbContext db, TokenService tokens, IEmailSend
             .Where(m => m.UserId != userId && myGroups.Contains(m.GroupId))
             .Select(m => m.UserId).Distinct();
         var query = db.Users.Where(u => peerIds.Contains(u.Id));
-        if (!string.IsNullOrWhiteSpace(q))
-        {
-            var s = q.ToLower();
+        var s = q?.Trim().ToLower();
+        if (!string.IsNullOrEmpty(s))
             query = query.Where(u => u.DisplayName.ToLower().Contains(s)
-                || u.Username.Contains(s) || u.Email.ToLower().Contains(s));
+                || u.Username.ToLower().Contains(s) || u.Email.ToLower().Contains(s));
+        var users = await query.OrderBy(u => (u.DisplayName == "" ? u.Email : u.DisplayName).ToLower())
+            .ThenBy(u => u.Email).Take(limit).ToListAsync();
+        // Only for a group the caller is in: anything else would reveal who belongs to it.
+        var roles = new Dictionary<Guid, string>();
+        if (groupId is { } gid && await db.GroupMembers.AnyAsync(m => m.GroupId == gid && m.UserId == userId))
+        {
+            var ids = users.Select(u => u.Id).ToList();
+            roles = await db.GroupMembers.Where(m => m.GroupId == gid && ids.Contains(m.UserId))
+                .ToDictionaryAsync(m => m.UserId, m => m.Role);
         }
-        return (await query.OrderBy(u => u.DisplayName == "" ? u.Email : u.DisplayName).Take(limit).ToListAsync())
-            .Select(u => (object)new { user_id = u.Id, display_name = u.Name, username = u.Username, avatar_url = (string?)null })
-            .ToList();
+        return users.Select(u => (object)new
+        {
+            user_id = u.Id, display_name = u.Name, username = u.Username, avatar_url = (string?)null,
+            in_group = roles.ContainsKey(u.Id), group_role = roles.GetValueOrDefault(u.Id)
+        }).ToList();
     }
 }

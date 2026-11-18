@@ -203,6 +203,11 @@ R3.1–R3.2 may run in parallel with R2 (disjoint files); R3.3+ waits for R3.2.
       source of truth for this step.
   - **Start when**: R3.2 `[X]`.
 
+- [ ] R3.3b Several receipts in one photo/camera shot (boxes, per-receipt crop, review UI).
+      Task source of truth: `specs/008-multi-receipt-single-photo/tasks.md` (its T1 web
+      bug fix may ship earlier).
+  - **Start when**: R3.3 `[X]`.
+
 - [ ] R3.4 Itemization API: extend `ReceiptSuggestion` (`api/Expenses/OcrService.cs`) with
       optional `items[] {name, qty, amount}`; `ReceiptParser` validates (sum of items +
       tax/tip ≈ total, else warning, never 500). Additive DTO field on
@@ -239,6 +244,17 @@ R3.1–R3.2 may run in parallel with R2 (disjoint files); R3.3+ waits for R3.2.
       expense count, resulting balances) before commit. i18n en + vi.
   - **Start when**: R4.2 `[X]`.
 - [ ] R4.4 Metric: imports per week, % imported groups with a new expense within 14 days.
+
+---
+
+## Phase R5 — anonymous group (guests without login)
+
+**Phase start when**: Alex prioritizes it AND decisions D1–D8 in
+`specs/009-anonymous-group/plan.md` are recorded.
+
+- [ ] R5.1 Anonymous group: owner (registered) creates it; guests join by email link or
+      shareable link without login; guests add expenses and edit only their own; owner edits
+      any expense any time. Task source of truth: `specs/009-anonymous-group/tasks.md`.
 
 ---
 

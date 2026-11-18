@@ -309,6 +309,11 @@ export function GroupDetail() {
       await api.del(removalPath(id, removeTarget.uid, removePreview));
       setRemoveOpen(false);
       setRemoveTarget(null);
+      if (inviteOpen) {
+        // Started from the invite contacts list: flip that row back to "Add".
+        setContactInGroup(removeTarget.uid, false);
+        notifications.show({ title: t('invite.memberRemoved', { name: removeTarget.name }), color: 'teal' });
+      }
       // Removal can re-split open expenses: refresh every ledger-derived view, not just the roster.
       load();
       loadLedger();
@@ -517,19 +522,29 @@ export function GroupDetail() {
       load();
     } catch (err) { setE(err); } finally { setInviteBusy(false); }
   };
+  // Empty box: first 10 contacts (A–Z); otherwise "contains" on name / username / email.
+  // Rows flag who is already in this group (Remove vs Add); the counter drops stale responses.
+  const contactReq = useRef(0);
+  const setContactInGroup = (uid, inGroup) => setContacts((prev) => prev.map((c) => (
+    c.user_id === uid ? { ...c, in_group: inGroup, group_role: inGroup ? 'member' : null } : c)));
   const searchContacts = async (ev) => {
     ev?.preventDefault?.();
+    const q = contactQ.trim();
+    const r = ++contactReq.current;
     setContactBusy(true);
     try {
-      setContacts(await api.get(`/api/v1/contacts?q=${encodeURIComponent(contactQ)}`));
-      setE(null);
-    } catch (err) { setE(err); } finally { setContactBusy(false); }
+      const rows = await api.get(`/api/v1/contacts?group_id=${id}&${q ? `q=${encodeURIComponent(q)}&limit=20` : 'limit=10'}`);
+      if (r === contactReq.current) { setContacts(rows || []); setE(null); }
+    } catch (err) { if (r === contactReq.current) setE(err); } finally { if (r === contactReq.current) setContactBusy(false); }
   };
+  useEffect(() => {
+    if (inviteOpen && inviteTab === 'contacts' && !contactQ.trim()) searchContacts();
+  }, [inviteOpen, inviteTab, contactQ, id]); // eslint-disable-line react-hooks/exhaustive-deps
   const addFromContact = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/members`, { user_ids: [uid] });
       notifications.show({ title: t('invite.memberAdded', { name }), color: 'teal' });
-      setContacts((prev) => prev.filter((c) => c.user_id !== uid));
+      setContactInGroup(uid, true);
       load();
     } catch (err) { setE(err); }
   };
@@ -1796,6 +1811,7 @@ export function GroupDetail() {
         opened={removeOpen}
         onClose={() => !removeBusy && setRemoveOpen(false)}
         closeOnClickOutside={!removeBusy}
+        zIndex={300} /* above the invite dialog (default 200) when opened from its contacts list */
         title={<span className="wizard-title-name">{t('groupDetail.removeMember')}</span>}
         classNames={{
           content: 'wizard-modal-content',
@@ -2006,6 +2022,9 @@ export function GroupDetail() {
                   </Button>
                 </Group>
                 <Stack gap={8}>
+                  {contactQ.trim() === '' && contacts.length > 0 && (
+                    <Text size="xs" c="dimmed" fw={600}>{t('wizard.yourContacts')}</Text>
+                  )}
                   {contacts.map((c) => (
                     <div className="wizard-person" key={c.user_id}>
                       <Group gap="sm" wrap="nowrap" style={{ minWidth: 0, flex: 1 }}>
@@ -2027,20 +2046,35 @@ export function GroupDetail() {
                           {publicHandle(c.username) && <Text size="xs" c="dimmed" truncate>@{c.username}</Text>}
                         </div>
                       </Group>
-                      <button
-                        type="button"
-                        className="wizard-chip"
-                        onClick={() => addFromContact(c.user_id, c.display_name)}
-                      >
-                        {t('common.add')}
-                      </button>
+                      {!c.in_group ? (
+                        <button
+                          type="button"
+                          className="wizard-chip"
+                          aria-label={t('invite.addNamed', { name: c.display_name })}
+                          onClick={() => addFromContact(c.user_id, c.display_name)}
+                        >
+                          {t('common.add')}
+                        </button>
+                      ) : detail?.my_role === 'owner' && c.group_role !== 'owner' ? (
+                        // Only the owner removes, never the owner (GroupService.RemoveMemberAsync).
+                        <button
+                          type="button"
+                          className="wizard-chip is-remove"
+                          aria-label={t('groupDetail.removeNamed', { name: c.display_name })}
+                          onClick={() => remove(c.user_id, c.display_name)}
+                        >
+                          {t('common.remove')}
+                        </button>
+                      ) : (
+                        <Text size="xs" c="dimmed" fw={600}>{t('common.member')}</Text>
+                      )}
                     </div>
                   ))}
                   {!contactBusy && contacts.length === 0 && contactQ.trim() !== '' && (
                     <Text size="sm" c="dimmed">{t('invite.noContacts')}</Text>
                   )}
                   {!contactBusy && contacts.length === 0 && contactQ.trim() === '' && (
-                    <Text size="sm" c="dimmed">{t('invite.searchYourContacts')}</Text>
+                    <Text size="sm" c="dimmed">{t('wizard.noContacts')}</Text>
                   )}
                 </Stack>
               </form>

@@ -334,6 +334,74 @@ public sealed class AuthTests
         Assert.Empty(none);
     }
 
+    private static string NameOf(object row) => (string)row.GetType().GetProperty("display_name")!.GetValue(row)!;
+
+    // Invite search: contacts only, "contains" on username / email / display name (any case),
+    // alphabetical; the empty query lists the first N contacts.
+    [Fact]
+    public async Task Contacts_Search_Contains_Username_Email_Name_Alphabetical()
+    {
+        var (db, svc) = Setup();
+        var me = (await svc.RegisterAsync("myself", "me@x.io", "Me", "pass1234", null)).User!;
+        var zed = (await svc.RegisterAsync("zed.k", "zed@corp.io", "zed", "pass1234", null)).User!;
+        var amy = (await svc.RegisterAsync("amy_w", "amy@home.io", "Amy Walker", "pass1234", null)).User!;
+        var bob = (await svc.RegisterAsync("bobby", "bob@corp.io", "Bob", "pass1234", null)).User!;
+        var stranger = (await svc.RegisterAsync("amyx", "amy2@corp.io", "Amy Stranger", "pass1234", null)).User!;
+        var g = new Group { Name = "G", CreatedBy = me.Id };
+        db.Groups.Add(g);
+        db.GroupMembers.AddRange(
+            new GroupMember { GroupId = g.Id, UserId = me.Id, Role = "owner" },
+            new GroupMember { GroupId = g.Id, UserId = zed.Id },
+            new GroupMember { GroupId = g.Id, UserId = amy.Id },
+            new GroupMember { GroupId = g.Id, UserId = bob.Id });
+        await db.SaveChangesAsync();
+
+        Assert.Equal(["Amy Walker", "Bob", "zed"], (await svc.SearchContactsAsync(me.Id, null, 10)).Select(NameOf));
+        Assert.Equal(["Amy Walker", "Bob"], (await svc.SearchContactsAsync(me.Id, "  ", 2)).Select(NameOf));
+
+        Assert.Equal(["Amy Walker"], (await svc.SearchContactsAsync(me.Id, "WALK", 10)).Select(NameOf)); // display name
+        Assert.Equal(["Amy Walker"], (await svc.SearchContactsAsync(me.Id, "amy_", 10)).Select(NameOf)); // username
+        Assert.Equal(["Bob", "zed"], (await svc.SearchContactsAsync(me.Id, "@Corp", 10)).Select(NameOf)); // email
+        Assert.Empty(await svc.SearchContactsAsync(me.Id, "stranger", 10)); // not a contact
+        Assert.Empty(await svc.SearchContactsAsync(me.Id, "me@x.io", 10)); // never yourself
+    }
+
+    private static (string Name, bool InGroup, string? Role) Row(object row)
+    {
+        var t = row.GetType();
+        return (NameOf(row), (bool)t.GetProperty("in_group")!.GetValue(row)!, (string?)t.GetProperty("group_role")!.GetValue(row));
+    }
+
+    // Inviting to a group: members stay listed but flagged (Remove), others are not (Add).
+    [Fact]
+    public async Task Contacts_Flag_Members_Of_The_Target_Group()
+    {
+        var (db, svc) = Setup();
+        var me = (await svc.RegisterAsync("myself", "me@x.io", "Me", "pass1234", null)).User!;
+        var ann = (await svc.RegisterAsync("ann", "ann@x.io", "Ann", "pass1234", null)).User!;
+        var ben = (await svc.RegisterAsync("ben", "ben@x.io", "Ben", "pass1234", null)).User!;
+        var old = new Group { Name = "Old", CreatedBy = me.Id };
+        var trip = new Group { Name = "Trip", CreatedBy = me.Id };
+        var foreign = new Group { Name = "Foreign", CreatedBy = ann.Id };
+        db.Groups.AddRange(old, trip, foreign);
+        db.GroupMembers.AddRange(
+            new GroupMember { GroupId = old.Id, UserId = me.Id, Role = "owner" },
+            new GroupMember { GroupId = old.Id, UserId = ann.Id },
+            new GroupMember { GroupId = old.Id, UserId = ben.Id },
+            new GroupMember { GroupId = trip.Id, UserId = me.Id, Role = "owner" },
+            new GroupMember { GroupId = trip.Id, UserId = ann.Id },
+            new GroupMember { GroupId = foreign.Id, UserId = ann.Id, Role = "owner" },
+            new GroupMember { GroupId = foreign.Id, UserId = ben.Id });
+        await db.SaveChangesAsync();
+
+        Assert.Equal([("Ann", true, "member"), ("Ben", false, null)],
+            (await svc.SearchContactsAsync(me.Id, null, 10, trip.Id)).Select(Row));
+        Assert.Equal([("Ann", false, null), ("Ben", false, null)], (await svc.SearchContactsAsync(me.Id, null, 10)).Select(Row));
+        // A group I'm not in must not flag anyone (it would leak who belongs to it).
+        Assert.Equal([("Ann", false, null), ("Ben", false, null)],
+            (await svc.SearchContactsAsync(me.Id, null, 10, foreign.Id)).Select(Row));
+    }
+
     [Fact]
     public async Task Delete_BlockedByOpenBalance()
     {

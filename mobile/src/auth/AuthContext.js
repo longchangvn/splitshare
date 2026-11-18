@@ -125,6 +125,14 @@ export function AuthProvider({ children }) {
       await saveSession(d);
       return d;
     },
+    // Keeps the biometric quick sign-in in step: it would replay the old password otherwise.
+    changePassword: async (current_password, new_password) => {
+      await api.patch('/api/v1/me/password', { current_password, new_password });
+      try {
+        const saved = await savedCredentials();
+        if (saved) await saveCredentials(saved.username, new_password);
+      } catch { /* keychain may be locked */ }
+    },
     verifyEmail: async (token) => api.post('/api/v1/auth/verify-email', { token }),
     // Profile → Verify email: in-app 6-digit code, or a fresh /verify/{token} link.
     requestVerifyCode: async () => api.post('/api/v1/me/verify-email/code'),

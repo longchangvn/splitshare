@@ -46,6 +46,7 @@ export default {
 
     // Profile
     'm.account.verified': 'Verified',
+    'm.account.currentPasswordWrong': 'Your current password is incorrect.',
     'm.account.handleRemoved': 'Payment handle removed',
     'm.account.handleAdded': 'Payment handle added',
     'm.account.addHandle': 'Add payment handle',
@@ -127,6 +128,7 @@ export default {
     'm.account.err.network': 'Không kết nối được SplitEase. Hãy kiểm tra mạng và thử lại.',
 
     'm.account.verified': 'Đã xác minh',
+    'm.account.currentPasswordWrong': 'Mật khẩu hiện tại không đúng.',
     'm.account.handleRemoved': 'Đã gỡ tài khoản nhận tiền',
     'm.account.handleAdded': 'Đã thêm tài khoản nhận tiền',
     'm.account.addHandle': 'Thêm tài khoản nhận tiền',

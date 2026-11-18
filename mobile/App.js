@@ -38,8 +38,23 @@ import { colors, shadow } from './src/theme';
 import { ToastHost } from './src/ui';
 import { registerPush, addNotificationResponseListener } from './src/push/notifications';
 import { activeTheme } from './src/themes';
+import { ThemedIcon } from './src/components/ThemedIcon';
 
 const Tab = createBottomTabNavigator();
+
+// iOS shows no back button on a modal (page sheet): give every modal screen the same ✕ as Sheet.
+function CloseX({ onPress }) {
+  const t = useT();
+  return (
+    <Pressable onPress={onPress} hitSlop={10} style={st.closeX} accessibilityRole="button" accessibilityLabel={t('common.close')}>
+      <ThemedIcon ms="close" size={22} color={colors.secondary} style={{ lineHeight: 22, textAlign: 'center' }}><Text style={st.closeXT}>✕</Text></ThemedIcon>
+    </Pressable>
+  );
+}
+const withClose = (opts) => ({ navigation }) => (opts?.presentation === 'modal'
+  ? { ...opts, headerRight: () => <CloseX onPress={() => navigation.goBack()} /> }
+  : opts);
+const modal = (title) => withClose({ title, presentation: 'modal' });
 const Stack = createNativeStackNavigator();
 
 const prefix = Linking.createURL('/');
@@ -215,15 +230,15 @@ function Root({ navigationRef }) {
             <Stack.Screen name="Invitation" component={InvitationScreen} options={{ title: '' }} />
           </Stack.Group>
           {/* Task / form screens: modal, no bottom bar. */}
-          <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={{ title: t('groupDetail.addExpense'), presentation: 'modal' }} />
-          <Stack.Screen name="ScanReceipts" component={ScanReceiptsScreen} options={{ title: t('scan.title'), presentation: 'modal' }} />
-          <Stack.Screen name="Pay" component={PayScreen} options={{ title: t('groupDetail.recordPayment'), presentation: 'modal' }} />
-          <Stack.Screen name="NewGroup" component={NewGroupScreen} options={{ title: t('wizard.newGroup'), presentation: 'modal' }} />
-          <Stack.Screen name="QuickAdd" component={QuickAddScreen} options={{ title: t('quickAdd.title'), presentation: 'modal' }} />
-          <Stack.Screen name="Invite" component={InviteScreen} options={{ title: t('invite.title'), presentation: 'modal' }} />
+          <Stack.Screen name="AddExpense" component={AddExpenseScreen} options={modal(t('groupDetail.addExpense'))} />
+          <Stack.Screen name="ScanReceipts" component={ScanReceiptsScreen} options={modal(t('scan.title'))} />
+          <Stack.Screen name="Pay" component={PayScreen} options={modal(t('groupDetail.recordPayment'))} />
+          <Stack.Screen name="NewGroup" component={NewGroupScreen} options={modal(t('wizard.newGroup'))} />
+          <Stack.Screen name="QuickAdd" component={QuickAddScreen} options={modal(t('quickAdd.title'))} />
+          <Stack.Screen name="Invite" component={InviteScreen} options={modal(t('invite.title'))} />
           {/* Theme-only screens (src/themes/<name>/screens). */}
           {activeTheme().screens.map((sc) => (
-            <Stack.Screen key={sc.name} name={sc.name} component={sc.component} options={typeof sc.options === 'function' ? sc.options(t) : sc.options} />
+            <Stack.Screen key={sc.name} name={sc.name} component={sc.component} options={withClose(typeof sc.options === 'function' ? sc.options(t) : sc.options)} />
           ))}
         </>
       )}
@@ -248,6 +263,9 @@ export default function App() {
 }
 
 const st = StyleSheet.create({
+  // Square, no offset: the native header centres it (iOS wraps header buttons in its own round button).
+  closeX: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  closeXT: { fontSize: 18, lineHeight: 22, color: colors.secondary, textAlign: 'center' },
   dockWrap: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center' },
   fab: {
     alignSelf: 'flex-end', marginRight: 20, marginBottom: 12, minHeight: 52, paddingHorizontal: 20,

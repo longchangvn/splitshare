@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ActionIcon, Anchor, Avatar, Button, Card, CopyButton, Group, Stack,
@@ -53,17 +53,28 @@ export function InvitePage() {
     } catch (err) { setE(err); } finally { setInviting(false); }
   };
 
+  // Empty box: first 10 contacts (A–Z); otherwise "contains" on name / username / email.
+  // Rows flag who is already in this group; the counter drops stale responses.
+  const contactReq = useRef(0);
   const searchContacts = async (ev) => {
-    ev.preventDefault();
+    ev?.preventDefault?.();
+    const q = cq.trim();
+    const r = ++contactReq.current;
     setSearching(true);
-    try { setContacts(await api.get(`/api/v1/contacts?q=${encodeURIComponent(cq)}`)); setE(null); }
-    catch (err) { setE(err); } finally { setSearching(false); }
+    try {
+      const rows = await api.get(`/api/v1/contacts?group_id=${id}&${q ? `q=${encodeURIComponent(q)}&limit=20` : 'limit=10'}`);
+      if (r === contactReq.current) { setContacts(rows || []); setE(null); }
+    } catch (err) { if (r === contactReq.current) setE(err); } finally { if (r === contactReq.current) setSearching(false); }
   };
+  useEffect(() => {
+    if (!cq.trim()) searchContacts();
+  }, [id, cq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addMember = async (uid, name) => {
     try {
       await api.post(`/api/v1/groups/${id}/members`, { user_ids: [uid] });
       notifications.show({ title: t('invite.memberAdded', { name }), color: 'teal' });
+      setContacts((prev) => prev.map((c) => (c.user_id === uid ? { ...c, in_group: true, group_role: 'member' } : c)));
     } catch (err) { setE(err); }
   };
 
@@ -118,19 +129,28 @@ export function InvitePage() {
           </Stack>
         </form>
         <Stack gap="xs" mt="sm">
+          {!cq.trim() && contacts.length > 0 && <Text size="xs" c="dimmed" fw={600}>{t('wizard.yourContacts')}</Text>}
+          {!searching && contacts.length === 0 && (
+            <Text size="sm" c="dimmed">{cq.trim() ? t('invite.noContacts') : t('wizard.noContacts')}</Text>
+          )}
           {contacts.map((c) => (
             <Group key={c.user_id} justify="space-between" wrap="nowrap">
               <Group gap="sm" wrap="nowrap">
                 <Avatar color="blue" radius="xl" size="sm">{initialsOf(c.display_name)}</Avatar>
                 <Text size="sm">{c.display_name}{publicHandle(c.username) && <> <Text span c="dimmed">@{c.username}</Text></>}</Text>
               </Group>
-              <ActionIcon
-                variant="light"
-                title={t('invite.addNamed', { name: c.display_name })}
-                onClick={() => addMember(c.user_id, c.display_name)}
-              >
-                +
-              </ActionIcon>
+              {c.in_group ? (
+                // Removing (with its re-split preview) lives on the group page.
+                <Text size="xs" c="dimmed" fw={600}>{t('common.member')}</Text>
+              ) : (
+                <ActionIcon
+                  variant="light"
+                  title={t('invite.addNamed', { name: c.display_name })}
+                  onClick={() => addMember(c.user_id, c.display_name)}
+                >
+                  +
+                </ActionIcon>
+              )}
             </Group>
           ))}
         </Stack>

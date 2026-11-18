@@ -200,6 +200,24 @@ public sealed class AuthFlowE2E(E2eApiFactory api) : E2eTest(api)
         Assert.Equal(email, E2eClient.Str(login.GetProperty("user"), "email"));
     }
 
+    // 401 means "session expired" to both clients (refresh + retry, or sign-out): a wrong
+    // current password must not look like that.
+    [Theory]
+    [InlineData("WrongPass123")]
+    [InlineData(null)]
+    public async Task Change_Password_With_Wrong_Current_Is_403_Not_401(string? current)
+    {
+        await Client.RegisterAsync(E2eClient.NewEmail(), E2eClient.NewPassword());
+
+        var resp = await Client.SendAsync(HttpMethod.Patch, "/api/v1/me/password", new
+        {
+            CurrentPassword = current,
+            NewPassword = E2eClient.NewPassword(),
+        });
+        var body = await Client.ExpectAsync(resp, HttpStatusCode.Forbidden);
+        Assert.Equal("INVALID_CREDENTIALS", E2eClient.Str(body, "code"));
+    }
+
     [Fact]
     public async Task Verify_Email_With_The_Mailed_Confirmation_Code()
     {
@@ -267,6 +285,27 @@ public sealed class AuthFlowE2E(E2eApiFactory api) : E2eTest(api)
         var hit = Assert.Single(rows.Where(r => r.GetProperty("user_id").GetGuid() == peerId).ToList());
         Assert.Equal(peerName, E2eClient.Str(hit, "display_name"));
         Assert.Equal(peer.Email, E2eClient.Str(hit, "username"));
+    }
+
+    [Fact]
+    public async Task Contacts_For_Invite_Flag_Members_Of_That_Group()
+    {
+        await Client.RegisterAsync();
+        var inGroup = NewClient();
+        await inGroup.RegisterAsync();
+        var outside = NewClient();
+        await outside.RegisterAsync();
+        await E2eScenario.CreateGroupAsync(Client, inGroup, outside);
+        var trip = await E2eScenario.CreateGroupAsync(Client, inGroup);
+        var inGroupId = await E2eScenario.UserIdAsync(inGroup);
+        var outsideId = await E2eScenario.UserIdAsync(outside);
+
+        var rows = (await Client.GetOkAsync($"/api/v1/contacts?limit=10&group_id={trip}")).EnumerateArray()
+            .ToDictionary(r => r.GetProperty("user_id").GetGuid());
+        Assert.Equal(2, rows.Count);
+        Assert.True(rows[inGroupId].GetProperty("in_group").GetBoolean());
+        Assert.Equal("member", E2eClient.Str(rows[inGroupId], "group_role"));
+        Assert.False(rows[outsideId].GetProperty("in_group").GetBoolean());
     }
 
     [Fact]

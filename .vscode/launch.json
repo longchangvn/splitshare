@@ -5,13 +5,10 @@
       "name": ".NET: AppHost (Aspire — API + Web)",
       "type": "coreclr",
       "request": "launch",
-      "program": "dotnet",
-      "args": [
-        "run",
-        "--project",
-        "${workspaceFolder}/apphost/SplitShare.AppHost.csproj"
-      ],
-      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build-apphost",
+      "program": "${workspaceFolder}/apphost/bin/Debug/net10.0/SplitShare.AppHost.dll",
+      "args": [],
+      "cwd": "${workspaceFolder}/apphost",
       "stopAtEntry": false,
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen",

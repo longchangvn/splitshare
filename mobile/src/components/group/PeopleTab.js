@@ -1,15 +1,12 @@
 // People tab — web gd-people: pastel avatars, role + deposit tags, owner actions in a per-member sheet.
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Text } from '../../typography';
-import { colors, type, groupTokens } from '../../theme';
-import { activeTheme } from '../../themes';
-import RemovalPreviewSheet from '../../themes/splitease/components/group/RemovalPreviewSheet';
+import { type, groupTokens } from '../../theme';
 import { useT } from '../../i18n';
-import { fmt } from '../../api/client';
-import { Card, Avatar, Sheet, ConfirmSheet, ErrText } from '../../ui';
-import { isStaleRemoval, removalSummary } from '../../shared/memberRemoval';
+import { Card, Avatar, Sheet, ErrText } from '../../ui';
 import { ListRow, MenuRow, Chevron, p as parts } from './parts';
+import RemoveMemberFlow from './RemoveMemberFlow';
 
 const ROLE_TONE = groupTokens.roleTone;
 
@@ -17,47 +14,11 @@ export default function PeopleTab({ detail, members, meId, onSetRole, onSetDepos
   const t = useT();
   const [target, setTarget] = useState(null);
   const [confirmRemove, setConfirmRemove] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [previewErr, setPreviewErr] = useState(null);
-  const [stale, setStale] = useState(false);
-  const [previewNonce, setPreviewNonce] = useState(0);
   const [busy, setBusy] = useState(false);
   const [e, setE] = useState(null);
   const isOwner = detail?.my_role === 'owner';
   const isEvent = detail?.mode === 'event';
   const canAct = isEvent || isOwner;
-
-  // Same flow as web GroupDetail: load the server preview, confirm with its hash.
-  useEffect(() => {
-    setPreview(null);
-    setPreviewErr(null);
-    if (!confirmRemove) return undefined;
-    let live = true;
-    onRemovalPreview(confirmRemove).then((p) => { if (live) setPreview(p); }).catch((err) => { if (live) setPreviewErr(err); });
-    return () => { live = false; };
-  }, [confirmRemove, previewNonce]);
-
-  const openRemove = (m) => { setStale(false); setConfirmRemove(m); };
-  const closeRemove = () => { setConfirmRemove(null); setStale(false); };
-
-  const removalMessage = () => {
-    const name = confirmRemove.display_name;
-    const notice = stale ? `${t('groupDetail.removeStale')}\n\n` : '';
-    if (previewErr) return notice + (previewErr.message || String(previewErr));
-    const sum = removalSummary(preview, (uid) => members.find((m) => m.user_id === uid)?.display_name || '?');
-    if (sum.mode === 'loading') return notice + t('groupDetail.removeLoading');
-    if (sum.mode === 'legacy') return notice + t('groupDetail.removeMemberBody', { name });
-    if (sum.mode === 'settled') return notice + t('groupDetail.removeSettled', { name });
-    if (sum.mode === 'blocked') return notice + [t('groupDetail.removeBlocked', { name }), ...sum.blockers.map((b) => `• ${b}`)].join('\n');
-    const cur = preview.currency || detail?.currency;
-    return notice + [
-      t('groupDetail.removeResplit', { name, amount: fmt(Math.abs(preview.net_cents), cur), count: sum.expenses.length }),
-      ...sum.expenses.map((x) => [
-        `\n${x.title} · ${fmt(x.amountCents, cur)} · ${t(`forms.expense.${x.method}`)}`,
-        ...x.rows.map((r) => `  ${r.name}: ${fmt(r.fromCents, cur)} → ${fmt(r.toCents, cur)}`),
-      ].join('\n')),
-    ].join('\n');
-  };
 
   const roleLabel = (r) => (r === 'owner' ? t('common.owner') : r === 'treasurer' ? t('common.treasurer') : t('common.member'));
 
@@ -119,7 +80,7 @@ export default function PeopleTab({ detail, members, meId, onSetRole, onSetDepos
                 danger
                 label={t('groupDetail.removeNamed', { name: target.display_name })}
                 disabled={busy}
-                onPress={() => { openRemove(target); setTarget(null); }}
+                onPress={() => { setConfirmRemove(target); setTarget(null); }}
               />
             ) : null}
             <ErrText e={e} />
@@ -127,52 +88,15 @@ export default function PeopleTab({ detail, members, meId, onSetRole, onSetDepos
         ) : null}
       </Sheet>
 
-      <RemoveSheet
-        structured={!!activeTheme().features.removalPreview}
-        name={confirmRemove?.display_name}
-        preview={preview}
-        previewErr={previewErr}
-        stale={stale}
+      <RemoveMemberFlow
+        target={confirmRemove}
+        detail={detail}
         members={members}
-        currency={preview?.currency || detail?.currency}
-        visible={!!confirmRemove}
-        title={t('groupDetail.removeMember')}
-        message={confirmRemove ? removalMessage() : ''}
-        confirmLabel={t('common.remove')}
-        danger
-        busy={busy}
-        confirmDisabled={!preview?.can_remove}
-        onClose={() => !busy && closeRemove()}
-        onConfirm={async () => {
-          if (!preview?.can_remove) return;
-          setBusy(true);
-          try {
-            await onRemove(confirmRemove, preview);
-            closeRemove();
-          } catch (err) {
-            if (!isStaleRemoval(err)) { closeRemove(); return; }
-            setStale(true);
-            setPreviewNonce((n) => n + 1);
-          } finally { setBusy(false); }
-        }}
+        onRemovalPreview={onRemovalPreview}
+        onRemove={onRemove}
+        onClose={() => setConfirmRemove(null)}
       />
     </>
-  );
-}
-
-/** Classic: text ConfirmSheet. SplitEase (features.removalPreview): structured re-split preview. */
-function RemoveSheet({ structured, name, preview, previewErr, stale, members, currency, ...confirm }) {
-  if (!structured) return <ConfirmSheet {...confirm} />;
-  return (
-    <RemovalPreviewSheet
-      {...confirm}
-      name={name}
-      preview={preview}
-      previewErr={previewErr}
-      stale={stale}
-      members={members}
-      currency={currency}
-    />
   );
 }
 

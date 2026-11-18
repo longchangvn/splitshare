@@ -288,18 +288,18 @@ export function SelectField({ label, value, options, onChange, placeholder, erro
 // ---------- Sheet (web wizard modal → native bottom sheet) ----------
 export function Sheet({ visible, onClose, title, children, footer, scroll = true }) {
   const insets = useSafeAreaInsets();
+  const t = useT();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView style={u.scrim} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel="Close" />
+        <Pressable style={{ flex: 1 }} onPress={onClose} accessibilityLabel={t('common.close')} />
         <View style={[u.sheet, { paddingBottom: 12 + insets.bottom }]}>
           <View style={u.grip} />
-          {title ? (
-            <View style={u.sheetHead}>
-              <Text style={[type.h1, { flex: 1 }]}>{title}</Text>
-              <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button" accessibilityLabel="Close"><ThemedIcon ms="close" size={22} color={colors.secondary}><Text style={u.close}>✕</Text></ThemedIcon></Pressable>
-            </View>
-          ) : null}
+          {/* Every sheet gets a close X, titled or not. */}
+          <View style={u.sheetHead}>
+            <Text style={[type.h1, { flex: 1 }]}>{title || ''}</Text>
+            <Pressable onPress={onClose} hitSlop={8} style={u.closeBtn} accessibilityRole="button" accessibilityLabel={t('common.close')}><ThemedIcon ms="close" size={22} color={colors.secondary}><Text style={u.close}>✕</Text></ThemedIcon></Pressable>
+          </View>
           {scroll ? <ScrollView keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>{children}</ScrollView> : children}
           {footer ? <View style={{ marginTop: 10 }}>{footer}</View> : null}
         </View>
@@ -483,6 +483,7 @@ export const u = StyleSheet.create({
   grip: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.line, marginBottom: 10 },
   sheetHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
   close: { fontSize: 18, color: colors.secondary, paddingHorizontal: 4 },
+  closeBtn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', marginRight: -10 },
   toastWrap: { position: 'absolute', left: 12, right: 12, gap: 8, zIndex: 1000 },
   toast: { backgroundColor: '#fff', borderRadius: 14, padding: 12, borderLeftWidth: 4, ...shadow.dock },
 });
